@@ -10,7 +10,7 @@ Decided by Jordy on 2026-10-25. They apply to the eight macOS apps: AppSettings2
 
 - **About:** one JTKit About window in every app, opened only from the app menu ("About [App]"). Never a page inside the app, and not listed in the Window menu.
 - **Copyright:** JTKit's About window writes the copyright line itself, "© [year] [author]. Released under the [licence].", from what the app passes in (MIT by default). It does not read the app's `NSHumanReadableCopyright`.
-- **Settings:** one JTKit Settings window (⌘,) with tabs in the toolbar: General always first, then the app's own tabs, the Updates tab always last, the same width in every app (680 points, room for a list beside an editor).
+- **Settings:** one JTKit Settings window (⌘,) with tabs in the toolbar: General always first, then the app's own tabs, the Updates tab always last, the same width in every app (680 points, room for a list beside an editor). Diagnostics and troubleshooting (support bundles, bundled tool versions) go in an "Advanced" tab just before Updates.
 - **Appearance:** JTKit's Appearance picker (System / Light / Dark) always starts the General tab; the app's own general settings go below it. JTKit applies the choice to the whole app (every window, About and Settings included) and saves it under "appearance". Apps keep no appearance setting of their own. Connection settings go in a "Connections" tab.
 - **Acknowledgements:** the same JTKit view inside About, in every app with third-party code, with full licence texts.
 - **Updates:** "Check for Updates…" in the app menu. The daily-check switch in Settings, using JTKit's Updates section. About shows the version only.
@@ -68,6 +68,7 @@ Rules that apply to every step: everything in CLAUDE.md, especially "preserve st
 - **Then:** Blueprint Managed Preferences Editor, Checkpoint, Intune Deployer, Jamf Deployer, JamfMigrator, Profile2Blueprint, Serial Number Reader. Apps that use the standard macOS About panel switch to JTKit's About window. Profile2Blueprint drops its sidebar About page and its standard panel, and gets a Settings window for the Updates section.
 - **Licences, added as each app adopts step 3** (full texts in About, and next to bundled copies):
   - Jamf Deployer: jamformer (MIT, Copyright (c) 2026 Jamf Software LLC, github.com/Jamf-Concepts/jamformer), whose licence is missing next to the bundled copy and in the app; check jamformer's own credits for components that need their own notice. The Terraform providers' licence texts (jamfpro, jamfplatform, jamfprotect; MPL-2.0) are missing too. OpenTofu and terraform-backend-git are already copied into the bundle.
+    - Done in Jamf Deployer (2026-10-25): About also credits Go, HCL, terraform-exec and go-api-sdk-jamfpro, the libraries jamformer's own credits name as compiled in. **To raise with Jamf Concepts:** jamformer's download ships no notices for its other compiled-in libraries (about 100, among them Jamf's jamfplatform and jamfprotect Go SDKs, gitleaks and parts of the AWS SDK).
   - Intune Deployer: MSAL (MIT, Microsoft Corporation).
   - JamfMigrator: Replicator (MIT, Jamf Professional Services).
   - AppSettings2Blueprint: App Settings Utility (MIT, Anthony Darlow), already complete.

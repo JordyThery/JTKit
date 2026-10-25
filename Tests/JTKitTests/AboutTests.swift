@@ -52,6 +52,15 @@ struct AcknowledgementTests {
         #expect(Acknowledgement(name: "Y").licenceName == nil)
     }
 
+    /// For texts that open with a copyright line, as OpenTofu's MPL-2.0 does.
+    @Test func licenceNameCanBeGiven() {
+        let tofu = Acknowledgement(name: "X", licence: "Copyright (c) The OpenTofu Authors\n\nMozilla Public License, version 2.0", licenceName: "MPL-2.0")
+        #expect(tofu.licenceName == "MPL-2.0")
+        #expect(tofu.licence == "Copyright (c) The OpenTofu Authors\n\nMozilla Public License, version 2.0")
+        // A label without a text shows nothing: there is no licence to unfold.
+        #expect(Acknowledgement(name: "Y", licenceName: "MPL-2.0").licenceName == nil)
+    }
+
     @Test func licenceTextIsKeptUnchanged() {
         let text = "MIT License\n\n    Indented line\nTHE SOFTWARE IS PROVIDED \"AS IS\""
         #expect(Acknowledgement(name: "X", licence: text).licence == text)

@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.4.4 (2026-10-25)
+- `AppShell/`: `Acknowledgement(licenceName:)` sets the label under which
+  a licence folds out in About. Use it for texts that open with a copyright
+  line instead of the licence's name (OpenTofu's MPL-2.0, Go's BSD-3-Clause),
+  found adopting step 3 in Jamf Deployer. Without it the label is still the
+  text's first line.
+
 ## 0.4.3 (2026-10-25)
 - `AppShell/`: `SettingsTabs { … }` with only tabs works again, as in 0.4.1
   (the General tab then has Appearance alone). 0.4.2 dropped that form and

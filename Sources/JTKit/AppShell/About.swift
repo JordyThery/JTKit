@@ -94,15 +94,28 @@ public nonisolated struct Acknowledgement: Sendable, Hashable, Identifiable {
     public var links: [AboutLink]
     /// The full licence text, unchanged from the project.
     public var licence: String?
+    /// The label the app gave for the licence, e.g. `"MPL-2.0"`.
+    private var givenLicenceName: String?
 
     public var id: String { name }
 
-    public init(name: String, author: String? = nil, summary: String? = nil, links: [AboutLink] = [], licence: String? = nil) {
+    /// - Parameter licenceName: the licence's label in the About window. Give it
+    ///   when the text doesn't start with the licence's name, e.g. when it opens
+    ///   with a copyright line. Without it the label is the text's first line.
+    public init(
+        name: String,
+        author: String? = nil,
+        summary: String? = nil,
+        links: [AboutLink] = [],
+        licence: String? = nil,
+        licenceName: String? = nil
+    ) {
         self.name = name
         self.author = author
         self.summary = summary
         self.links = links
         self.licence = licence
+        self.givenLicenceName = licenceName
     }
 
     /// "App Settings Utility by Anthony Darlow".
@@ -110,9 +123,11 @@ public nonisolated struct Acknowledgement: Sendable, Hashable, Identifiable {
         author.map { "\(name) by \($0)" } ?? name
     }
 
-    /// The licence's name, taken from its first non-empty line ("MIT License").
+    /// The licence's label: the name the app gave, otherwise the text's first
+    /// non-empty line ("MIT License"). Nil when there is no licence text.
     public var licenceName: String? {
-        licence?.split(separator: "\n").lazy
+        guard let licence else { return nil }
+        return givenLicenceName ?? licence.split(separator: "\n").lazy
             .map { $0.trimmingCharacters(in: .whitespaces) }
             .first { !$0.isEmpty }
     }
