@@ -66,13 +66,8 @@ Paths are relative to `~/Developer`. Line counts show how far copies have drifte
 
 Settings views exist in every app but are mostly app-specific; share sections (connections, updates, logging), not whole screens.
 
-Not candidates: IntuneOnboard's `OnboardCore` and Jamf Deployer's `DeployerKit` / `JamfDeployerCore` are app-specific packages.
+Jamf Deployer's `DeployerKit` is an earlier shared package; its pieces move into JTKit (ROADMAP step 2). Not candidates: IntuneOnboard's `OnboardCore` and Jamf Deployer's `JamfDeployerCore` are app-specific.
 
-## Suggested order
+## Order and sources
 
-1. Updates: near-identical in 8 apps, quick win. Start with AppSettings2Blueprint (has tests).
-2. Keychain (mind rule 4: keep existing service names).
-3. JSONValue, redaction, request/activity log.
-4. Jamf token providers and connection/tenant profiles.
-5. Platform API (Blueprints) client.
-6. Jamf Pro, Jamf School, Intune and ABM clients: largest and most diverged.
+Follow `ROADMAP.md`: it lists the steps in order, the source copy for each building block, which app goes first, and what Jordy checks by hand.
