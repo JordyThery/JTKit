@@ -1,5 +1,6 @@
 import Foundation
 import SwiftUI
+import UniformTypeIdentifiers
 import Testing
 @testable import JTKit
 import JTKitTestSupport
@@ -255,6 +256,57 @@ struct ConnectionStoreTests {
         #expect(throws: ConnectionStoreError.self) { try store.save(SampleTenant(name: "Demo")) }
         #expect(defaults.data(forKey: "connectionProfiles") == damaged)
         #expect(defaults.dictionaryRepresentation().keys.contains { $0.hasPrefix("connectionProfiles.unreadable-") })
+    }
+
+    // MARK: Import
+
+    private let sampleImport = ConnectionImport<SampleTenant>(contentTypes: [.json]) { data in
+        try JSONDecoder().decode(SampleTenant.self, from: data)
+    }
+
+    @Test func importingSavesTheConnectionInTheFile() throws {
+        let url = temporaryFile()
+        defer { cleanUp(url) }
+        let store = makeStore(url)
+        let exported = url.deletingLastPathComponent().appending(path: "exported.json")
+        let tenant = SampleTenant(name: "From another Mac", clientId: "client-b")
+        try FileManager.default.createDirectory(at: exported.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try JSONEncoder().encode(tenant).write(to: exported)
+
+        let imported = try sampleImport.importRecord(from: exported, into: store)
+
+        #expect(imported == tenant)
+        #expect(store.records == [tenant])
+        #expect(makeStore(url).records == [tenant])
+    }
+
+    @Test func importingNeverReplacesASavedConnection() throws {
+        let url = temporaryFile()
+        defer { cleanUp(url) }
+        try write(Self.existingFile, to: url)
+        let store = makeStore(url)
+        var sameID = store.records[0]
+        sameID.name = "Changed elsewhere"
+        let exported = url.deletingLastPathComponent().appending(path: "exported.json")
+        try JSONEncoder().encode(sameID).write(to: exported)
+
+        #expect(throws: ConnectionImportError.alreadySaved("Sandbox")) {
+            try sampleImport.importRecord(from: exported, into: store)
+        }
+        #expect(try String(contentsOf: url, encoding: .utf8) == Self.existingFile)
+    }
+
+    @Test func aFileThatIsNotAConnectionImportsNothing() throws {
+        let url = temporaryFile()
+        defer { cleanUp(url) }
+        try write(Self.existingFile, to: url)
+        let store = makeStore(url)
+        let other = url.deletingLastPathComponent().appending(path: "other.json")
+        try Data("{\"something\": \"else\"}".utf8).write(to: other)
+
+        #expect(throws: (any Error).self) { try sampleImport.importRecord(from: other, into: store) }
+        #expect(store.records.count == 2)
+        #expect(try String(contentsOf: url, encoding: .utf8) == Self.existingFile)
     }
 }
 

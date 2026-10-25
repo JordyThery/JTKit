@@ -1,4 +1,5 @@
 import SwiftUI
+import UniformTypeIdentifiers
 
 /// A way the app uses a connection: "Active connection" in most apps,
 /// "Source" and "Destination" in JamfMigrator, "Apple" and "MDM" in
@@ -170,6 +171,53 @@ nonisolated enum ConnectionServiceChoices {
 /// the HTTP status or a trace ID in `failureReason`.
 public typealias ConnectionTest<Record> = @MainActor (Record, [ConnectionSecretKind: String]) async throws -> String
 
+/// Importing a connection from a file: "Import…" in the + menu of the
+/// Connections tab, e.g. a tenant profile exported on another Mac. The
+/// imported connection is saved and selected. An import never replaces a
+/// saved connection: give the record a new id in `read` when its id is
+/// already in the list.
+public struct ConnectionImport<Record: ConnectionRecord> {
+    public let title: String
+    public let contentTypes: [UTType]
+    public let read: @MainActor (Data) throws -> Record
+
+    /// - Parameters:
+    ///   - title: the + menu item, `"Import…"` by default.
+    ///   - contentTypes: the files the open panel accepts, e.g. `[.json]`.
+    ///   - read: the record in the file's contents; throws for a file that
+    ///     isn't one, with a plain-language message.
+    public init(title: String = "Import…", contentTypes: [UTType],
+                read: @escaping @MainActor (Data) throws -> Record) {
+        self.title = title
+        self.contentTypes = contentTypes
+        self.read = read
+    }
+
+    /// Reads the file and saves the record it holds.
+    @MainActor
+    func importRecord(from url: URL, into store: ConnectionStore<Record>) throws -> Record {
+        let accessing = url.startAccessingSecurityScopedResource()
+        defer { if accessing { url.stopAccessingSecurityScopedResource() } }
+        let record = try read(try Data(contentsOf: url))
+        if let saved = store.record(id: record.id) {
+            throw ConnectionImportError.alreadySaved(ConnectionMenuText.name(of: saved.connection))
+        }
+        try store.save(record)
+        return record
+    }
+}
+
+nonisolated enum ConnectionImportError: LocalizedError, Equatable {
+    case alreadySaved(String)
+
+    var errorDescription: String? {
+        switch self {
+        case .alreadySaved(let name):
+            "This file holds “\(name)”, which is already in the list. Nothing was imported."
+        }
+    }
+}
+
 /// The full text of a failed connection test: every non-empty part of the
 /// error, one after another.
 nonisolated func connectionTestFailureText(_ error: any Error) -> String {
@@ -208,6 +256,7 @@ public struct ConnectionsSettingsTab<Record: ConnectionRecord, AppSection: View>
     let protectServices: Set<ConnectionService>
     let newRecord: (ConnectionService) -> Record
     let add: (() -> Void)?
+    let importer: ConnectionImport<Record>?
     let delete: ((Record) async throws -> Void)?
     let deleteMessage: String?
     let didDelete: (Record) -> Void
@@ -220,6 +269,7 @@ public struct ConnectionsSettingsTab<Record: ConnectionRecord, AppSection: View>
     @State private var pendingDeletion: Record?
     @State private var isDeleting = false
     @State private var listError: String?
+    @State private var showingImporter = false
 
     /// - Parameters:
     ///   - store: the app's saved connections.
@@ -240,6 +290,7 @@ public struct ConnectionsSettingsTab<Record: ConnectionRecord, AppSection: View>
     ///     when `optionalFields` contains `.jamfProtect`.
     ///   - newRecord: a new, unsaved record for the service chosen with +.
     ///   - add: replaces what + does, e.g. to open the app's own setup wizard.
+    ///   - importer: adds "Import…" to the + menu (see `ConnectionImport`).
     ///   - delete: replaces what deleting does, e.g. when more than the record
     ///     and its secrets goes; the list is read again afterwards. A thrown
     ///     error is shown below the list.
@@ -263,6 +314,7 @@ public struct ConnectionsSettingsTab<Record: ConnectionRecord, AppSection: View>
         protectServices: Set<ConnectionService> = [.jamfPlatform, .jamfPro],
         newRecord: @escaping (ConnectionService) -> Record,
         add: (() -> Void)? = nil,
+        importer: ConnectionImport<Record>? = nil,
         delete: ((Record) async throws -> Void)? = nil,
         deleteMessage: String? = nil,
         didDelete: @escaping (Record) -> Void = { _ in },
@@ -282,6 +334,7 @@ public struct ConnectionsSettingsTab<Record: ConnectionRecord, AppSection: View>
         self.protectServices = protectServices
         self.newRecord = newRecord
         self.add = add
+        self.importer = importer
         self.delete = delete
         self.deleteMessage = deleteMessage
         self.didDelete = didDelete
@@ -395,11 +448,14 @@ public struct ConnectionsSettingsTab<Record: ConnectionRecord, AppSection: View>
             .buttonStyle(.borderless)
             .padding(4)
         }
+        .fileImporter(isPresented: $showingImporter,
+                      allowedContentTypes: importer?.contentTypes ?? [],
+                      onCompletion: importRecord)
     }
 
     @ViewBuilder
     private var addButton: some View {
-        if add != nil || services.count == 1 {
+        if importer == nil && (add != nil || services.count == 1) {
             Button {
                 if let add { add() } else { addRecord(for: services[0]) }
             } label: {
@@ -411,12 +467,20 @@ public struct ConnectionsSettingsTab<Record: ConnectionRecord, AppSection: View>
             .disabled(store.problem != nil)
         } else {
             Menu {
-                let sections = ConnectionServiceChoices.addMenuSections(offered: services, groups: serviceGroups)
-                ForEach(sections.indices, id: \.self) { index in
-                    if index > 0 { Divider() }
-                    ForEach(sections[index]) { service in
-                        Button(service.displayName, systemImage: service.systemImage) { addRecord(for: service) }
+                if let add {
+                    Button(ConnectionMenuText.addTitle, systemImage: "plus") { add() }
+                } else {
+                    let sections = ConnectionServiceChoices.addMenuSections(offered: services, groups: serviceGroups)
+                    ForEach(sections.indices, id: \.self) { index in
+                        if index > 0 { Divider() }
+                        ForEach(sections[index]) { service in
+                            Button(service.displayName, systemImage: service.systemImage) { addRecord(for: service) }
+                        }
                     }
+                }
+                if let importer {
+                    Divider()
+                    Button(importer.title, systemImage: "square.and.arrow.down") { showingImporter = true }
                 }
             } label: {
                 Image(systemName: "plus")
@@ -462,6 +526,22 @@ public struct ConnectionsSettingsTab<Record: ConnectionRecord, AppSection: View>
             try store.save(record)
             listError = nil
             editingID = record.id
+        } catch {
+            listError = error.localizedDescription
+        }
+    }
+
+    private func importRecord(_ result: Result<URL, any Error>) {
+        guard let importer, case .success(let url) = result else { return }
+        do {
+            let record = try importer.importRecord(from: url, into: store)
+            listError = nil
+            // like clicking the row: unsaved changes to another connection ask first
+            if editorHasChanges {
+                pendingSelection = .some(record.id)
+            } else {
+                editingID = record.id
+            }
         } catch {
             listError = error.localizedDescription
         }
@@ -548,6 +628,7 @@ extension ConnectionsSettingsTab where AppSection == EmptyView {
         protectServices: Set<ConnectionService> = [.jamfPlatform, .jamfPro],
         newRecord: @escaping (ConnectionService) -> Record,
         add: (() -> Void)? = nil,
+        importer: ConnectionImport<Record>? = nil,
         delete: ((Record) async throws -> Void)? = nil,
         deleteMessage: String? = nil,
         didDelete: @escaping (Record) -> Void = { _ in },
@@ -557,7 +638,7 @@ extension ConnectionsSettingsTab where AppSection == EmptyView {
                   allowsChangingService: allowsChangingService, serviceGroups: serviceGroups,
                   signInMethods: signInMethods, roles: roles, height: height,
                   footer: footer, readOnlyFields: readOnlyFields, protectServices: protectServices,
-                  newRecord: newRecord, add: add, delete: delete, deleteMessage: deleteMessage,
+                  newRecord: newRecord, add: add, importer: importer, delete: delete, deleteMessage: deleteMessage,
                   didDelete: didDelete, test: test) { _ in
             EmptyView()
         }

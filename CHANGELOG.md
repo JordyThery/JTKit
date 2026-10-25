@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.5.5 (2026-10-25)
+From adopting ROADMAP step 4 in Intune Deployer. Additions only; apps that
+don't use them work as before.
+- `AppShell/`: `ConnectionsSettingsTab(importer:)` adds "Import…" to the +
+  menu (`ConnectionImport`): the app reads a connection from a file, e.g. a
+  tenant profile exported on another Mac; JTKit shows the open panel, saves
+  and selects it. An import never replaces a saved connection with the same
+  id: it is refused with a plain message. With an importer, + is always a
+  menu, also for one service or with `add:`.
+
 ## 0.5.4 (2026-10-25)
 From adopting ROADMAP step 4 in Jamf Deployer. Additions only; apps that
 don't use them work as before.
