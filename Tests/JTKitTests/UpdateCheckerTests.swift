@@ -114,6 +114,23 @@ struct UpdateCheckerTests {
         #expect(!again.isPresented)
     }
 
+    @Test func automaticCheckIgnoresTheCurrentRelease() async throws {
+        MockURLProtocol.install { _ in .json(200, Self.releaseJSON) }
+        let checker = makeChecker(defaults: try makeDefaults(), version: "2.5")
+        await checker.checkAutomatically()
+        #expect(MockURLProtocol.requests.count == 1)
+        #expect(checker.status == .idle)
+        #expect(!checker.isPresented)
+    }
+
+    @Test func automaticCheckFailsSilently() async throws {
+        MockURLProtocol.install { _ in .json(503, "{}") }
+        let checker = makeChecker(defaults: try makeDefaults())
+        await checker.checkAutomatically()
+        #expect(checker.status == .idle)
+        #expect(!checker.isPresented)
+    }
+
     @Test func automaticCheckHonoursTheToggleAndTheDailyInterval() async throws {
         MockURLProtocol.install { _ in .json(200, Self.releaseJSON) }
         let defaults = try makeDefaults()
