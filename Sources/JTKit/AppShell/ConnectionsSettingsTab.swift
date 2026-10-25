@@ -1,27 +1,153 @@
 import SwiftUI
 
 /// A way the app uses a connection: "Active connection" in most apps,
-/// "Source" and "Destination" in JamfMigrator. The app keeps the choice
-/// itself (and saves it under the key it has always used); the editor's
-/// "Use This Connection" or "Use as …" button sets it.
+/// "Source" and "Destination" in JamfMigrator, "Apple" and "MDM" in
+/// Checkpoint. The app keeps the choice itself (and saves it under the key it
+/// has always used); the editor's "Use This Connection" or "Use as …" button,
+/// the toolbar picker and the Connection menu set it.
 public struct ConnectionRole {
     public let title: String
     public let useTitle: String
+    /// The single connection chosen for this role. Never holds "All": that
+    /// is `all`, so the choice the app saves is always a single connection.
     public let selection: Binding<UUID?>
+    /// The services whose connections can have this role; nil for every service.
+    public let services: Set<ConnectionService>?
+    /// The role's "All" choice, e.g. "All Organizations"; nil when it has none.
+    public let all: AllConnectionsChoice?
+    /// How VoiceOver names the toolbar picker.
+    let accessibilityName: String
 
     /// - Parameters:
     ///   - title: shown when the connection has this role, e.g. `"Source"`.
     ///   - useTitle: the button that gives it the role; `"Use as <title>"` by default.
     ///   - selection: the app's choice for this role.
-    public init(_ title: String, useTitle: String? = nil, selection: Binding<UUID?>) {
+    ///   - services: only connections of these services can have the role,
+    ///     e.g. Checkpoint's Apple role; every service by default.
+    ///   - all: offers "All" for this role (see `AllConnectionsChoice`).
+    public init(_ title: String, useTitle: String? = nil, selection: Binding<UUID?>,
+                services: Set<ConnectionService>? = nil, all: AllConnectionsChoice? = nil) {
+        self.init(title, useTitle: useTitle, selection: selection, services: services, all: all,
+                  accessibilityName: title)
+    }
+
+    private init(_ title: String, useTitle: String?, selection: Binding<UUID?>,
+                 services: Set<ConnectionService>?, all: AllConnectionsChoice?, accessibilityName: String) {
         self.title = title
         self.useTitle = useTitle ?? "Use as \(title)"
         self.selection = selection
+        self.services = services
+        self.all = all
+        self.accessibilityName = accessibilityName
     }
 
     /// The single role of apps that use one connection at a time.
     public static func active(selection: Binding<UUID?>) -> ConnectionRole {
-        ConnectionRole("Active connection", useTitle: "Use This Connection", selection: selection)
+        ConnectionRole("Active connection", useTitle: "Use This Connection", selection: selection,
+                       services: nil, all: nil, accessibilityName: ConnectionMenuText.menuTitle)
+    }
+
+    /// Whether a connection can have this role.
+    public func accepts(_ connection: Connection) -> Bool {
+        services?.contains(connection.service) ?? true
+    }
+
+    /// Whether "All" is in use: chosen, and offered because the role has
+    /// enough connections.
+    @MainActor
+    public func usesAll(connectionCount: Int) -> Bool {
+        all?.isInEffect(connectionCount: connectionCount) ?? false
+    }
+
+    /// Gives a single connection the role, which ends "All".
+    @MainActor
+    func use(_ id: UUID?) {
+        all?.isChosen = false
+        selection.wrappedValue = id
+    }
+
+    /// The menu's choice: a connection, or "All".
+    @MainActor
+    func menuChoice(connectionCount: Int) -> Binding<ConnectionMenuChoice?> {
+        Binding(
+            get: {
+                if usesAll(connectionCount: connectionCount) { return .all }
+                return selection.wrappedValue.map(ConnectionMenuChoice.connection)
+            },
+            set: { choice in
+                switch choice {
+                case .all: all?.isChosen = true
+                case .connection(let id): use(id)
+                case nil: break
+                }
+            })
+    }
+}
+
+/// What a role's picker or menu can choose.
+enum ConnectionMenuChoice: Hashable {
+    case connection(UUID)
+    case all
+}
+
+/// The "All" choice of a role, e.g. Checkpoint's "All Organizations": every
+/// connection of the role at once.
+///
+/// The same in every app: "All" lasts for this session only and is never
+/// saved. Choosing it leaves the app's saved single connection as it is, so
+/// at the next launch the role falls back to the last single connection used,
+/// and a combined read is never a surprise at launch. Choosing a single
+/// connection ends it. It is offered only while the role has at least
+/// `minimumConnections` connections.
+///
+/// The app keeps one for each role that has it, for as long as it runs, and
+/// reads `isInEffect` to know whether to work with every connection.
+@MainActor
+@Observable
+public final class AllConnectionsChoice {
+    public static let minimumConnections = 2
+
+    /// e.g. `"All Organizations"`.
+    public let title: String
+    /// Whether "All" was chosen. In memory only, never saved.
+    public var isChosen = false
+
+    public init(title: String) {
+        self.title = title
+    }
+
+    /// Chosen, and offered because the role has enough connections.
+    public func isInEffect(connectionCount: Int) -> Bool {
+        isChosen && connectionCount >= Self.minimumConnections
+    }
+}
+
+/// Which services the editor offers for a connection, and which sign-in
+/// methods for a service.
+nonisolated enum ConnectionServiceChoices {
+    /// The services a saved connection can switch to: its own group when the
+    /// app groups them, else every service the app supports.
+    static func services(for service: ConnectionService, offered: [ConnectionService],
+                         groups: [[ConnectionService]], allowsChanging: Bool) -> [ConnectionService] {
+        guard allowsChanging else { return [service] }
+        guard let group = groups.first(where: { $0.contains(service) }) else { return offered }
+        return offered.filter(group.contains)
+    }
+
+    /// The + menu's sections: the app's groups in order, then any service in
+    /// no group.
+    static func addMenuSections(offered: [ConnectionService], groups: [[ConnectionService]]) -> [[ConnectionService]] {
+        var sections = groups.map { group in offered.filter(group.contains) }
+        let rest = offered.filter { service in !groups.contains { $0.contains(service) } }
+        sections.append(rest)
+        return sections.filter { !$0.isEmpty }
+    }
+
+    /// The sign-in methods the app accepts for a service, the usual one first.
+    static func signInMethods(for service: ConnectionService,
+                              limits: [ConnectionService: [SignInMethod]]) -> [SignInMethod] {
+        let limited = service.signInMethods.filter { limits[service]?.contains($0) ?? true }
+        return limited.isEmpty ? service.signInMethods : limited
     }
 }
 
@@ -65,6 +191,8 @@ public struct ConnectionsSettingsTab<Record: ConnectionRecord, AppSection: View>
     let services: [ConnectionService]
     let optionalFields: Set<ConnectionOptionalField>
     let allowsChangingService: Bool
+    let serviceGroups: [[ConnectionService]]
+    let signInMethods: [ConnectionService: [SignInMethod]]
     let roles: [ConnectionRole]
     let height: CGFloat
     let footer: String?
@@ -85,6 +213,11 @@ public struct ConnectionsSettingsTab<Record: ConnectionRecord, AppSection: View>
     ///   - services: the services the app supports, in the order of the + menu.
     ///   - optionalFields: extra fields to show, e.g. `.jamfProtect`.
     ///   - allowsChangingService: whether a saved connection can switch service.
+    ///   - serviceGroups: services a saved connection can switch between,
+    ///     e.g. Checkpoint's Apple services and its MDM services; also the
+    ///     sections of the + menu. Empty: any service the app supports.
+    ///   - signInMethods: limits the sign-in methods of a service, e.g.
+    ///     `[.intune: [.entraClientSecret]]`; services left out offer all theirs.
     ///   - roles: the ways the app uses a connection, each with a button in the editor.
     ///   - height: the tab's height; the width is `SettingsLayout.width`.
     ///   - footer: a note below the editor, e.g. the API permissions needed.
@@ -99,6 +232,8 @@ public struct ConnectionsSettingsTab<Record: ConnectionRecord, AppSection: View>
         services: [ConnectionService],
         optionalFields: Set<ConnectionOptionalField> = [],
         allowsChangingService: Bool = true,
+        serviceGroups: [[ConnectionService]] = [],
+        signInMethods: [ConnectionService: [SignInMethod]] = [:],
         roles: [ConnectionRole] = [],
         height: CGFloat = 480,
         footer: String? = nil,
@@ -112,6 +247,8 @@ public struct ConnectionsSettingsTab<Record: ConnectionRecord, AppSection: View>
         self.services = services
         self.optionalFields = optionalFields
         self.allowsChangingService = allowsChangingService
+        self.serviceGroups = serviceGroups
+        self.signInMethods = signInMethods
         self.roles = roles
         self.height = height
         self.footer = footer
@@ -144,7 +281,8 @@ public struct ConnectionsSettingsTab<Record: ConnectionRecord, AppSection: View>
         .frame(width: SettingsLayout.width, height: height)
         .onAppear {
             if editingID == nil {
-                editingID = roles.lazy.compactMap { $0.selection.wrappedValue }.first { store.record(id: $0) != nil }
+                editingID = roles.lazy.compactMap { $0.selection.wrappedValue }
+                    .first { id in store.record(id: id).map { record in roles.contains { $0.accepts(record.connection) } } ?? false }
                     ?? store.records.first?.id
             }
         }
@@ -182,7 +320,7 @@ public struct ConnectionsSettingsTab<Record: ConnectionRecord, AppSection: View>
                 ForEach(store.records) { record in
                     ConnectionRow(connection: record.connection,
                                   badge: record.listBadge,
-                                  roleTitles: roles.filter { $0.selection.wrappedValue == record.id }.map(\.title))
+                                  roleTitles: roleTitles(for: record))
                         .tag(record.id)
                 }
             }
@@ -230,8 +368,12 @@ public struct ConnectionsSettingsTab<Record: ConnectionRecord, AppSection: View>
             .disabled(store.problem != nil)
         } else {
             Menu {
-                ForEach(services) { service in
-                    Button(service.displayName, systemImage: service.systemImage) { addRecord(for: service) }
+                let sections = ConnectionServiceChoices.addMenuSections(offered: services, groups: serviceGroups)
+                ForEach(sections.indices, id: \.self) { index in
+                    if index > 0 { Divider() }
+                    ForEach(sections[index]) { service in
+                        Button(service.displayName, systemImage: service.systemImage) { addRecord(for: service) }
+                    }
                 }
             } label: {
                 Image(systemName: "plus")
@@ -243,6 +385,17 @@ public struct ConnectionsSettingsTab<Record: ConnectionRecord, AppSection: View>
             .help("Add connection")
             .accessibilityLabel("Add Connection")
             .disabled(store.problem != nil)
+        }
+    }
+
+    /// The roles a row is marked with: the role, or its "All" title when every
+    /// connection of the role is in use.
+    private func roleTitles(for record: Record) -> [String] {
+        roles.compactMap { role in
+            guard role.accepts(record.connection) else { return nil }
+            let count = store.records.filter { role.accepts($0.connection) }.count
+            if role.usesAll(connectionCount: count) { return role.all?.title }
+            return role.selection.wrappedValue == record.id ? role.title : nil
         }
     }
 
@@ -295,7 +448,10 @@ public struct ConnectionsSettingsTab<Record: ConnectionRecord, AppSection: View>
         if let editingID, let record = store.record(id: editingID) {
             ConnectionEditor(store: store,
                              saved: record,
-                             services: allowsChangingService ? services : [record.connection.service],
+                             services: ConnectionServiceChoices.services(
+                                for: record.connection.service, offered: services,
+                                groups: serviceGroups, allowsChanging: allowsChangingService),
+                             signInMethods: signInMethods,
                              optionalFields: optionalFields,
                              roles: roles,
                              footer: footer,
@@ -320,6 +476,8 @@ extension ConnectionsSettingsTab where AppSection == EmptyView {
         services: [ConnectionService],
         optionalFields: Set<ConnectionOptionalField> = [],
         allowsChangingService: Bool = true,
+        serviceGroups: [[ConnectionService]] = [],
+        signInMethods: [ConnectionService: [SignInMethod]] = [:],
         roles: [ConnectionRole] = [],
         height: CGFloat = 480,
         footer: String? = nil,
@@ -329,7 +487,8 @@ extension ConnectionsSettingsTab where AppSection == EmptyView {
         test: ConnectionTest<Record>? = nil
     ) {
         self.init(store: store, services: services, optionalFields: optionalFields,
-                  allowsChangingService: allowsChangingService, roles: roles, height: height,
+                  allowsChangingService: allowsChangingService, serviceGroups: serviceGroups,
+                  signInMethods: signInMethods, roles: roles, height: height,
                   footer: footer, newRecord: newRecord, add: add, didDelete: didDelete, test: test) { _ in
             EmptyView()
         }
@@ -388,6 +547,7 @@ private struct ConnectionEditor<Record: ConnectionRecord, AppSection: View>: Vie
 
     let store: ConnectionStore<Record>
     let services: [ConnectionService]
+    let signInLimits: [ConnectionService: [SignInMethod]]
     let optionalFields: Set<ConnectionOptionalField>
     let roles: [ConnectionRole]
     let footer: String?
@@ -403,13 +563,17 @@ private struct ConnectionEditor<Record: ConnectionRecord, AppSection: View>: Vie
     @State private var hasStoredSecret: Set<ConnectionSecretKind> = []
     @State private var testState = TestState.idle
     @State private var saveError: String?
+    @State private var showingKeyImporter = false
+    @State private var importedKeyName: String?
+    @State private var keyImportError: String?
 
     init(store: ConnectionStore<Record>, saved: Record, services: [ConnectionService],
-         optionalFields: Set<ConnectionOptionalField>, roles: [ConnectionRole], footer: String?,
+         signInMethods: [ConnectionService: [SignInMethod]], optionalFields: Set<ConnectionOptionalField>, roles: [ConnectionRole], footer: String?,
          test: ConnectionTest<Record>?, hasChanges: Binding<Bool>,
          appSection: @escaping (Binding<Record>) -> AppSection) {
         self.store = store
         self.services = services
+        self.signInLimits = signInMethods
         self.optionalFields = optionalFields
         self.roles = roles
         self.footer = footer
@@ -434,9 +598,9 @@ private struct ConnectionEditor<Record: ConnectionRecord, AppSection: View>: Vie
                         }
                     }
                 }
-                if current.service.signInMethods.count > 1 {
+                if signInMethods(for: current.service).count > 1 {
                     Picker("Sign in with", selection: connection.signIn) {
-                        ForEach(current.service.signInMethods) { method in
+                        ForEach(signInMethods(for: current.service)) { method in
                             Text(method.displayName).tag(method)
                         }
                     }
@@ -489,6 +653,8 @@ private struct ConnectionEditor<Record: ConnectionRecord, AppSection: View>: Vie
             }
         }
         .formStyle(.grouped)
+        .fileImporter(isPresented: $showingKeyImporter, allowedContentTypes: ApplePrivateKey.contentTypes,
+                      onCompletion: importPrivateKey)
         .onAppear(perform: loadSecrets)
         .onChange(of: isChanged, initial: true) { hasChanges = isChanged }
         .onChange(of: draft) { testState = .idle }
@@ -579,20 +745,49 @@ private struct ConnectionEditor<Record: ConnectionRecord, AppSection: View>: Vie
             let binding = Binding(get: { secrets[kind] ?? "" }, set: { secrets[kind] = $0 })
             let prompt = Text(hasStoredSecret.contains(kind) ? "Stored in the Keychain · type to replace" : "Required")
             if kind == .main && current.signIn == .applePrivateKey {
-                LabeledContent(title) {
-                    VStack(alignment: .leading, spacing: 4) {
-                        TextEditor(text: binding)
-                            .font(.caption.monospaced())
-                            .frame(minHeight: 60, maxHeight: 90)
-                            .accessibilityLabel(title)
-                        prompt
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-                }
+                privateKeyField(title)
             } else {
                 SecureField(title, text: binding, prompt: prompt)
             }
+        }
+    }
+
+    /// The Apple private key is imported from its .pem file and never shown:
+    /// a status line and a button, no text.
+    private func privateKeyField(_ title: String) -> some View {
+        let imported = !(secrets[.main] ?? "").isEmpty
+        let hasKey = imported || hasStoredSecret.contains(.main)
+        return LabeledContent(title) {
+            VStack(alignment: .leading, spacing: 4) {
+                Button(hasKey ? "Replace Private Key…" : "Import .pem File…") { showingKeyImporter = true }
+                Text(privateKeyStatus(imported: imported))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                if let keyImportError {
+                    Label(keyImportError, systemImage: "exclamationmark.triangle.fill")
+                        .symbolRenderingMode(.multicolor)
+                        .font(.caption)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+        }
+    }
+
+    private func privateKeyStatus(imported: Bool) -> String {
+        if imported {
+            return "\(importedKeyName ?? "Private key") imported · Save to keep it"
+        }
+        return hasStoredSecret.contains(.main) ? "Stored in the Keychain" : "Required: the .pem file downloaded from Apple"
+    }
+
+    private func importPrivateKey(_ result: Result<URL, any Error>) {
+        guard case .success(let url) = result else { return }
+        do {
+            secrets[.main] = try ApplePrivateKey.read(contentsOf: url)
+            importedKeyName = url.lastPathComponent
+            keyImportError = nil
+        } catch {
+            keyImportError = error.localizedDescription
         }
     }
 
@@ -610,6 +805,10 @@ private struct ConnectionEditor<Record: ConnectionRecord, AppSection: View>: Vie
         }
     }
 
+    private func signInMethods(for service: ConnectionService) -> [SignInMethod] {
+        ConnectionServiceChoices.signInMethods(for: service, limits: signInLimits)
+    }
+
     /// Switching service keeps a sign-in method the new service accepts.
     private var serviceBinding: Binding<ConnectionService> {
         Binding(
@@ -617,8 +816,9 @@ private struct ConnectionEditor<Record: ConnectionRecord, AppSection: View>: Vie
             set: { service in
                 var updated = current
                 updated.service = service
-                if !service.signInMethods.contains(updated.signIn) {
-                    updated.signIn = service.signInMethods[0]
+                let methods = signInMethods(for: service)
+                if !methods.contains(updated.signIn) {
+                    updated.signIn = methods[0]
                 }
                 draft.connection = updated
             })
@@ -650,7 +850,9 @@ private struct ConnectionEditor<Record: ConnectionRecord, AppSection: View>: Vie
         HStack(spacing: 8) {
             ForEach(roles.indices, id: \.self) { index in
                 let role = roles[index]
-                if role.selection.wrappedValue == saved.id {
+                if !role.accepts(saved.connection) {
+                    EmptyView()
+                } else if role.selection.wrappedValue == saved.id && !usesAll(role) {
                     Label(role.title, systemImage: "checkmark.circle.fill")
                         .foregroundStyle(.secondary)
                 } else {
@@ -719,6 +921,7 @@ private struct ConnectionEditor<Record: ConnectionRecord, AppSection: View>: Vie
             saved = draft
             hasStoredSecret.formUnion(changedSecrets.keys)
             secrets = [:]
+            importedKeyName = nil
             saveError = nil
             return true
         } catch {
@@ -730,13 +933,19 @@ private struct ConnectionEditor<Record: ConnectionRecord, AppSection: View>: Vie
     private func revert() {
         draft = saved
         secrets = [:]
+        importedKeyName = nil
+        keyImportError = nil
         saveError = nil
+    }
+
+    private func usesAll(_ role: ConnectionRole) -> Bool {
+        role.usesAll(connectionCount: store.records.filter { role.accepts($0.connection) }.count)
     }
 
     /// Saves unsaved changes first; the role changes only when that worked.
     private func use(_ role: ConnectionRole) {
         if isChanged && !save() { return }
-        role.selection.wrappedValue = saved.id
+        role.use(saved.id)
     }
 
     private func runTest() {

@@ -5,6 +5,10 @@ import SwiftUI
 /// The toolbar's `ConnectionPicker` and the menu bar's `ConnectionCommands`
 /// show these same items, as every toolbar control needs a menu bar command.
 ///
+/// A role with "All" (`ConnectionRole.all`) lists it below its connections,
+/// dimmed until the role has two or more; "All" lasts for the session only
+/// (see `AllConnectionsChoice`).
+///
 /// "Edit Connections…" opens the Connections tab only when the app opens
 /// tabs by name (`SettingsWindow(opensTabsByName: true)`).
 public struct ConnectionMenuItems<Record: ConnectionRecord>: View {
@@ -17,7 +21,8 @@ public struct ConnectionMenuItems<Record: ConnectionRecord>: View {
     ///   - store: the app's saved connections.
     ///   - roles: the ways the app uses a connection; each gets its own
     ///     choice, under the role's title when there are several (JamfMigrator's
-    ///     Source and Destination).
+    ///     Source and Destination, Checkpoint's Apple and MDM). A role lists
+    ///     only the connections it accepts.
     ///   - editTitle: e.g. `"Edit Tenants…"`; "Add Connection…" while the list is empty.
     ///   - itemTitle: a connection's name in the menu; its name by default.
     public init(
@@ -60,14 +65,27 @@ public struct ConnectionMenuItems<Record: ConnectionRecord>: View {
         }
     }
 
+    @ViewBuilder
     private func choice(for role: ConnectionRole) -> some View {
-        Picker(role.title, selection: role.selection) {
-            ForEach(store.records) { record in
-                Text(itemTitle(record)).tag(Optional(record.id))
+        let records = store.records.filter { role.accepts($0.connection) }
+        if records.isEmpty {
+            Text(ConnectionMenuText.noConnections)
+        } else {
+            Picker(role.title, selection: role.menuChoice(connectionCount: records.count)) {
+                ForEach(records) { record in
+                    Text(itemTitle(record)).tag(Optional(ConnectionMenuChoice.connection(record.id)))
+                }
+                // dimmed rather than hidden with one connection: menu bar
+                // menus keep the same items (HIG, The menu bar)
+                if let all = role.all {
+                    Divider()
+                    Text(all.title).tag(Optional(ConnectionMenuChoice.all))
+                        .disabled(records.count < AllConnectionsChoice.minimumConnections)
+                }
             }
+            .pickerStyle(.inline)
+            .labelsHidden()
         }
-        .pickerStyle(.inline)
-        .labelsHidden()
     }
 }
 
@@ -82,9 +100,10 @@ public struct ConnectionMenuItems<Record: ConnectionRecord>: View {
 /// ```
 public struct ConnectionPicker<Record: ConnectionRecord>: View {
     let store: ConnectionStore<Record>
-    let selection: Binding<UUID?>
+    let role: ConnectionRole
     let editTitle: String
     let itemTitle: (Record) -> String
+    let help: String?
 
     /// - Parameters:
     ///   - store: the app's saved connections.
@@ -97,10 +116,27 @@ public struct ConnectionPicker<Record: ConnectionRecord>: View {
         editTitle: String = ConnectionMenuText.editTitle,
         itemTitle: @escaping (Record) -> String = { ConnectionMenuText.name(of: $0.connection) }
     ) {
+        self.init(store: store, role: .active(selection: selection), editTitle: editTitle, itemTitle: itemTitle)
+    }
+
+    /// The picker of one role, for apps with a picker per role (Checkpoint's
+    /// Apple and MDM). It lists the connections the role accepts, and "All"
+    /// when the role has it.
+    ///
+    /// - Parameters:
+    ///   - help: the tooltip; "The connection in use" by default.
+    public init(
+        store: ConnectionStore<Record>,
+        role: ConnectionRole,
+        editTitle: String = ConnectionMenuText.editTitle,
+        itemTitle: @escaping (Record) -> String = { ConnectionMenuText.name(of: $0.connection) },
+        help: String? = nil
+    ) {
         self.store = store
-        self.selection = selection
+        self.role = role
         self.editTitle = editTitle
         self.itemTitle = itemTitle
+        self.help = help
     }
 
     public var body: some View {
@@ -110,16 +146,19 @@ public struct ConnectionPicker<Record: ConnectionRecord>: View {
             }
             .help("Add a connection in Settings › Connections")
         } else {
-            let current = selection.wrappedValue.flatMap(store.record(id:))
-            let title = ConnectionMenuText.pickerTitle(current.map(itemTitle))
+            let records = store.records.filter { role.accepts($0.connection) }
+            let usesAll = role.usesAll(connectionCount: records.count)
+            let current = usesAll ? nil : role.selection.wrappedValue.flatMap { id in records.first { $0.id == id } }
+            let title = usesAll ? (role.all?.title ?? "") : ConnectionMenuText.pickerTitle(current.map(itemTitle))
+            let symbol = usesAll ? ConnectionMenuText.allSymbol : (current?.connection.service.systemImage ?? "network.slash")
             Menu {
-                ConnectionMenuItems(store: store, selection: selection, editTitle: editTitle, itemTitle: itemTitle)
+                ConnectionMenuItems(store: store, roles: [role], editTitle: editTitle, itemTitle: itemTitle)
             } label: {
-                Label(title, systemImage: current?.connection.service.systemImage ?? "network.slash")
+                Label(title, systemImage: symbol)
                     .labelStyle(.titleAndIcon)
             }
-            .help("The connection in use")
-            .accessibilityLabel("Connection: \(title)")
+            .help(help ?? "The connection in use")
+            .accessibilityLabel("\(role.accessibilityName): \(title)")
         }
     }
 }
@@ -181,6 +220,8 @@ public nonisolated enum ConnectionMenuText {
     public static let addTitle = "Add Connection…"
     static let noConnections = "No Connections"
     static let noneChosen = "No Connection"
+    /// The toolbar picker's symbol while "All" is in use.
+    static let allSymbol = "square.stack.3d.up"
     static let unnamed = "Unnamed connection"
 
     /// A connection's name, or "Unnamed connection" as in the Connections tab.

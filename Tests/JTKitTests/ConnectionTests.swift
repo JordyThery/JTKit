@@ -1,4 +1,5 @@
 import Foundation
+import SwiftUI
 import Testing
 @testable import JTKit
 import JTKitTestSupport
@@ -373,5 +374,168 @@ struct ConnectionMenuTests {
     @Test func theLinkAddsUntilThereIsSomethingToEdit() {
         #expect(ConnectionMenuText.linkTitle(isEmpty: true, editTitle: "Edit Tenants…") == "Add Connection…")
         #expect(ConnectionMenuText.linkTitle(isEmpty: false, editTitle: "Edit Tenants…") == "Edit Tenants…")
+    }
+}
+
+// MARK: - Roles, “All”, services offered and the Apple private key
+/// A role's choice, kept the way an app keeps it.
+@MainActor
+private final class SavedChoice {
+    var id: UUID?
+    var binding: Binding<UUID?> {
+        Binding(get: { self.id }, set: { self.id = $0 })
+    }
+}
+
+@MainActor
+@Suite("Connection roles and “All”")
+struct ConnectionRoleTests {
+    let apple: Set<ConnectionService> = [.appleBusinessManager, .appleSchoolManager]
+
+    @Test func aRoleAcceptsOnlyItsServices() {
+        let role = ConnectionRole("Apple", selection: .constant(nil), services: apple)
+        #expect(role.accepts(Connection(name: "Org", service: .appleSchoolManager)))
+        #expect(!role.accepts(Connection(name: "Server", service: .jamfPro)))
+        #expect(ConnectionRole.active(selection: .constant(nil)).accepts(Connection(name: "Server", service: .jamfPro)))
+    }
+
+    @Test func allIsOfferedOnlyWithTwoOrMoreConnections() {
+        let all = AllConnectionsChoice(title: "All Organizations")
+        all.isChosen = true
+        #expect(!all.isInEffect(connectionCount: 0))
+        #expect(!all.isInEffect(connectionCount: 1))
+        #expect(all.isInEffect(connectionCount: 2))
+    }
+
+    @Test func choosingAllKeepsTheSavedSingleConnection() {
+        let saved = SavedChoice()
+        let first = UUID()
+        saved.id = first
+        let all = AllConnectionsChoice(title: "All Organizations")
+        let role = ConnectionRole("Apple", selection: saved.binding, services: apple, all: all)
+        let choice = role.menuChoice(connectionCount: 3)
+
+        #expect(choice.wrappedValue == .connection(first))
+        choice.wrappedValue = .all
+        #expect(choice.wrappedValue == .all)
+        #expect(role.usesAll(connectionCount: 3))
+        // what the app saves is still the single connection
+        #expect(saved.id == first)
+    }
+
+    @Test func allIsForThisSessionOnly() {
+        let saved = SavedChoice()
+        let first = UUID()
+        saved.id = first
+        let role = ConnectionRole("Apple", selection: saved.binding, all: AllConnectionsChoice(title: "All"))
+        role.menuChoice(connectionCount: 2).wrappedValue = .all
+
+        // a relaunch: a new "All" choice, the saved selection read again
+        let relaunched = ConnectionRole("Apple", selection: saved.binding, all: AllConnectionsChoice(title: "All"))
+        #expect(relaunched.menuChoice(connectionCount: 2).wrappedValue == .connection(first))
+        #expect(!relaunched.usesAll(connectionCount: 2))
+    }
+
+    @Test func choosingASingleConnectionEndsAll() {
+        let saved = SavedChoice()
+        let all = AllConnectionsChoice(title: "All Connections")
+        all.isChosen = true
+        let role = ConnectionRole("MDM", selection: saved.binding, all: all)
+        let other = UUID()
+        role.menuChoice(connectionCount: 2).wrappedValue = .connection(other)
+        #expect(!all.isChosen)
+        #expect(saved.id == other)
+
+        all.isChosen = true
+        role.use(UUID())
+        #expect(!all.isChosen)
+    }
+
+    @Test func allWithTooFewConnectionsShowsTheSingleConnection() {
+        let saved = SavedChoice()
+        let only = UUID()
+        saved.id = only
+        let all = AllConnectionsChoice(title: "All")
+        all.isChosen = true
+        let role = ConnectionRole("MDM", selection: saved.binding, all: all)
+        #expect(role.menuChoice(connectionCount: 1).wrappedValue == .connection(only))
+    }
+
+    @Test func rolesWithoutAllWorkAsBefore() {
+        let saved = SavedChoice()
+        let role = ConnectionRole("Source", selection: saved.binding)
+        #expect(role.useTitle == "Use as Source")
+        #expect(role.all == nil)
+        let id = UUID()
+        role.menuChoice(connectionCount: 5).wrappedValue = .connection(id)
+        #expect(saved.id == id)
+        #expect(!role.usesAll(connectionCount: 5))
+    }
+}
+
+@Suite("Services and sign-in methods offered")
+struct ConnectionServiceChoicesTests {
+    let offered: [ConnectionService] = [.appleBusinessManager, .appleSchoolManager, .jamfPro, .jamfPlatform, .jamfSchool, .intune]
+    let groups: [[ConnectionService]] = [[.appleBusinessManager, .appleSchoolManager], [.jamfPro, .jamfPlatform, .jamfSchool, .intune]]
+
+    @Test func aConnectionSwitchesOnlyWithinItsGroup() {
+        #expect(ConnectionServiceChoices.services(for: .appleSchoolManager, offered: offered, groups: groups, allowsChanging: true)
+                == [.appleBusinessManager, .appleSchoolManager])
+        #expect(ConnectionServiceChoices.services(for: .intune, offered: offered, groups: groups, allowsChanging: true)
+                == [.jamfPro, .jamfPlatform, .jamfSchool, .intune])
+    }
+
+    @Test func withoutGroupsEveryServiceIsOffered() {
+        #expect(ConnectionServiceChoices.services(for: .jamfPro, offered: offered, groups: [], allowsChanging: true) == offered)
+        #expect(ConnectionServiceChoices.services(for: .jamfPro, offered: offered, groups: groups, allowsChanging: false) == [.jamfPro])
+    }
+
+    @Test func thePlusMenuHasASectionPerGroup() {
+        #expect(ConnectionServiceChoices.addMenuSections(offered: offered, groups: groups) == groups)
+        #expect(ConnectionServiceChoices.addMenuSections(offered: [.jamfPro, .intune], groups: []) == [[.jamfPro, .intune]])
+    }
+
+    @Test func anAppCanLimitSignInMethods() {
+        #expect(ConnectionServiceChoices.signInMethods(for: .intune, limits: [.intune: [.entraClientSecret]]) == [.entraClientSecret])
+        #expect(ConnectionServiceChoices.signInMethods(for: .jamfPro, limits: [.intune: [.entraClientSecret]]) == [.apiClient, .usernamePassword])
+        // a limit that leaves nothing falls back to the service's own methods
+        #expect(ConnectionServiceChoices.signInMethods(for: .jamfSchool, limits: [.jamfSchool: [.apiClient]]) == [.schoolAPIKey])
+    }
+}
+
+@Suite("Apple private key import")
+struct ApplePrivateKeyTests {
+    static let key = """
+    -----BEGIN PRIVATE KEY-----
+    MIGHAgEAMBMGByqGSM49AgEGCCqGSM49AwEHBG0wawIBAQQgevZzL1gdAFr88hb2
+    -----END PRIVATE KEY-----
+    """
+
+    @Test func acceptsAKeyAndTrimsSurroundingSpace() throws {
+        #expect(try ApplePrivateKey.read(Data("\n\(Self.key)\n\n".utf8)) == Self.key)
+        let ec = Self.key.replacingOccurrences(of: "PRIVATE KEY", with: "EC PRIVATE KEY")
+        #expect(try ApplePrivateKey.read(Data(ec.utf8)) == ec)
+    }
+
+    @Test func refusesFilesThatAreNotAUsableKey() {
+        let certificate = Self.key.replacingOccurrences(of: "PRIVATE KEY", with: "CERTIFICATE")
+        let publicKey = Self.key.replacingOccurrences(of: "PRIVATE KEY", with: "PUBLIC KEY")
+        let encrypted = Self.key.replacingOccurrences(of: "PRIVATE KEY", with: "ENCRYPTED PRIVATE KEY")
+        #expect(throws: ApplePrivateKey.ImportError.notPrivateKey) { try ApplePrivateKey.read(Data(certificate.utf8)) }
+        #expect(throws: ApplePrivateKey.ImportError.notPrivateKey) { try ApplePrivateKey.read(Data(publicKey.utf8)) }
+        #expect(throws: ApplePrivateKey.ImportError.encrypted) { try ApplePrivateKey.read(Data(encrypted.utf8)) }
+        #expect(throws: ApplePrivateKey.ImportError.empty) { try ApplePrivateKey.read(Data()) }
+        #expect(throws: ApplePrivateKey.ImportError.empty) { try ApplePrivateKey.read(Data("  \n".utf8)) }
+        #expect(throws: ApplePrivateKey.ImportError.notText) { try ApplePrivateKey.read(Data([0xFF, 0xFE, 0x00, 0xC3])) }
+        #expect(throws: ApplePrivateKey.ImportError.tooLarge) {
+            try ApplePrivateKey.read(Data(count: ApplePrivateKey.maximumSize + 1))
+        }
+    }
+
+    @Test func readsAKeyFile() throws {
+        let file = FileManager.default.temporaryDirectory.appendingPathComponent("AuthKey_\(UUID().uuidString).pem")
+        try Data(Self.key.utf8).write(to: file)
+        defer { try? FileManager.default.removeItem(at: file) }
+        #expect(try ApplePrivateKey.read(contentsOf: file) == Self.key)
     }
 }

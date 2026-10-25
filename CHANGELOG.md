@@ -1,5 +1,28 @@
 # Changelog
 
+## 0.5.3 (2026-10-25)
+From adopting ROADMAP step 4 in Checkpoint. Additions only; apps that don't
+use them work as before.
+- `AppShell/`: "All" for a connection role (`ConnectionRole(…, all:)` with an
+  `AllConnectionsChoice`), e.g. Checkpoint's "All Organizations". The picker
+  and the Connection menu list it below the role's connections, dimmed until
+  there are two or more. The same in every app: "All" lasts for the session
+  only and is never saved; the app saves only the single connection chosen,
+  so at launch the role falls back to the last one used. Choosing a single
+  connection ends "All".
+- `AppShell/`: a role can be limited to some services (`services:`), so one
+  list can hold connections for different roles (Checkpoint's Apple and
+  MDM). `ConnectionPicker(store:role:…, help:)` shows one role's picker.
+- `AppShell/`: `ConnectionsSettingsTab(serviceGroups:)` lets a saved
+  connection switch service only within its group, and gives the + menu a
+  section per group. `signInMethods:` limits the sign-in methods offered for
+  a service, e.g. Intune with an app registration only.
+- `AppShell/` and `Core/`: the Apple private key is imported from its .pem
+  file (`ApplePrivateKey`) and never shown: the editor has an "Import .pem
+  File…" / "Replace Private Key…" button and a status line instead of a text
+  box. Files that aren't an unencrypted private key are refused with a plain
+  message.
+
 ## 0.5.2 (2026-10-25)
 From adopting ROADMAP step 4 in AppSettings2Blueprint.
 - `AppShell/`: the shared connection picker and "Connection" menu, a new
