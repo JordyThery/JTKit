@@ -4,11 +4,11 @@ JTKit is the shared Swift package for Jordy's apps in `~/Developer`. Jordy is no
 
 ## Layout
 
-One library product, `JTKit` (macOS 14+, iOS 17+, Swift 6 language mode). Organise `Sources/JTKit/` in folders:
+One library product, `JTKit` (macOS 14+ only, Swift 6 language mode). Organise `Sources/JTKit/` in folders:
 
 - `Core/`: Keychain, JSONValue, log redaction, request and activity logs, HTTP basics
 - `Updates/`: GitHub-release update checker and update view
-- `AppShell/`: About, acknowledgements, reusable Settings sections
+- `AppShell/`: About window, acknowledgements, reusable Settings sections (updates; connections from step 4), shared design components
 - `Jamf/`: token providers (OAuth client credentials, basic auth), Jamf Pro API, Classic API, Platform API (Blueprints, device groups), Jamf School
 - `Intune/`: Entra ID / Microsoft Graph auth and Intune device endpoints
 - `ABM/`: Apple Business / School Manager API
@@ -20,11 +20,12 @@ Test helpers (MockURLProtocol, fixtures) go in a separate library product `JTKit
 1. Nothing app-specific is hard-coded: app name, GitHub repo, bundle IDs, Keychain service names, URLs, UserDefaults keys come in as parameters or a configuration value.
 2. Only what apps need is `public`; everything else stays internal.
 3. Swift 6 concurrency: model types are `Sendable`; UI state is `@MainActor`.
-4. Platform-specific code goes inside `#if os(macOS)` / `#if os(iOS)` (Device Assist is iOS).
+4. macOS only. IntuneOnboard and Device Assist (iOS) are out of JTKit entirely; don't add iOS code or `#if os(iOS)` branches.
 5. Every component gets Swift Testing tests in `Tests/JTKitTests`, with no real network calls.
 6. No third-party dependencies without asking Jordy first.
-7. Views follow Apple's HIG: run the apple-design skill review on any view added or changed here.
+7. Views follow Apple's HIG: run the apple-design skill review on any view added or changed here. Design-review fixes change only JTKit's shared look, never a single app.
 8. Strings and assets in the package are loaded with `Bundle.module`.
+9. Follow "Standards for every app" in `ROADMAP.md` (About, acknowledgements, updates, connections, activity log). When adopting a step in an app, bring the app in line with the standards that step covers.
 
 ## Moving a component out of the apps
 
@@ -54,19 +55,20 @@ Paths are relative to `~/Developer`. Line counts show how far copies have drifte
 | Keychain | AppSettings2Blueprint `KeychainStore`, Blueprint Managed Preferences Editor `KeychainStore`, Checkpoint `Keychain`, Jamf Deployer `KeychainItem`, JamfMigrator `SecretStore`, Profile2Blueprint `KeychainStore`, Serial Number Reader `KeychainStore` |
 | JSONValue | AppSettings2Blueprint, Blueprint Managed Preferences Editor, Jamf Deployer, Profile2Blueprint |
 | Log redaction | AppSettings2Blueprint `LogRedactor`, Profile2Blueprint `Redactor` (Jamf Deployer `PlanRedactor` has a different purpose) |
-| Request / activity log | AppSettings2Blueprint and Blueprint Managed Preferences Editor `RequestLog`; Checkpoint, Intune Deployer, Jamf Deployer, Profile2Blueprint `ActivityLog` |
+| Request / activity log | AppSettings2Blueprint and Blueprint Managed Preferences Editor `RequestLog`; Checkpoint, Intune Deployer, Jamf Deployer, Profile2Blueprint `ActivityLog`. All but Profile2Blueprint's migration history are replaced by JTKit's activity log in step 5. |
 | Jamf Platform API client + token provider | AppSettings2Blueprint `PlatformAPIClient`, Blueprint Managed Preferences Editor `PlatformAPIClient`, Jamf Deployer `JamfPlatformClient`, JamfMigrator `PlatformClient` + `TokenProvider`, Profile2Blueprint `HTTPClient` + `TokenProvider` |
 | Connection / tenant profiles | AppSettings2Blueprint and Blueprint Managed Preferences Editor `ConnectionProfile` + `ProfileStore`; Jamf Deployer, JamfMigrator, Profile2Blueprint `Tenant` + `TenantStore`; Intune Deployer `TenantStore` |
-| Jamf Pro API client | Checkpoint `JamfClient` (2,204 lines), Device Assist `JamfClient` (603, iOS), Serial Number Reader `JamfClient` (598) |
+| Jamf Pro API client | Checkpoint `JamfClient` (2,204 lines), Serial Number Reader `JamfClient` (598) |
 | Jamf School client | Checkpoint `JamfSchoolClient` (616), Serial Number Reader `JamfSchoolClient` (250) |
 | Intune / Graph | Checkpoint `IntuneClient`, Intune Deployer `GraphClient` + `AuthManager` |
 | Apple Business Manager | Checkpoint `ABMClient` |
-| About view | AppSettings2Blueprint, Jamf Deployer, Profile2Blueprint |
+| About view | AppSettings2Blueprint (window, with acknowledgements), Jamf Deployer (window, "Built with" credits), Profile2Blueprint (sidebar page). The other five use the standard macOS About panel. |
+| Third-party notices | AppSettings2Blueprint: App Settings Utility (MIT, complete). Missing or incomplete: Jamf Deployer (jamformer MIT, Terraform providers MPL-2.0), Intune Deployer (MSAL MIT), JamfMigrator (Replicator MIT). |
 | Test helper `MockURLProtocol` | AppSettings2Blueprint, Profile2Blueprint |
 
-Settings views exist in every app but are mostly app-specific; share sections (connections, updates, logging), not whole screens.
+Settings views exist in every app but are mostly app-specific; share sections (updates from step 3, connections from step 4), not whole screens. No app has a logging setting; logs are windows (activity log, ROADMAP step 5).
 
-Jamf Deployer's `DeployerKit` is an earlier shared package; its pieces move into JTKit (ROADMAP step 2). Not candidates: IntuneOnboard's `OnboardCore` and Jamf Deployer's `JamfDeployerCore` are app-specific.
+Jamf Deployer's `DeployerKit` is an earlier shared package; its pieces move into JTKit (ROADMAP step 2). Not candidates: Jamf Deployer's `JamfDeployerCore` is app-specific. IntuneOnboard (with `OnboardCore`) and Device Assist are out of JTKit entirely.
 
 ## Order and sources
 

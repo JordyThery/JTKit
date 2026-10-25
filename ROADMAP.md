@@ -4,6 +4,17 @@ The order in which shared code moves into JTKit, where each piece comes from, an
 
 Sources were chosen from the code (October 2026): prefer the copy with tests and the most robust handling, and take *coverage* (which calls exist) from wherever it is widest.
 
+## Standards for every app
+
+Decided by Jordy on 2026-10-25. They apply to the eight macOS apps: AppSettings2Blueprint, Blueprint Managed Preferences Editor, Checkpoint, Intune Deployer, Jamf Deployer, JamfMigrator, Profile2Blueprint, Serial Number Reader. IntuneOnboard and Device Assist are out of JTKit entirely.
+
+- **About:** one JTKit About window in every app, opened only from the app menu ("About [App]"). Never a page inside the app, and not listed in the Window menu.
+- **Acknowledgements:** the same JTKit view inside About, in every app with third-party code, with full licence texts.
+- **Updates:** "Check for Updates…" in the app menu. The daily-check switch in Settings, using JTKit's Updates section. About shows the version only.
+- **Connections:** every app that connects to Jamf, Intune or Apple Business/School Manager uses the same JTKit connections list and editor, with several services in one list. Built in step 4 with saved connections.
+- **Activity log:** every app that connects to those services has the same JTKit activity log window (⌘⇧L), filled automatically by JTKit's networking, with a bug-report export that masks device identifiers (from Checkpoint). Built in step 5. It replaces the request logs in AppSettings2Blueprint and Blueprint Managed Preferences Editor, and Checkpoint's log. Profile2Blueprint's migration history stays.
+- **Design-review fixes** change only JTKit's shared look, never a single app.
+
 ## How to run a step
 
 Always work in `~/Developer/Apps.xcworkspace`. Pick the scheme of the app being changed (or **JTKit** to run the package tests).
@@ -33,36 +44,45 @@ Rules that apply to every step: everything in CLAUDE.md, especially "preserve st
 - **Source:** AppSettings2Blueprint (newest fixes incl. suffixed tags like `1.2.1-hotfix`; has tests).
 - **First app:** AppSettings2Blueprint.
 - **Then:** Blueprint Managed Preferences Editor, Checkpoint, Intune Deployer, JamfMigrator, Profile2Blueprint, Serial Number Reader. Jamf Deployer last: its copy lives in DeployerKit (see step 2).
-- **Check by hand:** Check for Updates from the menu and from About says "up to date"; the daily-check toggle survives a relaunch.
+- **Check by hand:** Check for Updates from the menu (and from About, until step 3 removes it there) says "up to date"; the daily-check toggle survives a relaunch.
 
 ### Step 2: Fold in DeployerKit (0.3.0)
 `Jamf Deployer/DeployerKit` is an earlier shared package (tested, macOS 15, Swift 6.2 with main-actor default isolation). Intune Deployer was meant to use it but doesn't.
 - **Move:** ActivityLog + ActivityLogView, GuidedTour, DesignSystem components (StatusBadge etc.), TextExportDocument, JSONFile.
-- **Decision (2026-10-25):** JTKit stays at macOS 14 (and iOS 17): nothing in the moved code needs macOS 15 or Swift 6.2. It moves up only when all apps move together. JTKit keeps Swift tools 6.0 and marks UI state `@MainActor` explicitly instead of DeployerKit's main-actor default.
+- **Decision (2026-10-25):** JTKit stays at macOS 14 (macOS only since step 3): nothing in the moved code needs macOS 15 or Swift 6.2. It moves up only when all apps move together. JTKit keeps Swift tools 6.0 and marks UI state `@MainActor` explicitly instead of DeployerKit's main-actor default.
 - **First app:** Jamf Deployer (switch its DeployerKit imports to JTKit; DeployerKit keeps only what is Jamf Deployer-specific, or goes away).
 - **Then:** Intune Deployer (GuidedTour, ActivityLog), JamfMigrator (GuidedTour).
-- **Not replaced:** Checkpoint's activity log (a bug-report log that masks device identifiers on export) and Profile2Blueprint's activity (a saved migration history) stay in their apps; JTKit's in-memory log is not a substitute.
+- **Not replaced here:** Checkpoint's activity log (a bug-report log that masks device identifiers on export) stays until step 5, where JTKit's log gains that export and replaces it. Profile2Blueprint's activity (a saved migration history) stays in the app for good; JTKit's in-memory log is not a substitute.
 - **Design:** run the apple-design review on the moved components; they become the shared look of all apps.
 - **Check by hand:** guided tour runs start to finish; activity log fills, exports and clears.
 - **Later (changes the look, so every app at once):** from the step 2 design review: show the failure icon next to failed statuses in the activity log, not only red text; make the yellow warning and green success icons stand out more on light backgrounds (for example the multicolour warning symbol); put the activity log's Clear in the menu bar as well as the toolbar; decide whether the update sheet uses the SheetFrame header like the other sheets.
 
 ### Step 3: App shell (0.4.0)
-- **Move:** About window and acknowledgements, reusable Settings sections (updates, logging, connections list).
-- **Source:** AppSettings2Blueprint (About and acknowledgements have unit and UI tests); compare Jamf Deployer and Profile2Blueprint's About.
-- **First app:** AppSettings2Blueprint. **Then:** every macOS app.
-- **Check by hand:** About shows the right name, version, links and acknowledgements.
+- **Move:** About window, acknowledgements and the Updates settings section (see "Standards for every app"). No logging section: no app has one. The connections list is built in step 4.
+- **Source:** AppSettings2Blueprint (About and acknowledgements have unit and UI tests); options from Jamf Deployer's About (disclaimer, credits list) and Profile2Blueprint's About.
+- **Also:** JTKit drops iOS and becomes macOS 14 only.
+- **First app:** AppSettings2Blueprint: its update controls move from About to Settings.
+- **Then:** Blueprint Managed Preferences Editor, Checkpoint, Intune Deployer, Jamf Deployer, JamfMigrator, Profile2Blueprint, Serial Number Reader. Apps that use the standard macOS About panel switch to JTKit's About window. Profile2Blueprint drops its sidebar About page and its standard panel, and gets a Settings window for the Updates section.
+- **Licences, added as each app adopts step 3** (full texts in About, and next to bundled copies):
+  - Jamf Deployer: jamformer (MIT, Copyright (c) 2026 Jamf Software LLC, github.com/Jamf-Concepts/jamformer), whose licence is missing next to the bundled copy and in the app; check jamformer's own credits for components that need their own notice. The Terraform providers' licence texts (jamfpro, jamfplatform, jamfprotect; MPL-2.0) are missing too. OpenTofu and terraform-backend-git are already copied into the bundle.
+  - Intune Deployer: MSAL (MIT, Microsoft Corporation).
+  - JamfMigrator: Replicator (MIT, Jamf Professional Services).
+  - AppSettings2Blueprint: App Settings Utility (MIT, Anthony Darlow), already complete.
+- **Check by hand:** About opens only from the app menu and shows the right name, version, links and acknowledgements; it is not in the Window menu. The daily-check switch is in Settings and survives a relaunch; "Check for Updates…" in the app menu says "up to date".
 
 ### Step 4: Keychain and saved connections (0.5.0)
+- **Also builds** the shared connections list and editor for Settings: one list holding several services (Jamf Pro, Jamf Platform, Jamf School, Intune, Apple Business/School Manager), with add, delete, edit, test and "use this connection". It replaces each app's own connections screen; Profile2Blueprint's sidebar tenants move to it too. Start from AppSettings2Blueprint's and Blueprint Managed Preferences Editor's list (same shape); take services from Checkpoint (ABM/ASM and MDM lists) and Serial Number Reader.
 - **Source:** JamfMigrator `SecretStore` (protocol with an in-memory fake for tests) and `Tenant`/`TenantStore` (tested). Fold in fields from Jamf Deployer's `Tenant` (Platform API, Protect) and Intune Deployer's `TenantStore`.
 - **Critical:** every app keeps its own Keychain service and account names and its saved-connections file/keys. Losing them logs users out.
 - **First app:** JamfMigrator. **Then:** Profile2Blueprint, AppSettings2Blueprint, Blueprint Managed Preferences Editor, Serial Number Reader, Checkpoint, Jamf Deployer, Intune Deployer.
-- **Check by hand:** before switching, save a connection with the old build; after switching, it is still there and still connects.
+- **Check by hand:** before switching, save a connection with the old build; after switching, it is still there and still connects. Settings shows the shared connections list.
 
 ### Step 5: Jamf login and HTTP basics (0.6.0)
-- **Move:** token providers (OAuth client credentials and username/password, token renewal), HTTP client with retry and `Retry-After`/429 handling, request log, secret redaction in logs.
-- **Source:** Profile2Blueprint `TokenProvider` + `HTTPClient` and JamfMigrator `TokenProvider` (both tested); AppSettings2Blueprint `RequestLog` + `LogRedactor` (tested); Checkpoint `ActivityRedaction` + `IdentifierMasker` for masking device identifiers in exported logs.
-- **First app:** Profile2Blueprint. **Then:** JamfMigrator, AppSettings2Blueprint, Blueprint Managed Preferences Editor, Serial Number Reader, Device Assist (iOS: also proves JTKit builds for iOS), Checkpoint, Jamf Deployer.
-- **Check by hand:** connect with an API client and with a user account; the request log shows no secrets.
+- **Move:** token providers (OAuth client credentials and username/password, token renewal), HTTP client with retry and `Retry-After`/429 handling, secret redaction in logs.
+- **Activity log standard:** JTKit's networking fills JTKit's `ActivityLog` automatically. Every app that connects to Jamf, Intune or ABM/ASM gets the same activity log window (⌘⇧L) with a bug-report export that masks device identifiers. It replaces AppSettings2Blueprint's and Blueprint Managed Preferences Editor's request logs and Checkpoint's activity log. Profile2Blueprint's migration history stays.
+- **Source:** Profile2Blueprint `TokenProvider` + `HTTPClient` and JamfMigrator `TokenProvider` (both tested); AppSettings2Blueprint `RequestLog` + `LogRedactor` (tested; what a request entry records); Checkpoint `ActivityRedaction` + `IdentifierMasker` for the masked bug-report export.
+- **First app:** Profile2Blueprint. **Then:** JamfMigrator, AppSettings2Blueprint, Blueprint Managed Preferences Editor, Serial Number Reader, Checkpoint, Jamf Deployer.
+- **Check by hand:** connect with an API client and with a user account; the activity log (⌘⇧L) fills by itself and shows no secrets; the bug-report export masks serial numbers and other device identifiers.
 
 ### Step 6: Jamf Platform API (0.7.0)
 - **Source:** JamfMigrator `PlatformClient` (regions, polling, permission probe, gateway errors; tested). Add Blueprint and device-group calls from AppSettings2Blueprint, Blueprint Managed Preferences Editor, Profile2Blueprint and Jamf Deployer.
@@ -70,9 +90,9 @@ Rules that apply to every step: everything in CLAUDE.md, especially "preserve st
 - **Check by hand:** list Blueprints and device groups; one harmless write on a test tenant.
 
 ### Step 7: Jamf Pro, Jamf School and device actions (0.8.0)
-- **Source for coverage:** Checkpoint `JamfClient` (widest) and `JamfSchoolClient`. **Source for tested code:** Serial Number Reader (Jamf School tests). **iOS side:** Device Assist (restart, erase, return to service, clear passcode).
+- **Source for coverage:** Checkpoint `JamfClient` (widest) and `JamfSchoolClient`. **Source for tested code:** Serial Number Reader (Jamf School tests).
 - **Rule:** every call taken from Checkpoint gets a fake-network test as it moves (Checkpoint has none).
-- **First app:** Serial Number Reader. **Then:** Device Assist, Checkpoint.
+- **First app:** Serial Number Reader. **Then:** Checkpoint.
 - **Check by hand:** look up a device in Jamf Pro and Jamf School; send one harmless command to a test device.
 
 ### Step 8: Intune / Microsoft Graph (0.9.0)
@@ -97,7 +117,7 @@ When every app has adopted steps 1–9 and the public API has stopped changing.
 
 ## Not shared
 
-Each app's own engine (migration, deployment, onboarding, rule building) and whole Settings screens. The customer variants (DeviceAssist-Rituals, DeviceAssist-UMCUtrecht), Replicator (fork) and IntuneOnboard's OnboardCore stay out of scope.
+Each app's own engine (migration, deployment, rule building) and whole Settings screens; only the sections above are shared. Out of scope entirely: IntuneOnboard (with OnboardCore), Device Assist and its customer variants (DeviceAssist-Rituals, DeviceAssist-UMCUtrecht), and Replicator (fork).
 
 ## Versions
 
