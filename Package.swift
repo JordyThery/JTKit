@@ -9,9 +9,12 @@ let package = Package(
     ],
     products: [
         .library(name: "JTKit", targets: ["JTKit"]),
+        // Test helpers for app test targets; never a dependency of JTKit itself.
+        .library(name: "JTKitTestSupport", targets: ["JTKitTestSupport"]),
     ],
     targets: [
         .target(name: "JTKit"),
-        .testTarget(name: "JTKitTests", dependencies: ["JTKit"]),
+        .target(name: "JTKitTestSupport"),
+        .testTarget(name: "JTKitTests", dependencies: ["JTKit", "JTKitTestSupport"]),
     ]
 )
