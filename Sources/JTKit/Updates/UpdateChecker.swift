@@ -47,7 +47,8 @@ public final class UpdateChecker {
 
     /// Receives one line per check outcome (shown nowhere by default).
     @ObservationIgnored private let activity: (@MainActor (String) -> Void)?
-    @ObservationIgnored private let defaults: UserDefaults
+    /// Also read by `UpdateSettingsSection`, so the switch and the check share one store.
+    @ObservationIgnored let defaults: UserDefaults
     @ObservationIgnored private let session: URLSession
     @ObservationIgnored private let installedVersion: String?
 

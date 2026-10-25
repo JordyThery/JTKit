@@ -1,4 +1,3 @@
-#if os(macOS)
 import AppKit
 import SwiftUI
 import UniformTypeIdentifiers
@@ -185,4 +184,3 @@ nonisolated struct ZipDocument: FileDocument {
         FileWrapper(regularFileWithContents: data)
     }
 }
-#endif

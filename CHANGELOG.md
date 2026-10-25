@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.4.0 (2026-10-25)
+App shell (ROADMAP step 3), from AppSettings2Blueprint. JTKit is now macOS 14 only.
+- `AppShell/`: `AboutWindow`, the shared About window. It opens only from the
+  app menu, is left out of the Window menu, and has only a working close
+  button (minimize and zoom are dimmed). It shows the app icon, name,
+  "Version x (build)", the copyright line from the app's Info.plist and what
+  the app passes in `AboutConfiguration`: author, summary, links, disclaimer
+  and acknowledgements.
+- `AppShell/`: `Acknowledgement` and `AcknowledgementsView`: each project's
+  credit, links and full licence text, folded away under the licence's name.
+- `AppShell/`: `AppInfoCommands`: "About [App]", a separator, then
+  "Check for Updates…" in the app menu.
+- `Updates/`: `UpdateSettingsSection`, the "Check for updates daily" switch for
+  Settings. It uses the checker's `automaticCheckKey` and store, so saved
+  choices keep working.
+- iOS removed: no iOS platform in `Package.swift`, no `#if os(macOS)` guards.
+
 ## 0.3.1 (2026-10-25)
 - `Core/`: `ActivityLogEntry` takes an optional `failedWithoutStatus` for
   requests that never got a response. Such entries count as failed and show a

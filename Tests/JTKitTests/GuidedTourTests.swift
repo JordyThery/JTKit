@@ -1,4 +1,3 @@
-#if os(macOS)
 import Foundation
 import Testing
 @testable import JTKit
@@ -76,4 +75,3 @@ struct GuidedTourTests {
         #expect(relaunch.index == 0, "Help › Guided Tour still replays it")
     }
 }
-#endif

@@ -1,4 +1,3 @@
-#if os(macOS)
 import SwiftUI
 
 /// One step of the first-launch guided tour.
@@ -278,4 +277,3 @@ private struct TourOverlay<AnchorID: Hashable & Sendable>: View {
         return clamp(CGSize(width: target.minX, height: target.maxY + margin))
     }
 }
-#endif

@@ -76,7 +76,6 @@ public nonisolated enum StatusIndicator: Sendable {
     }
 }
 
-#if os(macOS)
 /// The shared sheet skeleton: titled header with a busy spinner, divider,
 /// content, divider, footer row.
 @MainActor
@@ -130,7 +129,6 @@ public struct SheetFrame<Content: View, Footer: View>: View {
         }
     }
 }
-#endif
 
 /// The shared detail-page header: large tinted symbol, bold title and a
 /// monospaced secondary subtitle.

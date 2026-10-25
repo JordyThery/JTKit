@@ -1,4 +1,3 @@
-#if os(macOS)
 import SwiftUI
 
 /// Newest-first table of activity entries for the Activity Log window.
@@ -81,4 +80,3 @@ public struct ActivityLogView: View {
         }
     }
 }
-#endif
