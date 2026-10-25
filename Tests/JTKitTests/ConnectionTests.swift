@@ -350,3 +350,28 @@ struct SettingsTabNameTests {
         #expect(SettingsTabSelection().selected == SettingsTabName.general)
     }
 }
+
+@MainActor
+@Suite("Connection menu")
+struct ConnectionMenuTests {
+    @Test func everyAppUsesTheSameWords() {
+        #expect(ConnectionMenuText.menuTitle == "Connection")
+        #expect(ConnectionMenuText.editTitle == "Edit Connections…")
+        #expect(ConnectionMenuText.addTitle == "Add Connection…")
+    }
+
+    @Test func thePickerIsNamedAfterTheConnectionInUse() {
+        #expect(ConnectionMenuText.pickerTitle("Production (eu)") == "Production (eu)")
+        #expect(ConnectionMenuText.pickerTitle(nil) == "No Connection")
+    }
+
+    @Test func anUnnamedConnectionIsNamedAsInTheConnectionsTab() {
+        #expect(ConnectionMenuText.name(of: Connection(name: "", service: .jamfPro)) == "Unnamed connection")
+        #expect(ConnectionMenuText.name(of: Connection(name: "School", service: .jamfSchool)) == "School")
+    }
+
+    @Test func theLinkAddsUntilThereIsSomethingToEdit() {
+        #expect(ConnectionMenuText.linkTitle(isEmpty: true, editTitle: "Edit Tenants…") == "Add Connection…")
+        #expect(ConnectionMenuText.linkTitle(isEmpty: false, editTitle: "Edit Tenants…") == "Edit Tenants…")
+    }
+}

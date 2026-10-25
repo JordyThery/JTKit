@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.5.2 (2026-10-25)
+From adopting ROADMAP step 4 in AppSettings2Blueprint.
+- `AppShell/`: the shared connection picker and "Connection" menu, a new
+  standard for every app with a connection picker. `ConnectionPicker` is the
+  toolbar control, named after the connection in use (an "Add Connection…"
+  button while none are saved). `ConnectionCommands` adds the "Connection"
+  menu to the menu bar. Both show `ConnectionMenuItems`: the saved
+  connections with the one in use checked (a section per role when there are
+  several), then "Edit Connections…", which opens Settings › Connections
+  (`SettingsWindow(opensTabsByName: true)`).
+
 ## 0.5.1 (2026-10-25)
 From adopting ROADMAP step 4 in Profile2Blueprint.
 - `AppShell/`: `SettingsTabLink` opens the Settings window on a named tab,
