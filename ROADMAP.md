@@ -76,7 +76,8 @@ Rules that apply to every step: everything in CLAUDE.md, especially "preserve st
   - AppSettings2Blueprint: App Settings Utility (MIT, Anthony Darlow), already complete.
 - **Check by hand:** About opens only from the app menu and shows the right name, version, links and acknowledgements; it is not in the Window menu. Settings opens on General with the Appearance picker first, and the chosen appearance applies to every window, About included, and survives a relaunch. The daily-check switch is in Settings and survives a relaunch; "Check for Updates…" in the app menu says "up to date".
 
-### Step 4: Keychain and saved connections (0.5.0)
+### Step 4: Keychain and saved connections (0.5.0), done
+- **Done (2026-10-25):** in all eight apps, Intune Deployer last, with JTKit 0.5.0 to 0.5.5. Still open: JamfMigrator and Profile2Blueprint switch to the shared picker and Connection menu on their next JTKit update (see "Standards for every app").
 - **Also builds** the shared connections list and editor for Settings: one list holding several services (Jamf Pro, Jamf Platform, Jamf School, Intune, Apple Business/School Manager), with add, delete, edit, test and "use this connection". It replaces each app's own connections screen; Profile2Blueprint's sidebar tenants move to it too. Start from AppSettings2Blueprint's and Blueprint Managed Preferences Editor's list (same shape); take services from Checkpoint (ABM/ASM and MDM lists) and Serial Number Reader. It lives in the shared Settings window's "Connections" tab.
 - **Labels:** some apps show field labels such as "Environment ID" and "Network ID" in a code-style (monospaced) font, for example Serial Number Reader. The shared connections screen uses normal labels.
 - **Source:** JamfMigrator `SecretStore` (protocol with an in-memory fake for tests) and `Tenant`/`TenantStore` (tested). Fold in fields from Jamf Deployer's `Tenant` (Platform API, Protect) and Intune Deployer's `TenantStore`.
