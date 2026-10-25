@@ -8,7 +8,7 @@ One library product, `JTKit` (macOS 14+ only, Swift 6 language mode). Organise `
 
 - `Core/`: Keychain, JSONValue, log redaction, request and activity logs, HTTP basics
 - `Updates/`: GitHub-release update checker and update view
-- `AppShell/`: About window, acknowledgements, reusable Settings sections (updates; connections from step 4), shared design components
+- `AppShell/`: About window, acknowledgements, the Settings window and reusable Settings sections (updates; connections from step 4), shared design components
 - `Jamf/`: token providers (OAuth client credentials, basic auth), Jamf Pro API, Classic API, Platform API (Blueprints, device groups), Jamf School
 - `Intune/`: Entra ID / Microsoft Graph auth and Intune device endpoints
 - `ABM/`: Apple Business / School Manager API

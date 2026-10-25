@@ -6,7 +6,10 @@ import SwiftUI
 public nonisolated struct AboutConfiguration: Sendable {
     /// The app's display name, e.g. `"AppSettings2Blueprint"`.
     public var appName: String
-    /// A line under the version, e.g. `"Created by Jordy Thery"`.
+    /// The copyright line under the version. JTKit writes it; the app's
+    /// `NSHumanReadableCopyright` is not used.
+    public var copyright: AboutCopyright?
+    /// A line under the copyright, e.g. `"Created by Jordy Thery"`.
     public var author: String?
     /// One or two sentences on what the app does.
     public var summary: String?
@@ -19,6 +22,7 @@ public nonisolated struct AboutConfiguration: Sendable {
 
     public init(
         appName: String,
+        copyright: AboutCopyright? = nil,
         author: String? = nil,
         summary: String? = nil,
         links: [AboutLink] = [],
@@ -26,6 +30,7 @@ public nonisolated struct AboutConfiguration: Sendable {
         disclaimer: String? = nil
     ) {
         self.appName = appName
+        self.copyright = copyright
         self.author = author
         self.summary = summary
         self.links = links
@@ -35,6 +40,28 @@ public nonisolated struct AboutConfiguration: Sendable {
 
     /// "About AppSettings2Blueprint": the window title and the app menu item.
     public var windowTitle: String { "About \(appName)" }
+}
+
+/// Who holds the app's copyright and the licence it is released under. The
+/// About window shows it as "© 2026 Jordy Thery. Released under the MIT License."
+public nonisolated struct AboutCopyright: Sendable, Hashable {
+    /// The year, or a range such as `"2024–2026"`.
+    public var year: String
+    /// e.g. `"Jordy Thery"`.
+    public var holder: String
+    /// The licence's name as it is usually written, e.g. `"MIT License"`.
+    public var licence: String
+
+    public init(year: String, holder: String, licence: String = "MIT License") {
+        self.year = year
+        self.holder = holder
+        self.licence = licence
+    }
+
+    /// "© 2026 Jordy Thery. Released under the MIT License."
+    public var text: String {
+        "© \(year) \(holder). Released under the \(licence)."
+    }
 }
 
 /// A link with a visible title.
@@ -198,12 +225,6 @@ public struct AboutView: View {
         )
     }
 
-    /// The app's copyright line (`NSHumanReadableCopyright`), when it has one.
-    private var copyright: String? {
-        (Bundle.main.object(forInfoDictionaryKey: "NSHumanReadableCopyright") as? String)
-            .flatMap { $0.isEmpty ? nil : $0 }
-    }
-
     public var body: some View {
         if configuration.acknowledgements.isEmpty {
             content
@@ -230,8 +251,8 @@ public struct AboutView: View {
             Text(version)
                 .foregroundStyle(.secondary)
                 .textSelection(.enabled)
-            if let copyright {
-                Text(copyright)
+            if let copyright = configuration.copyright {
+                Text(copyright.text)
                     .font(.callout)
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
@@ -361,6 +382,7 @@ private struct LinkRow: View {
 #Preview("With acknowledgements") {
     AboutView(configuration: AboutConfiguration(
         appName: "Example",
+        copyright: AboutCopyright(year: "2026", holder: "Jordy Thery"),
         author: "Created by Jordy Thery",
         summary: "A short sentence on what the app does.",
         links: [AboutLink("github.com/JordyThery/Example", address: "https://github.com/JordyThery/Example")].compactMap { $0 },

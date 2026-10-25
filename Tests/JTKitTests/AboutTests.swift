@@ -16,6 +16,21 @@ struct AboutTests {
         #expect(AboutConfiguration(appName: "Checkpoint").windowTitle == "About Checkpoint")
     }
 
+    @Test func copyrightLineDefaultsToMIT() {
+        let copyright = AboutCopyright(year: "2026", holder: "Jordy Thery")
+        #expect(copyright.licence == "MIT License")
+        #expect(copyright.text == "© 2026 Jordy Thery. Released under the MIT License.")
+    }
+
+    @Test func copyrightLineUsesTheGivenYearAndLicence() {
+        let copyright = AboutCopyright(year: "2024–2026", holder: "Someone", licence: "Apache License 2.0")
+        #expect(copyright.text == "© 2024–2026 Someone. Released under the Apache License 2.0.")
+    }
+
+    @Test func noCopyrightLineUnlessTheAppPassesOne() {
+        #expect(AboutConfiguration(appName: "Checkpoint").copyright == nil)
+    }
+
     @Test func invalidLinkAddressIsDropped() {
         #expect(AboutLink("Broken", address: "") == nil)
         #expect(AboutLink("GitHub", address: "https://github.com/JordyThery")?.url.host() == "github.com")
@@ -59,5 +74,17 @@ struct UpdateSettingsTests {
 
     @Test func defaultKeyIsTheOneEveryAppUses() {
         #expect(UpdateConfiguration(owner: "o", repository: "r", appName: "A").automaticCheckKey == "checksForUpdates")
+    }
+}
+
+@Suite("Settings window")
+struct SettingsWindowTests {
+    @Test func everyAppUsesTheSameWidth() {
+        #expect(SettingsLayout.width == 520)
+    }
+
+    @Test func updatesTabIsNamedUpdates() {
+        #expect(SettingsLayout.updatesTitle == "Updates")
+        #expect(SettingsLayout.updatesSymbol == "arrow.down.circle")
     }
 }

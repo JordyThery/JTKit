@@ -9,6 +9,8 @@ Sources were chosen from the code (October 2026): prefer the copy with tests and
 Decided by Jordy on 2026-10-25. They apply to the eight macOS apps: AppSettings2Blueprint, Blueprint Managed Preferences Editor, Checkpoint, Intune Deployer, Jamf Deployer, JamfMigrator, Profile2Blueprint, Serial Number Reader. IntuneOnboard and Device Assist are out of JTKit entirely.
 
 - **About:** one JTKit About window in every app, opened only from the app menu ("About [App]"). Never a page inside the app, and not listed in the Window menu.
+- **Copyright:** JTKit's About window writes the copyright line itself, "© [year] [author]. Released under the [licence].", from what the app passes in (MIT by default). It does not read the app's `NSHumanReadableCopyright`.
+- **Settings:** one JTKit Settings window (⌘,) with tabs in the toolbar: the app's own tabs first, the Updates tab always last, the same width in every app. Connection settings go in a "Connections" tab.
 - **Acknowledgements:** the same JTKit view inside About, in every app with third-party code, with full licence texts.
 - **Updates:** "Check for Updates…" in the app menu. The daily-check switch in Settings, using JTKit's Updates section. About shows the version only.
 - **Connections:** every app that connects to Jamf, Intune or Apple Business/School Manager uses the same JTKit connections list and editor, with several services in one list. Built in step 4 with saved connections.
@@ -58,7 +60,7 @@ Rules that apply to every step: everything in CLAUDE.md, especially "preserve st
 - **Later (changes the look, so every app at once):** from the step 2 design review: show the failure icon next to failed statuses in the activity log, not only red text; make the yellow warning and green success icons stand out more on light backgrounds (for example the multicolour warning symbol); put the activity log's Clear in the menu bar as well as the toolbar; decide whether the update sheet uses the SheetFrame header like the other sheets.
 
 ### Step 3: App shell (0.4.0)
-- **Move:** About window, acknowledgements and the Updates settings section (see "Standards for every app"). No logging section: no app has one. The connections list is built in step 4.
+- **Move:** About window (with the copyright line), acknowledgements, the Settings window and its Updates tab (see "Standards for every app"). No logging section: no app has one. The connections list is built in step 4.
 - **Source:** AppSettings2Blueprint (About and acknowledgements have unit and UI tests); options from Jamf Deployer's About (disclaimer, credits list) and Profile2Blueprint's About.
 - **Also:** JTKit drops iOS and becomes macOS 14 only.
 - **First app:** AppSettings2Blueprint: its update controls move from About to Settings.
@@ -71,7 +73,8 @@ Rules that apply to every step: everything in CLAUDE.md, especially "preserve st
 - **Check by hand:** About opens only from the app menu and shows the right name, version, links and acknowledgements; it is not in the Window menu. The daily-check switch is in Settings and survives a relaunch; "Check for Updates…" in the app menu says "up to date".
 
 ### Step 4: Keychain and saved connections (0.5.0)
-- **Also builds** the shared connections list and editor for Settings: one list holding several services (Jamf Pro, Jamf Platform, Jamf School, Intune, Apple Business/School Manager), with add, delete, edit, test and "use this connection". It replaces each app's own connections screen; Profile2Blueprint's sidebar tenants move to it too. Start from AppSettings2Blueprint's and Blueprint Managed Preferences Editor's list (same shape); take services from Checkpoint (ABM/ASM and MDM lists) and Serial Number Reader.
+- **Also builds** the shared connections list and editor for Settings: one list holding several services (Jamf Pro, Jamf Platform, Jamf School, Intune, Apple Business/School Manager), with add, delete, edit, test and "use this connection". It replaces each app's own connections screen; Profile2Blueprint's sidebar tenants move to it too. Start from AppSettings2Blueprint's and Blueprint Managed Preferences Editor's list (same shape); take services from Checkpoint (ABM/ASM and MDM lists) and Serial Number Reader. It lives in the shared Settings window's "Connections" tab.
+- **Labels:** some apps show field labels such as "Environment ID" and "Network ID" in a code-style (monospaced) font, for example Serial Number Reader. The shared connections screen uses normal labels.
 - **Source:** JamfMigrator `SecretStore` (protocol with an in-memory fake for tests) and `Tenant`/`TenantStore` (tested). Fold in fields from Jamf Deployer's `Tenant` (Platform API, Protect) and Intune Deployer's `TenantStore`.
 - **Critical:** every app keeps its own Keychain service and account names and its saved-connections file/keys. Losing them logs users out.
 - **First app:** JamfMigrator. **Then:** Profile2Blueprint, AppSettings2Blueprint, Blueprint Managed Preferences Editor, Serial Number Reader, Checkpoint, Jamf Deployer, Intune Deployer.

@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.4.1 (2026-10-25)
+App shell consistency (ROADMAP step 3, from adopting it in Serial Number Reader).
+- `AppShell/`: `AboutCopyright`. The About window writes the copyright line
+  itself, "© 2026 Jordy Thery. Released under the MIT License.", from
+  `AboutConfiguration.copyright` (licence defaults to MIT). It no longer reads
+  `NSHumanReadableCopyright`; apps that don't pass `copyright` show no line.
+- `AppShell/`: `SettingsWindow`, `SettingsTabs` and `SettingsTab`, the shared
+  Settings window: tabs in the toolbar, the app's tabs first and Updates always
+  last, every tab `SettingsLayout.width` (520 points) wide.
+
 ## 0.4.0 (2026-10-25)
 App shell (ROADMAP step 3), from AppSettings2Blueprint. JTKit is now macOS 14 only.
 - `AppShell/`: `AboutWindow`, the shared About window. It opens only from the
