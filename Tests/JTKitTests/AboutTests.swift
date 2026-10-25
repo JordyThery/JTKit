@@ -80,7 +80,12 @@ struct UpdateSettingsTests {
 @Suite("Settings window")
 struct SettingsWindowTests {
     @Test func everyAppUsesTheSameWidth() {
-        #expect(SettingsLayout.width == 520)
+        #expect(SettingsLayout.width == 680)
+    }
+
+    @Test func generalTabIsNamedGeneral() {
+        #expect(SettingsLayout.generalTitle == "General")
+        #expect(SettingsLayout.generalSymbol == "gearshape")
     }
 
     @Test func updatesTabIsNamedUpdates() {

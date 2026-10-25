@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.4.2 (2026-10-25)
+App shell: General tab with Appearance, wider Settings (ROADMAP step 3, from adopting it in Checkpoint).
+- `AppShell/`: `AppAppearance` (System / Light / Dark). The Settings window
+  now always opens with a General tab whose first item is the Appearance
+  picker; apps pass their own general settings to `SettingsWindow(general:)`
+  and they appear below it. JTKit applies the choice to the whole app, at
+  launch and as it changes, and saves it under "appearance" (Checkpoint's
+  key). Apps that only pass `tabs` get a General tab with Appearance alone.
+- `AppShell/`: `SettingsLayout.width` is 680 points instead of 520, the width
+  AppSettings2Blueprint and Blueprint Managed Preferences Editor already use,
+  with room for a list beside an editor (Checkpoint's Apple and MDM tabs, and
+  the connections tab in step 4).
+
 ## 0.4.1 (2026-10-25)
 App shell consistency (ROADMAP step 3, from adopting it in Serial Number Reader).
 - `AppShell/`: `AboutCopyright`. The About window writes the copyright line

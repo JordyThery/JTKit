@@ -10,7 +10,8 @@ Decided by Jordy on 2026-10-25. They apply to the eight macOS apps: AppSettings2
 
 - **About:** one JTKit About window in every app, opened only from the app menu ("About [App]"). Never a page inside the app, and not listed in the Window menu.
 - **Copyright:** JTKit's About window writes the copyright line itself, "© [year] [author]. Released under the [licence].", from what the app passes in (MIT by default). It does not read the app's `NSHumanReadableCopyright`.
-- **Settings:** one JTKit Settings window (⌘,) with tabs in the toolbar: the app's own tabs first, the Updates tab always last, the same width in every app. Connection settings go in a "Connections" tab.
+- **Settings:** one JTKit Settings window (⌘,) with tabs in the toolbar: General always first, then the app's own tabs, the Updates tab always last, the same width in every app (680 points, room for a list beside an editor).
+- **Appearance:** JTKit's Appearance picker (System / Light / Dark) always starts the General tab; the app's own general settings go below it. JTKit applies the choice to the whole app (every window, About and Settings included) and saves it under "appearance". Apps keep no appearance setting of their own. Connection settings go in a "Connections" tab.
 - **Acknowledgements:** the same JTKit view inside About, in every app with third-party code, with full licence texts.
 - **Updates:** "Check for Updates…" in the app menu. The daily-check switch in Settings, using JTKit's Updates section. About shows the version only.
 - **Connections:** every app that connects to Jamf, Intune or Apple Business/School Manager uses the same JTKit connections list and editor, with several services in one list. Built in step 4 with saved connections.
@@ -60,7 +61,7 @@ Rules that apply to every step: everything in CLAUDE.md, especially "preserve st
 - **Later (changes the look, so every app at once):** from the step 2 design review: show the failure icon next to failed statuses in the activity log, not only red text; make the yellow warning and green success icons stand out more on light backgrounds (for example the multicolour warning symbol); put the activity log's Clear in the menu bar as well as the toolbar; decide whether the update sheet uses the SheetFrame header like the other sheets.
 
 ### Step 3: App shell (0.4.0)
-- **Move:** About window (with the copyright line), acknowledgements, the Settings window and its Updates tab (see "Standards for every app"). No logging section: no app has one. The connections list is built in step 4.
+- **Move:** About window (with the copyright line), acknowledgements, the Settings window with its General tab (Appearance) and its Updates tab (see "Standards for every app"). No logging section: no app has one. The connections list is built in step 4.
 - **Source:** AppSettings2Blueprint (About and acknowledgements have unit and UI tests); options from Jamf Deployer's About (disclaimer, credits list) and Profile2Blueprint's About.
 - **Also:** JTKit drops iOS and becomes macOS 14 only.
 - **First app:** AppSettings2Blueprint: its update controls move from About to Settings.
@@ -70,7 +71,7 @@ Rules that apply to every step: everything in CLAUDE.md, especially "preserve st
   - Intune Deployer: MSAL (MIT, Microsoft Corporation).
   - JamfMigrator: Replicator (MIT, Jamf Professional Services).
   - AppSettings2Blueprint: App Settings Utility (MIT, Anthony Darlow), already complete.
-- **Check by hand:** About opens only from the app menu and shows the right name, version, links and acknowledgements; it is not in the Window menu. The daily-check switch is in Settings and survives a relaunch; "Check for Updates…" in the app menu says "up to date".
+- **Check by hand:** About opens only from the app menu and shows the right name, version, links and acknowledgements; it is not in the Window menu. Settings opens on General with the Appearance picker first, and the chosen appearance applies to every window, About included, and survives a relaunch. The daily-check switch is in Settings and survives a relaunch; "Check for Updates…" in the app menu says "up to date".
 
 ### Step 4: Keychain and saved connections (0.5.0)
 - **Also builds** the shared connections list and editor for Settings: one list holding several services (Jamf Pro, Jamf Platform, Jamf School, Intune, Apple Business/School Manager), with add, delete, edit, test and "use this connection". It replaces each app's own connections screen; Profile2Blueprint's sidebar tenants move to it too. Start from AppSettings2Blueprint's and Blueprint Managed Preferences Editor's list (same shape); take services from Checkpoint (ABM/ASM and MDM lists) and Serial Number Reader. It lives in the shared Settings window's "Connections" tab.
