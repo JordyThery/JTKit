@@ -38,6 +38,16 @@ struct JSONFileTests {
         """)
     }
 
+    /// Apps compare a file on disk with `encode` before changing it, so
+    /// `encode` must give exactly the bytes `save` writes.
+    @Test func encodeGivesTheBytesSaveWrites() throws {
+        let url = temporaryURL()
+        defer { try? FileManager.default.removeItem(at: url.deletingLastPathComponent().deletingLastPathComponent()) }
+        let value = Sample(name: "tenant/with \"quotes\"", date: Date(timeIntervalSince1970: 1_700_000_000))
+        try JSONFile.save(value, to: url)
+        #expect(try JSONFile.encode(value) == Data(contentsOf: url))
+    }
+
     @Test func missingFileThrows() {
         #expect(throws: (any Error).self) {
             try JSONFile.load(Sample.self, from: temporaryURL())

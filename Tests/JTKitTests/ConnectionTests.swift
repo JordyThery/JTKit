@@ -501,6 +501,16 @@ struct ConnectionServiceChoicesTests {
         // a limit that leaves nothing falls back to the service's own methods
         #expect(ConnectionServiceChoices.signInMethods(for: .jamfSchool, limits: [.jamfSchool: [.apiClient]]) == [.schoolAPIKey])
     }
+
+    @Test func protectIsOfferedOnlyWhereTheAppAllowsIt() {
+        let everywhere: Set<ConnectionService> = [.jamfPlatform, .jamfPro]
+        #expect(ConnectionServiceChoices.offersProtect(for: .jamfPro, optionalFields: [.jamfProtect], protectServices: everywhere))
+        #expect(ConnectionServiceChoices.offersProtect(for: .jamfPlatform, optionalFields: [.jamfProtect], protectServices: [.jamfPlatform]))
+        // Jamf Deployer: Protect is part of Platform connections only
+        #expect(!ConnectionServiceChoices.offersProtect(for: .jamfPro, optionalFields: [.jamfProtect], protectServices: [.jamfPlatform]))
+        #expect(!ConnectionServiceChoices.offersProtect(for: .jamfPro, optionalFields: [], protectServices: everywhere))
+        #expect(!ConnectionServiceChoices.offersProtect(for: .intune, optionalFields: [.jamfProtect], protectServices: [.intune]))
+    }
 }
 
 @Suite("Apple private key import")

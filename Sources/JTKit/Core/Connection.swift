@@ -133,6 +133,17 @@ public nonisolated enum ConnectionOptionalField: Hashable, Sendable {
     case jamfProtect
 }
 
+/// Shared fields an app can show read-only in the editor, e.g. what was fixed
+/// when the connection was made. A read-only field shows its value as text.
+public nonisolated enum ConnectionField: Hashable, Sendable {
+    case signIn
+    case region
+    case serverURL
+    case environmentID
+    case clientID
+    case username
+}
+
 /// One saved connection: what the shared connections list and editor show and
 /// change. Secrets are never part of it; they live in a `SecretStore`.
 ///

@@ -156,7 +156,9 @@ public final class ConnectionStore<Record: ConnectionRecord> {
         }
         do {
             try storage.save(updated)
-            records = updated
+            // what the storage holds now; an adapter may keep more than the
+            // records it was given, e.g. what it last wrote
+            records = (try? storage.load()) ?? updated
         } catch {
             log?("[Connections] could not save: \(error)")
             throw ConnectionStoreError.couldNotSave(error.localizedDescription)

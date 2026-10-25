@@ -10,12 +10,18 @@ public nonisolated enum JSONFile {
         return try decoder.decode(type, from: data)
     }
 
-    /// Writes atomically, creating intermediate directories as needed.
-    public static func save<T: Encodable>(_ value: T, to url: URL) throws {
+    /// The exact bytes `save` writes, e.g. to check that a file on disk is
+    /// still in this format before changing it.
+    public static func encode<T: Encodable>(_ value: T) throws -> Data {
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
         encoder.dateEncodingStrategy = .iso8601
-        let data = try encoder.encode(value)
+        return try encoder.encode(value)
+    }
+
+    /// Writes atomically, creating intermediate directories as needed.
+    public static func save<T: Encodable>(_ value: T, to url: URL) throws {
+        let data = try encode(value)
         try FileManager.default.createDirectory(
             at: url.deletingLastPathComponent(),
             withIntermediateDirectories: true

@@ -1,5 +1,25 @@
 # Changelog
 
+## 0.5.4 (2026-10-25)
+From adopting ROADMAP step 4 in Jamf Deployer. Additions only; apps that
+don't use them work as before.
+- `AppShell/`: `ConnectionsSettingsTab(readOnlyFields:)` shows chosen shared
+  fields of a connection as text, e.g. what was fixed when it was made
+  (`ConnectionField`: sign-in method, region, server URL, Environment ID,
+  client ID, username).
+- `AppShell/`: `protectServices:` limits the Jamf Protect add-on to some
+  services, e.g. Jamf Platform API connections only.
+- `AppShell/`: `delete:` replaces what deleting does, for an app that removes
+  more than the record and its secrets (it may take a while and fail with a
+  message); `deleteMessage:` gives the confirmation its text. The list is
+  read again afterwards.
+- `Core/`: after a save, `ConnectionStore` reads the list back from its
+  storage, and the editor continues from what was saved. For the built-in
+  JSON file and UserDefaults storage nothing changes; an adapter that keeps
+  more than the records (Jamf Deployer's) can rely on it.
+- `Core/`: `JSONFile.encode` gives the exact bytes `JSONFile.save` writes, to
+  check that a file on disk is still in that format before changing it.
+
 ## 0.5.3 (2026-10-25)
 From adopting ROADMAP step 4 in Checkpoint. Additions only; apps that don't
 use them work as before.

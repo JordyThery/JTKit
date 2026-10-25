@@ -125,6 +125,14 @@ public final class AllConnectionsChoice {
 /// Which services the editor offers for a connection, and which sign-in
 /// methods for a service.
 nonisolated enum ConnectionServiceChoices {
+    /// Whether the editor shows the Jamf Protect add-on for a service.
+    static func offersProtect(for service: ConnectionService, optionalFields: Set<ConnectionOptionalField>,
+                              protectServices: Set<ConnectionService>) -> Bool {
+        optionalFields.contains(.jamfProtect)
+            && (service == .jamfPlatform || service == .jamfPro)
+            && protectServices.contains(service)
+    }
+
     /// The services a saved connection can switch to: its own group when the
     /// app groups them, else every service the app supports.
     static func services(for service: ConnectionService, offered: [ConnectionService],
@@ -196,8 +204,12 @@ public struct ConnectionsSettingsTab<Record: ConnectionRecord, AppSection: View>
     let roles: [ConnectionRole]
     let height: CGFloat
     let footer: String?
+    let readOnlyFields: (Record) -> Set<ConnectionField>
+    let protectServices: Set<ConnectionService>
     let newRecord: (ConnectionService) -> Record
     let add: (() -> Void)?
+    let delete: ((Record) async throws -> Void)?
+    let deleteMessage: String?
     let didDelete: (Record) -> Void
     let test: ConnectionTest<Record>?
     let appSection: (Binding<Record>) -> AppSection
@@ -206,6 +218,7 @@ public struct ConnectionsSettingsTab<Record: ConnectionRecord, AppSection: View>
     @State private var editorHasChanges = false
     @State private var pendingSelection: UUID??
     @State private var pendingDeletion: Record?
+    @State private var isDeleting = false
     @State private var listError: String?
 
     /// - Parameters:
@@ -221,8 +234,17 @@ public struct ConnectionsSettingsTab<Record: ConnectionRecord, AppSection: View>
     ///   - roles: the ways the app uses a connection, each with a button in the editor.
     ///   - height: the tab's height; the width is `SettingsLayout.width`.
     ///   - footer: a note below the editor, e.g. the API permissions needed.
+    ///   - readOnlyFields: shared fields shown as text for a record, e.g. what
+    ///     was fixed when the connection was made.
+    ///   - protectServices: the services that offer the Jamf Protect add-on
+    ///     when `optionalFields` contains `.jamfProtect`.
     ///   - newRecord: a new, unsaved record for the service chosen with +.
     ///   - add: replaces what + does, e.g. to open the app's own setup wizard.
+    ///   - delete: replaces what deleting does, e.g. when more than the record
+    ///     and its secrets goes; the list is read again afterwards. A thrown
+    ///     error is shown below the list.
+    ///   - deleteMessage: the delete confirmation's text, when the app's
+    ///     `delete` does more than remove the connection and its secrets.
     ///   - didDelete: called after a connection and its secrets were deleted,
     ///     e.g. to clear choices the app stored for it.
     ///   - test: tests the editor's values; without it there is no Test Connection button.
@@ -237,8 +259,12 @@ public struct ConnectionsSettingsTab<Record: ConnectionRecord, AppSection: View>
         roles: [ConnectionRole] = [],
         height: CGFloat = 480,
         footer: String? = nil,
+        readOnlyFields: @escaping (Record) -> Set<ConnectionField> = { _ in [] },
+        protectServices: Set<ConnectionService> = [.jamfPlatform, .jamfPro],
         newRecord: @escaping (ConnectionService) -> Record,
         add: (() -> Void)? = nil,
+        delete: ((Record) async throws -> Void)? = nil,
+        deleteMessage: String? = nil,
         didDelete: @escaping (Record) -> Void = { _ in },
         test: ConnectionTest<Record>? = nil,
         @ViewBuilder appSection: @escaping (Binding<Record>) -> AppSection
@@ -252,8 +278,12 @@ public struct ConnectionsSettingsTab<Record: ConnectionRecord, AppSection: View>
         self.roles = roles
         self.height = height
         self.footer = footer
+        self.readOnlyFields = readOnlyFields
+        self.protectServices = protectServices
         self.newRecord = newRecord
         self.add = add
+        self.delete = delete
+        self.deleteMessage = deleteMessage
         self.didDelete = didDelete
         self.test = test
         self.appSection = appSection
@@ -306,7 +336,7 @@ public struct ConnectionsSettingsTab<Record: ConnectionRecord, AppSection: View>
             Button("Delete", role: .destructive) { deletePending() }
             Button("Cancel", role: .cancel) { pendingDeletion = nil }
         } message: {
-            Text("The connection and its Keychain secrets are removed.")
+            Text(deleteMessage ?? "The connection and its Keychain secrets are removed.")
         }
         .tabItem { Label("Connections", systemImage: "network") }
         .settingsTabName(SettingsTabName.connections)
@@ -327,6 +357,19 @@ public struct ConnectionsSettingsTab<Record: ConnectionRecord, AppSection: View>
             .onDeleteCommand {
                 if store.problem == nil { pendingDeletion = editingID.flatMap(store.record(id:)) }
             }
+            if isDeleting {
+                HStack(spacing: 6) {
+                    ProgressView()
+                        .controlSize(.small)
+                    Text("Removing…")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                .padding(.horizontal, 8)
+                .padding(.vertical, 4)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .accessibilityElement(children: .combine)
+            }
             if let listError {
                 Text(listError)
                     .font(.caption)
@@ -346,7 +389,7 @@ public struct ConnectionsSettingsTab<Record: ConnectionRecord, AppSection: View>
                 }
                 .help("Delete connection and its Keychain secrets")
                 .accessibilityLabel("Delete Connection")
-                .disabled(editingID == nil || store.problem != nil)
+                .disabled(editingID == nil || store.problem != nil || isDeleting)
                 Spacer()
             }
             .buttonStyle(.borderless)
@@ -427,18 +470,36 @@ public struct ConnectionsSettingsTab<Record: ConnectionRecord, AppSection: View>
     private func deletePending() {
         guard let record = pendingDeletion else { return }
         pendingDeletion = nil
-        do {
-            try store.delete(id: record.id)
-            listError = nil
-            for role in roles where role.selection.wrappedValue == record.id {
-                role.selection.wrappedValue = nil
+        guard let delete else {
+            do {
+                try store.delete(id: record.id)
+                finishDeleting(record)
+            } catch {
+                listError = error.localizedDescription
             }
-            didDelete(record)
-            editorHasChanges = false
-            editingID = store.records.first?.id
-        } catch {
-            listError = error.localizedDescription
+            return
         }
+        isDeleting = true
+        Task {
+            defer { isDeleting = false }
+            do {
+                try await delete(record)
+                store.reload()
+                finishDeleting(record)
+            } catch {
+                listError = error.localizedDescription
+            }
+        }
+    }
+
+    private func finishDeleting(_ record: Record) {
+        listError = nil
+        for role in roles where role.selection.wrappedValue == record.id {
+            role.selection.wrappedValue = nil
+        }
+        didDelete(record)
+        editorHasChanges = false
+        editingID = store.records.first?.id
     }
 
     // MARK: Editor
@@ -453,6 +514,8 @@ public struct ConnectionsSettingsTab<Record: ConnectionRecord, AppSection: View>
                                 groups: serviceGroups, allowsChanging: allowsChangingService),
                              signInMethods: signInMethods,
                              optionalFields: optionalFields,
+                             readOnlyFields: readOnlyFields(record),
+                             protectServices: protectServices,
                              roles: roles,
                              footer: footer,
                              test: test,
@@ -481,15 +544,21 @@ extension ConnectionsSettingsTab where AppSection == EmptyView {
         roles: [ConnectionRole] = [],
         height: CGFloat = 480,
         footer: String? = nil,
+        readOnlyFields: @escaping (Record) -> Set<ConnectionField> = { _ in [] },
+        protectServices: Set<ConnectionService> = [.jamfPlatform, .jamfPro],
         newRecord: @escaping (ConnectionService) -> Record,
         add: (() -> Void)? = nil,
+        delete: ((Record) async throws -> Void)? = nil,
+        deleteMessage: String? = nil,
         didDelete: @escaping (Record) -> Void = { _ in },
         test: ConnectionTest<Record>? = nil
     ) {
         self.init(store: store, services: services, optionalFields: optionalFields,
                   allowsChangingService: allowsChangingService, serviceGroups: serviceGroups,
                   signInMethods: signInMethods, roles: roles, height: height,
-                  footer: footer, newRecord: newRecord, add: add, didDelete: didDelete, test: test) { _ in
+                  footer: footer, readOnlyFields: readOnlyFields, protectServices: protectServices,
+                  newRecord: newRecord, add: add, delete: delete, deleteMessage: deleteMessage,
+                  didDelete: didDelete, test: test) { _ in
             EmptyView()
         }
     }
@@ -549,6 +618,8 @@ private struct ConnectionEditor<Record: ConnectionRecord, AppSection: View>: Vie
     let services: [ConnectionService]
     let signInLimits: [ConnectionService: [SignInMethod]]
     let optionalFields: Set<ConnectionOptionalField>
+    let readOnlyFields: Set<ConnectionField>
+    let protectServices: Set<ConnectionService>
     let roles: [ConnectionRole]
     let footer: String?
     let test: ConnectionTest<Record>?
@@ -568,13 +639,17 @@ private struct ConnectionEditor<Record: ConnectionRecord, AppSection: View>: Vie
     @State private var keyImportError: String?
 
     init(store: ConnectionStore<Record>, saved: Record, services: [ConnectionService],
-         signInMethods: [ConnectionService: [SignInMethod]], optionalFields: Set<ConnectionOptionalField>, roles: [ConnectionRole], footer: String?,
+         signInMethods: [ConnectionService: [SignInMethod]], optionalFields: Set<ConnectionOptionalField>,
+         readOnlyFields: Set<ConnectionField>, protectServices: Set<ConnectionService>,
+         roles: [ConnectionRole], footer: String?,
          test: ConnectionTest<Record>?, hasChanges: Binding<Bool>,
          appSection: @escaping (Binding<Record>) -> AppSection) {
         self.store = store
         self.services = services
         self.signInLimits = signInMethods
         self.optionalFields = optionalFields
+        self.readOnlyFields = readOnlyFields
+        self.protectServices = protectServices
         self.roles = roles
         self.footer = footer
         self.test = test
@@ -598,7 +673,9 @@ private struct ConnectionEditor<Record: ConnectionRecord, AppSection: View>: Vie
                         }
                     }
                 }
-                if signInMethods(for: current.service).count > 1 {
+                if readOnlyFields.contains(.signIn) {
+                    readOnlyRow("Sign in with", current.signIn.displayName)
+                } else if signInMethods(for: current.service).count > 1 {
                     Picker("Sign in with", selection: connection.signIn) {
                         ForEach(signInMethods(for: current.service)) { method in
                             Text(method.displayName).tag(method)
@@ -609,8 +686,8 @@ private struct ConnectionEditor<Record: ConnectionRecord, AppSection: View>: Vie
 
             serviceFields
 
-            if optionalFields.contains(.jamfProtect),
-               current.service == .jamfPlatform || current.service == .jamfPro {
+            if ConnectionServiceChoices.offersProtect(for: current.service, optionalFields: optionalFields,
+                                                      protectServices: protectServices) {
                 protectSection
             }
 
@@ -668,33 +745,37 @@ private struct ConnectionEditor<Record: ConnectionRecord, AppSection: View>: Vie
         Section {
             switch current.service {
             case .jamfPlatform:
-                Picker("Region", selection: connection.region) {
-                    ForEach(JamfRegion.allCases) { region in
-                        Text(region.displayName).tag(region)
+                if readOnlyFields.contains(.region) {
+                    readOnlyRow("Region", current.region.displayName)
+                } else {
+                    Picker("Region", selection: connection.region) {
+                        ForEach(JamfRegion.allCases) { region in
+                            Text(region.displayName).tag(region)
+                        }
                     }
                 }
                 if optionalFields.contains(.hostOverride) {
                     TextField("Host override", text: connection.hostOverride, prompt: Text("Leave empty for the region’s gateway"))
                 }
-                TextField("Environment ID", text: connection.environmentID, prompt: Text("From Jamf Account"))
-                TextField("Client ID", text: connection.clientID)
+                textField(.environmentID, "Environment ID", text: connection.environmentID, prompt: "From Jamf Account")
+                textField(.clientID, "Client ID", text: connection.clientID)
                 secretField(.main)
                 if optionalFields.contains(.jamfProWebURL) {
                     TextField("Jamf Pro web address", text: connection.jamfProWebURL, prompt: Text("https://yourorg.jamfcloud.com (optional)"))
                         .textContentType(.URL)
                 }
             case .jamfPro:
-                TextField("Server URL", text: connection.serverURL, prompt: Text("https://yourorg.jamfcloud.com"))
+                textField(.serverURL, "Server URL", text: connection.serverURL, prompt: "https://yourorg.jamfcloud.com")
                     .textContentType(.URL)
                 if current.signIn == .usernamePassword {
-                    TextField("Username", text: connection.username)
+                    textField(.username, "Username", text: connection.username)
                         .textContentType(.username)
                 } else {
-                    TextField("Client ID", text: connection.clientID)
+                    textField(.clientID, "Client ID", text: connection.clientID)
                 }
                 secretField(.main)
             case .jamfSchool:
-                TextField("Server URL", text: connection.serverURL, prompt: Text("https://yourschool.jamfcloud.com"))
+                textField(.serverURL, "Server URL", text: connection.serverURL, prompt: "https://yourschool.jamfcloud.com")
                     .textContentType(.URL)
                 TextField("Network ID", text: connection.clientID)
                 secretField(.main)
@@ -736,6 +817,26 @@ private struct ConnectionEditor<Record: ConnectionRecord, AppSection: View>: Vie
             }
         } footer: {
             issuesFooter(current.issues.filter { $0.contains("Jamf Protect") })
+        }
+    }
+
+    /// A text field, or its value as text when the app made it read-only.
+    @ViewBuilder
+    private func textField(_ field: ConnectionField, _ title: String, text: Binding<String>,
+                           prompt: String? = nil) -> some View {
+        if readOnlyFields.contains(field) {
+            readOnlyRow(title, text.wrappedValue)
+        } else {
+            TextField(title, text: text, prompt: prompt.map { Text($0) })
+        }
+    }
+
+    private func readOnlyRow(_ title: String, _ value: String) -> some View {
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        return LabeledContent(title) {
+            Text(trimmed.isEmpty ? "None" : trimmed)
+                .foregroundStyle(.secondary)
+                .textSelection(.enabled)
         }
     }
 
@@ -918,7 +1019,9 @@ private struct ConnectionEditor<Record: ConnectionRecord, AppSection: View>: Vie
     private func save() -> Bool {
         do {
             try store.save(draft, secrets: changedSecrets)
-            saved = draft
+            // continue from what was saved, as the storage reads it back
+            saved = store.record(id: draft.id) ?? draft
+            draft = saved
             hasStoredSecret.formUnion(changedSecrets.keys)
             secrets = [:]
             importedKeyName = nil
