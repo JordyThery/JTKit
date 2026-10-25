@@ -38,11 +38,12 @@ Rules that apply to every step: everything in CLAUDE.md, especially "preserve st
 ### Step 2: Fold in DeployerKit (0.3.0)
 `Jamf Deployer/DeployerKit` is an earlier shared package (tested, macOS 15, Swift 6.2 with main-actor default isolation). Intune Deployer was meant to use it but doesn't.
 - **Move:** ActivityLog + ActivityLogView, GuidedTour, DesignSystem components (StatusBadge etc.), TextExportDocument, JSONFile.
-- **Decision first:** in the dry run, list what needs macOS 15 or Swift 6.2. Jordy decides between raising JTKit to macOS 15 (Profile2Blueprint and Serial Number Reader are at 14) or keeping 14 with availability checks.
+- **Decision (2026-10-25):** JTKit stays at macOS 14 (and iOS 17): nothing in the moved code needs macOS 15 or Swift 6.2. It moves up only when all apps move together. JTKit keeps Swift tools 6.0 and marks UI state `@MainActor` explicitly instead of DeployerKit's main-actor default.
 - **First app:** Jamf Deployer (switch its DeployerKit imports to JTKit; DeployerKit keeps only what is Jamf Deployer-specific, or goes away).
 - **Then:** Intune Deployer (GuidedTour, ActivityLog), JamfMigrator (GuidedTour), then the other apps' activity logs (Checkpoint, Profile2Blueprint).
 - **Design:** run the apple-design review on the moved components; they become the shared look of all apps.
 - **Check by hand:** guided tour runs start to finish; activity log fills, exports and clears.
+- **Later (changes the look, so every app at once):** from the step 2 design review: show the failure icon next to failed statuses in the activity log, not only red text; make the yellow warning and green success icons stand out more on light backgrounds (for example the multicolour warning symbol); put the activity log's Clear in the menu bar as well as the toolbar; decide whether the update sheet uses the SheetFrame header like the other sheets.
 
 ### Step 3: App shell (0.4.0)
 - **Move:** About window and acknowledgements, reusable Settings sections (updates, logging, connections list).

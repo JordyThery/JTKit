@@ -128,19 +128,34 @@ public final class UpdateChecker {
             }
             let decoded = try JSONDecoder().decode(Response.self, from: data)
             let version = decoded.tag_name.hasPrefix("v") ? String(decoded.tag_name.dropFirst()) : decoded.tag_name
+            let downloadURL = decoded.assets?.first { $0.name.hasSuffix(".zip") }
+                .flatMap { URL(string: $0.browser_download_url) }
+            let pageURL = decoded.html_url.flatMap(URL.init(string:))
+            // Only offer downloads and pages on GitHub over HTTPS.
+            guard [downloadURL, pageURL].allSatisfy({ $0.map(Self.isTrustedHost) ?? true }) else {
+                throw UpdateError(message: "The release points at an unexpected download location, so it was not offered.")
+            }
             activity?("Update check: latest release \(version), installed \(currentVersion).")
             return Release(
                 version: version,
                 name: decoded.name ?? "\(configuration.appName) \(version)",
                 notes: decoded.body ?? "",
-                downloadURL: decoded.assets?.first { $0.name.hasSuffix(".zip") }
-                    .flatMap { URL(string: $0.browser_download_url) },
-                pageURL: decoded.html_url.flatMap(URL.init(string:))
+                downloadURL: downloadURL,
+                pageURL: pageURL
             )
         } catch {
             activity?("Update check failed: \(error.localizedDescription)")
             throw error
         }
+    }
+
+    /// Whether a release URL is on GitHub over HTTPS (github.com, its
+    /// subdomains, or GitHub's download host githubusercontent.com).
+    nonisolated static func isTrustedHost(_ url: URL) -> Bool {
+        guard url.scheme == "https", let host = url.host() else { return false }
+        return host == "github.com"
+            || host.hasSuffix(".github.com")
+            || host.hasSuffix(".githubusercontent.com")
     }
 
     /// Numeric component comparison, so 1.10 is newer than 1.9 and a missing

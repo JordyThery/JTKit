@@ -21,6 +21,29 @@ struct UpdateVersionTests {
     }
 }
 
+@Suite("Update download location")
+struct UpdateTrustedHostTests {
+    @Test(arguments: [
+        "https://github.com/x/y/releases/download/v1/a.zip",
+        "https://api.github.com/repos/x/y",
+        "https://objects.githubusercontent.com/a.zip",
+    ])
+    func acceptsGitHubOverHTTPS(_ address: String) throws {
+        #expect(UpdateChecker.isTrustedHost(try #require(URL(string: address))))
+    }
+
+    @Test(arguments: [
+        "https://example.com/a.zip",
+        "http://github.com/a.zip",
+        "https://github.com.evil.example/a.zip",
+        "https://evilgithub.com/a.zip",
+        "file:///tmp/a.zip",
+    ])
+    func rejectsOtherHostsAndSchemes(_ address: String) throws {
+        #expect(!UpdateChecker.isTrustedHost(try #require(URL(string: address))))
+    }
+}
+
 /// The checker against a mocked GitHub. The mock handler is global, so this
 /// suite runs serialized.
 @Suite("Update checker", .serialized)
@@ -132,6 +155,48 @@ struct UpdateCheckerTests {
         await checker.checkAutomatically()
         #expect(checker.status == .idle)
         #expect(!checker.isPresented)
+    }
+
+    /// A release whose zip or page lives outside GitHub.
+    private nonisolated static func releaseJSON(downloadURL: String, pageURL: String) -> String {
+        #"""
+        {
+          "tag_name": "v2.5",
+          "html_url": "\#(pageURL)",
+          "assets": [{"name": "TestApp-2.5.zip", "browser_download_url": "\#(downloadURL)"}]
+        }
+        """#
+    }
+
+    @Test(arguments: [
+        ("https://example.com/TestApp-2.5.zip", "https://github.com/JordyThery/TestApp/releases/tag/v2.5"),
+        ("https://github.com/dl/TestApp-2.5.zip", "https://example.com/releases/v2.5"),
+        ("http://github.com/dl/TestApp-2.5.zip", "https://github.com/JordyThery/TestApp/releases/tag/v2.5"),
+    ])
+    func manualCheckRefusesReleasesOutsideGitHub(downloadURL: String, pageURL: String) async throws {
+        let json = Self.releaseJSON(downloadURL: downloadURL, pageURL: pageURL)
+        MockURLProtocol.install { _ in .json(200, json) }
+        let checker = makeChecker(defaults: try makeDefaults())
+        checker.checkManually()
+        try await waitUntil { checker.status != .checking }
+        guard case let .failed(message) = checker.status else {
+            Issue.record("Expected .failed, got \(checker.status)"); return
+        }
+        #expect(message.contains("unexpected download location"))
+    }
+
+    @Test func automaticCheckSilentlySkipsReleasesOutsideGitHub() async throws {
+        let json = Self.releaseJSON(
+            downloadURL: "https://example.com/TestApp-2.5.zip",
+            pageURL: "https://github.com/JordyThery/TestApp/releases/tag/v2.5"
+        )
+        MockURLProtocol.install { _ in .json(200, json) }
+        let defaults = try makeDefaults()
+        let checker = makeChecker(defaults: defaults)
+        await checker.checkAutomatically()
+        #expect(checker.status == .idle)
+        #expect(!checker.isPresented)
+        #expect(defaults.string(forKey: "lastOfferedUpdate") == nil, "A refused release is not marked as offered")
     }
 
     @Test func automaticCheckHonoursTheToggleAndTheDailyInterval() async throws {
