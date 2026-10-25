@@ -9,11 +9,12 @@ let package = Package(
     products: [
         .library(name: "JTKit", targets: ["JTKit"]),
         // Test helpers for app test targets; never a dependency of JTKit itself.
+        // Builds on JTKit (InMemorySecretStore is a JTKit SecretStore).
         .library(name: "JTKitTestSupport", targets: ["JTKitTestSupport"]),
     ],
     targets: [
         .target(name: "JTKit"),
-        .target(name: "JTKitTestSupport"),
+        .target(name: "JTKitTestSupport", dependencies: ["JTKit"]),
         .testTarget(name: "JTKitTests", dependencies: ["JTKit", "JTKitTestSupport"]),
     ]
 )

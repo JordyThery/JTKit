@@ -1,5 +1,28 @@
 # Changelog
 
+## 0.5.0 (2026-10-25)
+Keychain and saved connections (ROADMAP step 4, first adopted in JamfMigrator).
+- `Core/`: `SecretStore` and `KeychainSecretStore` (from JamfMigrator):
+  login-keychain items under the app's own service name, with its
+  accessibility and label, and the optional move from the data-protection
+  keychain JamfMigrator needs.
+- `Core/`: `Connection`, one record for every service (Jamf Platform API,
+  Jamf Pro, Jamf School, Intune, Apple Business/School Manager) with sign-in
+  methods and an optional Jamf Protect add-on. Apps keep their own record type
+  and file format through `ConnectionRecord`.
+- `Core/`: `ConnectionStore` with `JSONFileConnectionStorage` and
+  `UserDefaultsConnectionStorage`, reading and writing each app's list where
+  it already is. Safety rule: an unreadable list is copied aside, reported,
+  and never saved over. The first save makes a one-time backup next to the
+  original (`<file>.backup`, `<key>.backup`).
+- `AppShell/`: `ConnectionsSettingsTab`, the shared Connections tab: a list
+  of several services beside an editor with Save and Revert, Test Connection,
+  "Use This Connection" or "Use as …" roles, a delete confirmation and an
+  unsaved-changes confirmation. Secret fields start empty (stored secrets are
+  never shown); the Delete key deletes the selected connection.
+- `JTKitTestSupport`: `InMemorySecretStore`. JTKitTestSupport now depends on
+  JTKit.
+
 ## 0.4.4 (2026-10-25)
 - `AppShell/`: `Acknowledgement(licenceName:)` sets the label under which
   a licence folds out in About. Use it for texts that open with a copyright
