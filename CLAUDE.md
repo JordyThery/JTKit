@@ -49,6 +49,8 @@ Decided by Jordy on 2026-10-25: build, unit tests and Jordy's check by hand are 
 
 Bump `JTKit.version`, add a CHANGELOG entry, commit, tag `x.y.z` (a breaking API change means a new major version) and push with tags. Before releasing an app, update its JTKit package version so the committed app matches what was built.
 
+**Before tagging any JTKit version, build every app that uses it** in `Apps.xcworkspace`, against the local JTKit: AppSettings2Blueprint, Blueprint Managed Preferences Editor, Checkpoint, Intune Deployer, Jamf Deployer, JamfMigrator, Profile2Blueprint, Serial Number Reader. Report any that fail and don't tag until they all build. JTKit's own tests can't catch a change that breaks how an app calls it (0.4.2 broke Serial Number Reader's Settings preview).
+
 ## Inventory of duplicated code (October 2026)
 
 Paths are relative to `~/Developer`. Line counts show how far copies have drifted.

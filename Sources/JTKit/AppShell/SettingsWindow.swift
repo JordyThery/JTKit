@@ -113,6 +113,14 @@ public struct SettingsTabs<General: View, AppTabs: View>: View {
     }
 }
 
+extension SettingsTabs where General == EmptyView {
+    /// Settings content whose General tab has only Appearance, e.g. for a preview:
+    /// `SettingsTabs { SettingsTab("Connections", systemImage: "network") { … } }`.
+    public init(appearanceKey: String = AppAppearance.defaultKey, @ViewBuilder tabs: () -> AppTabs) {
+        self.init(appearanceKey: appearanceKey, general: { EmptyView() }, tabs: tabs)
+    }
+}
+
 /// One tab of the Settings window: the app's sections in a grouped form, at the
 /// shared width, as tall as its content.
 public struct SettingsTab<Content: View>: View {

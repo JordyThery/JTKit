@@ -1,4 +1,6 @@
+import AppKit
 import Foundation
+import SwiftUI
 import Testing
 @testable import JTKit
 
@@ -86,6 +88,40 @@ struct SettingsWindowTests {
     @Test func generalTabIsNamedGeneral() {
         #expect(SettingsLayout.generalTitle == "General")
         #expect(SettingsLayout.generalSymbol == "gearshape")
+    }
+
+    /// Serial Number Reader's Settings preview passes only tabs, with one
+    /// trailing closure; 0.4.2 stopped accepting that and broke its build.
+    @MainActor @Test func contentAcceptsOnlyTabs() {
+        let tabs = SettingsTabs {
+            SettingsTab("Connections", systemImage: "network") {
+                Section("Server") {
+                    TextField("Server URL", text: .constant(""))
+                }
+            }
+        }
+        #expect(generalIsEmpty(tabs))
+    }
+
+    /// The same for the window, as Serial Number Reader's app uses it, and with
+    /// no tabs at all.
+    @MainActor @Test func windowAcceptsOnlyTabsOrNothing() {
+        let original = NSApplication.shared.appearance
+        defer { NSApplication.shared.appearance = original }
+        let updates = UpdateChecker(configuration: UpdateConfiguration(owner: "o", repository: "r", appName: "A"))
+
+        let withTabs = SettingsWindow(updates: updates) {
+            SettingsTab("Connections", systemImage: "network") {
+                Section { Text("Server") }
+            }
+        }
+        #expect(withTabs.appearanceKey == AppAppearance.defaultKey)
+        let updatesOnly = SettingsWindow(updates: updates)
+        #expect(updatesOnly.appearanceKey == AppAppearance.defaultKey)
+    }
+
+    private func generalIsEmpty<General, AppTabs>(_ tabs: SettingsTabs<General, AppTabs>) -> Bool {
+        General.self == EmptyView.self
     }
 
     @Test func updatesTabIsNamedUpdates() {

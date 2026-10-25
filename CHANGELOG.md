@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.4.3 (2026-10-25)
+- `AppShell/`: `SettingsTabs { … }` with only tabs works again, as in 0.4.1
+  (the General tab then has Appearance alone). 0.4.2 dropped that form and
+  broke Serial Number Reader's Settings preview.
+
 ## 0.4.2 (2026-10-25)
 App shell: General tab with Appearance, wider Settings (ROADMAP step 3, from adopting it in Checkpoint).
 - `AppShell/`: `AppAppearance` (System / Light / Dark). The Settings window
