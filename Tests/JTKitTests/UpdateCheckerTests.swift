@@ -10,6 +10,9 @@ struct UpdateVersionTests {
         #expect(!UpdateChecker.isNewer("1.0", than: "1.0.1"))
         #expect(!UpdateChecker.isNewer("1.2", than: "1.2"))
         #expect(UpdateChecker.isNewer("2", than: "1.9.9"))
+        #expect(!UpdateChecker.isNewer("1.9", than: "1.10"))
+        #expect(UpdateChecker.isNewer("1.1.1", than: "1.1"))
+        #expect(!UpdateChecker.isNewer("1.1.0", than: "1.1"))
     }
 
     @Test func suffixedTagsCompareByLeadingDigits() {
