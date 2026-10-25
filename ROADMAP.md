@@ -40,7 +40,8 @@ Rules that apply to every step: everything in CLAUDE.md, especially "preserve st
 - **Move:** ActivityLog + ActivityLogView, GuidedTour, DesignSystem components (StatusBadge etc.), TextExportDocument, JSONFile.
 - **Decision (2026-10-25):** JTKit stays at macOS 14 (and iOS 17): nothing in the moved code needs macOS 15 or Swift 6.2. It moves up only when all apps move together. JTKit keeps Swift tools 6.0 and marks UI state `@MainActor` explicitly instead of DeployerKit's main-actor default.
 - **First app:** Jamf Deployer (switch its DeployerKit imports to JTKit; DeployerKit keeps only what is Jamf Deployer-specific, or goes away).
-- **Then:** Intune Deployer (GuidedTour, ActivityLog), JamfMigrator (GuidedTour), then the other apps' activity logs (Checkpoint, Profile2Blueprint).
+- **Then:** Intune Deployer (GuidedTour, ActivityLog), JamfMigrator (GuidedTour).
+- **Not replaced:** Checkpoint's activity log (a bug-report log that masks device identifiers on export) and Profile2Blueprint's activity (a saved migration history) stay in their apps; JTKit's in-memory log is not a substitute.
 - **Design:** run the apple-design review on the moved components; they become the shared look of all apps.
 - **Check by hand:** guided tour runs start to finish; activity log fills, exports and clears.
 - **Later (changes the look, so every app at once):** from the step 2 design review: show the failure icon next to failed statuses in the activity log, not only red text; make the yellow warning and green success icons stand out more on light backgrounds (for example the multicolour warning symbol); put the activity log's Clear in the menu bar as well as the toolbar; decide whether the update sheet uses the SheetFrame header like the other sheets.
@@ -59,7 +60,7 @@ Rules that apply to every step: everything in CLAUDE.md, especially "preserve st
 
 ### Step 5: Jamf login and HTTP basics (0.6.0)
 - **Move:** token providers (OAuth client credentials and username/password, token renewal), HTTP client with retry and `Retry-After`/429 handling, request log, secret redaction in logs.
-- **Source:** Profile2Blueprint `TokenProvider` + `HTTPClient` and JamfMigrator `TokenProvider` (both tested); AppSettings2Blueprint `RequestLog` + `LogRedactor` (tested).
+- **Source:** Profile2Blueprint `TokenProvider` + `HTTPClient` and JamfMigrator `TokenProvider` (both tested); AppSettings2Blueprint `RequestLog` + `LogRedactor` (tested); Checkpoint `ActivityRedaction` + `IdentifierMasker` for masking device identifiers in exported logs.
 - **First app:** Profile2Blueprint. **Then:** JamfMigrator, AppSettings2Blueprint, Blueprint Managed Preferences Editor, Serial Number Reader, Device Assist (iOS: also proves JTKit builds for iOS), Checkpoint, Jamf Deployer.
 - **Check by hand:** connect with an API client and with a user account; the request log shows no secrets.
 
