@@ -107,10 +107,11 @@ Rules that apply to every step: everything in CLAUDE.md, especially "preserve st
 - **First app:** Checkpoint.
 - **Check by hand:** look up devices in ABM and ASM.
 
-### Step 10: Testing toolkit and demo mode (0.11.0)
-- **Move:** UI-test helpers from Jamf Deployer `UITestSupport.swift` into a `JTKitUITestSupport` product; a run-script template from Jamf Deployer's `Scripts/run-*-ui-tests.sh` (credentials from Keychain into environment variables, cleanup on exit); demo mode with a fake server from Profile2Blueprint (`DemoFixtures`, `DemoBlueprintServer`).
-- **First app:** AppSettings2Blueprint (has UI tests). **Then:** apps without UI tests, starting with Checkpoint.
-- **Check by hand:** UI tests run unattended; the app runs in demo mode without a tenant.
+### Step 10: Demo mode (0.11.0)
+- **Move:** demo mode with a fake server from Profile2Blueprint (`DemoFixtures`, `DemoBlueprintServer`), so every app can be tried and checked by hand without a tenant.
+- **Not planned (decided 2026-10-25):** the full UI test suites and `run-*-ui-tests.sh` scripts of Jamf Deployer and AppSettings2Blueprint are not moved, copied as a template or used as a check (see "Testing" in CLAUDE.md). Jamf Deployer's UI-test helpers (`UITestSupport.swift`) move into a `JTKitUITestSupport` product only if Jordy asks for a specific UI test that needs them.
+- **First app:** AppSettings2Blueprint. **Then:** the other apps, starting with Checkpoint.
+- **Check by hand:** the app runs in demo mode without a tenant and shows believable sample data; switching back to a real connection works.
 
 ### 1.0.0
 When every app has adopted steps 1–9 and the public API has stopped changing.

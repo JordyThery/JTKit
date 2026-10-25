@@ -35,11 +35,15 @@ One component, one app at a time:
 2. Add it to JTKit with tests.
 3. Switch the app to the JTKit version and delete the app's own copy. Behaviour and look stay the same.
 4. **Preserve stored data.** Keep each app's existing Keychain service and account names, UserDefaults keys, file locations and Codable field names by passing them in from the app. Changing them silently loses users' saved connections and settings.
-5. Build the app and run its tests.
+5. Build the app and run its unit tests (see "Testing").
 
 Apps depend on JTKit through its GitHub URL (Up to Next Major Version). Never add a local-path reference to JTKit inside an app's project. `~/Developer/Apps.xcworkspace` already makes every app build against the local JTKit during development.
 
 Only change an app when Jordy asks for that app.
+
+## Testing
+
+Decided by Jordy on 2026-10-25: build, unit tests and Jordy's check by hand are enough. Never run the full UI test suites or the `run-*-ui-tests.sh` scripts of Jamf Deployer and AppSettings2Blueprint: they take too long and don't test the right things. Run a single UI test only when Jordy asks for it by name. "Run its tests" in a prompt or in `ROADMAP.md` means the unit tests.
 
 ## Releasing JTKit
 
