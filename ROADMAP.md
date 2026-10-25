@@ -23,6 +23,8 @@ Always work in `~/Developer/Apps.xcworkspace`. Pick the scheme of the app being 
 
    Approve the same way as 5 (no new JTKit tag needed unless JTKit changed).
 
+**An app's first JTKit step:** before the prompt (dry run or go), Jordy adds the package to that app in Xcode: select the app's project, Package Dependencies, +, enter `https://github.com/JordyThery/JTKit.git`, choose "Up to Next Major Version" from the current JTKit version, and add the JTKit library to the app target. Claude doesn't edit `project.pbxproj` itself.
+
 Rules that apply to every step: everything in CLAUDE.md, especially "preserve stored data" and "nothing app-specific in JTKit".
 
 ## Steps
