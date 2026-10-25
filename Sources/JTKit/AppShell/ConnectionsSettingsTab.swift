@@ -29,7 +29,26 @@ public struct ConnectionRole {
 /// dictionary holds the secrets typed there and not saved yet; a kind left
 /// out means "use the stored one". Returns a short success message, e.g.
 /// `"Connected · Jamf Pro 11.12"`, or throws.
+///
+/// A thrown error is shown in full below "Connection failed", selectable for
+/// copying: its description, then its `failureReason` and
+/// `recoverySuggestion` when it is a `LocalizedError`. Put details such as
+/// the HTTP status or a trace ID in `failureReason`.
 public typealias ConnectionTest<Record> = @MainActor (Record, [ConnectionSecretKind: String]) async throws -> String
+
+/// The full text of a failed connection test: every non-empty part of the
+/// error, one after another.
+nonisolated func connectionTestFailureText(_ error: any Error) -> String {
+    let localized = error as? LocalizedError
+    let parts = [error.localizedDescription, localized?.failureReason, localized?.recoverySuggestion]
+        .compactMap { $0?.trimmingCharacters(in: .whitespacesAndNewlines) }
+        .filter { !$0.isEmpty }
+    var unique = [String]()
+    for part in parts where !unique.contains(part) {
+        unique.append(part)
+    }
+    return unique.isEmpty ? "No details were given." : unique.joined(separator: "\n\n")
+}
 
 /// The Connections tab of the Settings window: the app's saved connections in
 /// a list beside an editor. Several services can share the list.
@@ -152,6 +171,7 @@ public struct ConnectionsSettingsTab<Record: ConnectionRecord, AppSection: View>
             Text("The connection and its Keychain secrets are removed.")
         }
         .tabItem { Label("Connections", systemImage: "network") }
+        .settingsTabName(SettingsTabName.connections)
     }
 
     // MARK: List
@@ -440,6 +460,14 @@ private struct ConnectionEditor<Record: ConnectionRecord, AppSection: View>: Vie
                         testStatus
                         Spacer(minLength: 0)
                     }
+                    if case .failure(let text) = testState {
+                        // the whole error, for copying into a support ticket
+                        Text(text)
+                            .font(.callout)
+                            .textSelection(.enabled)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
                 }
             }
 
@@ -611,11 +639,10 @@ private struct ConnectionEditor<Record: ConnectionRecord, AppSection: View>: Vie
             Label(message, systemImage: "checkmark.circle.fill")
                 .foregroundStyle(.green)
                 .textSelection(.enabled)
-        case .failure(let message):
-            Label(message, systemImage: "xmark.octagon.fill")
+        case .failure:
+            // the full text follows below the row
+            Label("Connection failed", systemImage: "xmark.octagon.fill")
                 .foregroundStyle(.red)
-                .lineLimit(6)
-                .textSelection(.enabled)
         }
     }
 
@@ -722,7 +749,7 @@ private struct ConnectionEditor<Record: ConnectionRecord, AppSection: View>: Vie
                 let message = try await test(record, typed)
                 testState = .success(isChanged ? "\(message). Save to keep these values." : message)
             } catch {
-                testState = .failure(error.localizedDescription)
+                testState = .failure(connectionTestFailureText(error))
             }
         }
     }

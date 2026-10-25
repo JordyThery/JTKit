@@ -310,3 +310,43 @@ struct KeychainSecretStoreTests {
         #expect(store.setSecret(nil, for: account))
     }
 }
+
+@Suite("Connection test failures")
+struct ConnectionTestFailureTests {
+    private struct DetailedError: LocalizedError {
+        var errorDescription: String?
+        var failureReason: String?
+        var recoverySuggestion: String?
+    }
+
+    @Test func showsEveryPartOfTheError() {
+        let error = DetailedError(errorDescription: "HTTP 401 on POST /auth/token",
+                                  failureReason: "httpStatus: 401\ntraceId: abc-123",
+                                  recoverySuggestion: "Check the client secret.")
+        #expect(connectionTestFailureText(error) == "HTTP 401 on POST /auth/token\n\nhttpStatus: 401\ntraceId: abc-123\n\nCheck the client secret.")
+    }
+
+    @Test func aPlainErrorShowsItsDescription() {
+        let error = URLError(.notConnectedToInternet)
+        #expect(connectionTestFailureText(error) == error.localizedDescription)
+    }
+
+    @Test func emptyAndRepeatedPartsAreLeftOut() {
+        let error = DetailedError(errorDescription: "Timed out.", failureReason: "  ", recoverySuggestion: "Timed out.")
+        #expect(connectionTestFailureText(error) == "Timed out.")
+    }
+}
+
+@MainActor
+@Suite("Settings tabs by name")
+struct SettingsTabNameTests {
+    @Test func sharedTabsHaveTheirToolbarNames() {
+        #expect(SettingsTabName.general == "General")
+        #expect(SettingsTabName.connections == "Connections")
+        #expect(SettingsTabName.updates == "Updates")
+    }
+
+    @Test func settingsOpenOnGeneralUntilALinkAsksForAnotherTab() {
+        #expect(SettingsTabSelection().selected == SettingsTabName.general)
+    }
+}

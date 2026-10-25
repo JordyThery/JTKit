@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.5.1 (2026-10-25)
+From adopting ROADMAP step 4 in Profile2Blueprint.
+- `AppShell/`: `SettingsTabLink` opens the Settings window on a named tab,
+  e.g. "Edit Tenants…" opening Connections. Apps turn it on with
+  `SettingsWindow(opensTabsByName: true)` once every tab has a name:
+  `SettingsTab` is named by its title, `ConnectionsSettingsTab` is
+  `SettingsTabName.connections`, other tabs use `settingsTabName(_:)`. Off by
+  default, so apps with unnamed tabs keep working as before.
+- `AppShell/`: when Test Connection fails, the editor shows "Connection
+  failed" with the error's full text below it, selectable for copying: its
+  description, failure reason and recovery suggestion. Apps put details such
+  as the HTTP status or trace ID in `failureReason`.
+
 ## 0.5.0 (2026-10-25)
 Keychain and saved connections (ROADMAP step 4, first adopted in JamfMigrator).
 - `Core/`: `SecretStore` and `KeychainSecretStore` (from JamfMigrator):
