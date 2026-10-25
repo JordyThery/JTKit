@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.3.1 (2026-10-25)
+- `Core/`: `ActivityLogEntry` takes an optional `failedWithoutStatus` for
+  requests that never got a response. Such entries count as failed and show a
+  red "—" in the activity log (VoiceOver: "Failed, no response"). Entries
+  without a status that aren't marked stay as before: not failed, empty cell.
+
 ## 0.3.0 (2026-10-25)
 Folds in Jamf Deployer's DeployerKit (ROADMAP step 2). Still macOS 14 / iOS 17.
 - `Core/`: `ActivityLog` and `ActivityLogEntry` (capacity now a parameter,

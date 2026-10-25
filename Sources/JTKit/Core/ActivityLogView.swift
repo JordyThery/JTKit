@@ -51,6 +51,11 @@ public struct ActivityLogView: View {
                                 .foregroundStyle(entry.isFailure ? .red : .primary)
                                 // Red alone doesn't reach VoiceOver; say it.
                                 .accessibilityLabel(entry.isFailure ? "\(status), failed" : "\(status)")
+                        } else if entry.isFailure {
+                            // Failed without a response: a red dash.
+                            Text("—")
+                                .foregroundStyle(.red)
+                                .accessibilityLabel("Failed, no response")
                         }
                     }
                     .width(50)

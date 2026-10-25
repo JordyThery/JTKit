@@ -15,6 +15,9 @@ public nonisolated struct ActivityLogEntry: Identifiable, Sendable {
     public var status: Int?
     public var duration: TimeInterval?
     public var note: String?
+    /// Marks the entry failed even though it has no status, e.g. a request
+    /// that never got a response. Entries with a status ≥ 400 fail anyway.
+    public var failedWithoutStatus: Bool
 
     public init(
         category: String,
@@ -22,7 +25,8 @@ public nonisolated struct ActivityLogEntry: Identifiable, Sendable {
         detail: String,
         status: Int? = nil,
         duration: TimeInterval? = nil,
-        note: String? = nil
+        note: String? = nil,
+        failedWithoutStatus: Bool = false
     ) {
         self.id = UUID()
         self.date = .now
@@ -32,10 +36,11 @@ public nonisolated struct ActivityLogEntry: Identifiable, Sendable {
         self.status = status
         self.duration = duration
         self.note = note
+        self.failedWithoutStatus = failedWithoutStatus
     }
 
     public var isFailure: Bool {
-        guard let status else { return false }
+        guard let status else { return failedWithoutStatus }
         return status >= 400
     }
 }

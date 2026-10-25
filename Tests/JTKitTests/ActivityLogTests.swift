@@ -47,4 +47,19 @@ struct ActivityLogTests {
         #expect(entry("/a", status: 400).isFailure)
         #expect(entry("/a", status: 503).isFailure)
     }
+
+    @Test func entriesWithoutStatusCanBeMarkedFailed() {
+        let unanswered = ActivityLogEntry(
+            category: "Graph", operation: "GET", detail: "/a",
+            failedWithoutStatus: true
+        )
+        #expect(unanswered.isFailure, "Marked failed without a status")
+        #expect(!entry("/a").isFailure, "Unmarked entries without a status still aren't failures")
+
+        let answered = ActivityLogEntry(
+            category: "Graph", operation: "GET", detail: "/a",
+            status: 200, failedWithoutStatus: true
+        )
+        #expect(!answered.isFailure, "A status decides on its own")
+    }
 }

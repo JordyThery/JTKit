@@ -3,5 +3,5 @@
 /// Components are added one at a time; see CLAUDE.md for the plan.
 public enum JTKit {
     /// Version of this package. Keep in sync with the git tag.
-    public static let version = "0.3.0"
+    public static let version = "0.3.1"
 }
