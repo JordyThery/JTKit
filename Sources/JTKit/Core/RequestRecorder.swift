@@ -11,7 +11,9 @@ import Foundation
 /// - request bodies never, and response bodies only for errors (status 400
 ///   and up), unless the request is marked safe (`recordsBodies`). Bodies
 ///   can carry secrets that no key list finds, e.g. a Wi-Fi password inside
-///   a configuration profile;
+///   a configuration profile. A recorded error answer also gets the free-text
+///   cleaning the on-screen message gets (`Redaction.text`), so a secret
+///   inside the server's message (`client_secret=…`, `Bearer …`) is hidden too;
 /// - for sensitive calls (`SensitiveRequests`), only method, path, status and
 ///   duration;
 /// - bodies over 256 KB are not recorded; recorded text is cut at 20,000
@@ -204,7 +206,8 @@ public nonisolated struct RequestRecorder: Sendable {
             responseHeaders = Redaction.headers(headers)
             if !data.isEmpty {
                 if context.recordsBodies || response.statusCode >= 400 {
-                    let recorded = recordedBody(data, contentType: response.value(forHTTPHeaderField: "Content-Type"), name: "response")
+                    let recorded = recordedBody(data, contentType: response.value(forHTTPHeaderField: "Content-Type"), name: "response",
+                                                cleansFreeText: response.statusCode >= 400)
                     responseBody = recorded.text
                     if let note = recorded.note { bodyNotes.append(note) }
                     if recorded.text != nil { identifiers += IdentifierMasker.identifiers(inBody: data) }
@@ -229,12 +232,16 @@ public nonisolated struct RequestRecorder: Sendable {
         )
     }
 
-    static func recordedBody(_ data: Data, contentType: String?, name: String) -> (text: String?, note: String?) {
+    /// - Parameter cleansFreeText: also clean the text as a whole
+    ///   (`Redaction.text`), not only by key, as for the on-screen message.
+    static func recordedBody(_ data: Data, contentType: String?, name: String,
+                             cleansFreeText: Bool = false) -> (text: String?, note: String?) {
         guard data.count <= maximumRecordedBodySize else {
             let size = Int64(data.count).formatted(.byteCount(style: .file))
             return (nil, "Not recorded: the \(name) body is \(size).")
         }
-        guard let text = Redaction.body(data, contentType: contentType) else { return (nil, nil) }
+        guard var text = Redaction.body(data, contentType: contentType) else { return (nil, nil) }
+        if cleansFreeText { text = Redaction.text(text) }
         return (truncated(text), nil)
     }
 

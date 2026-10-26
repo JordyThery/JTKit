@@ -63,6 +63,35 @@ struct RequestRecorderTests {
         #expect(entry.identifiers.contains(FoundIdentifier(.device, "C02XK1JHJG5H")))
     }
 
+    @Test("A secret inside an error's message is hidden in the log, as on screen")
+    func secretsInErrorMessage() async throws {
+        let message = "invalid request client_secret=s3cr3t-value&grant_type=client_credentials, sent with Bearer eyJhbGciOi.payload.sig"
+        let server = MockServer { _ in
+            .json(401, #"{"error":"invalid_client","message":"\#(message)"}"#)
+        }
+        let log = ActivityLog()
+        let (data, response) = try await RequestRecorder(session: server.session, log: log)
+            .send(request("POST", "https://example.com/api/oauth/token"))
+
+        let entry = try #require(log.entries.first)
+        let body = try #require(entry.request?.responseBody)
+        #expect(body.contains("invalid_client"))
+        #expect(body.contains("client_secret=\(Redaction.placeholder)"))
+        #expect(body.contains("Bearer \(Redaction.placeholder)"))
+        let transcript = ActivityLogExport.transcript(of: entry)
+        for secret in ["s3cr3t-value", "eyJhbGciOi", "payload.sig"] {
+            #expect(!transcript.contains(secret))
+            #expect(!ActivityLogExport.text(log.entries, masked: true).contains(secret))
+            #expect(!ActivityLogExport.text(log.entries, masked: false).contains(secret))
+        }
+        // the same cleaning as the message shown to the user
+        let shown = HTTPError.status(HTTPResponse(status: response.statusCode, data: data),
+                                     method: "POST", path: "/api/oauth/token", duringSignIn: true)
+        for secret in ["s3cr3t-value", "eyJhbGciOi"] {
+            #expect(!(shown.errorDescription ?? "").contains(secret))
+        }
+    }
+
     @Test("A request marked safe records both bodies, also of a success")
     func optIn() async throws {
         let server = MockServer { _ in .json(200, #"{"ok":true}"#) }

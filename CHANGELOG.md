@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.6.1 (2026-10-26)
+Fix, found while Serial Number Reader adopted step 5.
+- `IdentifierMasker`: "Export for Bug Report…" now also masks identifiers in
+  a recorded address, where they follow a percent escape (a Jamf Pro lookup
+  `filter=serialNumber%3D%3D%22C02XK1JHJG5H%22` left the serial visible) or
+  are themselves encoded (`jane%40corp.example`).
+- `RequestRecorder`: a recorded error answer (status 400 and up) also gets the
+  free-text cleaning the on-screen message already gets, so a secret inside
+  the server's message (`client_secret=…`, `Bearer …`) is hidden in the log
+  and its exports too. Before, JSON answers were cleaned by key only.
+
 ## 0.6.0 (2026-10-26)
 ROADMAP step 5: Jamf sign-in, HTTP basics and the shared activity log, first
 adopted by Profile2Blueprint. Additions only; apps that don't use them work as

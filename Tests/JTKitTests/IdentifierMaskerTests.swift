@@ -107,6 +107,19 @@ struct IdentifierMaskerTests {
         #expect(masker.mask("device jordy") == "<user 4> <user 1>")
     }
 
+    @Test("Values in an encoded address are masked: after a percent escape, and in encoded form")
+    func encodedAddresses() {
+        let masker = IdentifierMasker([
+            FoundIdentifier(.device, "C02XK1JHJG5H"),
+            FoundIdentifier(.user, "jane@corp.example"),
+        ])
+        #expect(masker.mask("GET /api/v2/mobile-devices/detail?filter=serialNumber%3D%3D%22C02XK1JHJG5H%22")
+                == "GET /api/v2/mobile-devices/detail?filter=serialNumber%3D%3D%22<device 1>%22")
+        #expect(masker.mask("?email=jane%40corp.example&page=0") == "?email=<user 1>&page=0")
+        // still whole words only: a value inside a longer one stays
+        #expect(masker.mask("%22XC02XK1JHJG5H%22") == "%22XC02XK1JHJG5H%22")
+    }
+
     @Test("Short and common values are never masked")
     func ignoresCommonValues() {
         let masker = IdentifierMasker([FoundIdentifier(.user, "jo"), FoundIdentifier(.user, "Unknown")])

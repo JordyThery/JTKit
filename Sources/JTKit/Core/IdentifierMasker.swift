@@ -31,6 +31,9 @@ public nonisolated struct FoundIdentifier: Hashable, Sendable {
 /// field clearly holds one.
 public nonisolated struct IdentifierMasker: Sendable {
     private let assigned: [String: String]
+    /// `assigned` plus each value's percent-encoded form, e.g.
+    /// `jane%40corp.example`, as it appears in a recorded address.
+    private let replacements: [String: String]
     private let pattern: NSRegularExpression?
 
     /// - Parameter identifiers: in the order they appeared, oldest first.
@@ -45,13 +48,21 @@ public nonisolated struct IdentifierMasker: Sendable {
             assigned[key] = "<\(identifier.kind.rawValue) \(number)>"
         }
         self.assigned = assigned
+        var replacements = assigned
+        for (value, placeholder) in assigned {
+            let encoded = FormEncoding.encode(value).lowercased()
+            if replacements[encoded] == nil { replacements[encoded] = placeholder }
+        }
+        self.replacements = replacements
         // One pass, longest values first, so a shorter value can never be
         // replaced inside a longer one or inside a placeholder already written.
-        let alternatives = assigned.keys
+        // Whole words only; a percent escape before a value counts as a word
+        // boundary, so `%22C02XK1JHJG5H%22` in an address is masked too.
+        let alternatives = replacements.keys
             .sorted { ($0.count, $0) > ($1.count, $1) }
             .map { NSRegularExpression.escapedPattern(for: $0) }
         pattern = alternatives.isEmpty ? nil : try? NSRegularExpression(
-            pattern: "(?<![A-Za-z0-9])(?:\(alternatives.joined(separator: "|")))(?![A-Za-z0-9])",
+            pattern: "(?:(?<![A-Za-z0-9])|(?<=%[0-9A-Fa-f]{2}))(?:\(alternatives.joined(separator: "|")))(?![A-Za-z0-9])",
             options: [.caseInsensitive]
         )
     }
@@ -69,7 +80,7 @@ public nonisolated struct IdentifierMasker: Sendable {
         for match in pattern.matches(in: text, range: NSRange(location: 0, length: source.length)) {
             result += source.substring(with: NSRange(location: last, length: match.range.location - last))
             let found = source.substring(with: match.range)
-            result += assigned[found.lowercased()] ?? found
+            result += replacements[found.lowercased()] ?? found
             last = match.range.location + match.range.length
         }
         result += source.substring(from: last)
