@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.8.5 (2026-10-26)
+Step 7 for Jamf Deployer: the privileges its preflight and Day 0 calls
+need. Additions only.
+- `JamfPro.Privilege`: Read JSS URL, Create Device Enrollment Program
+  Instances, Read and Create Volume Purchasing Locations, Read and Create
+  Self Service Branding Configuration, Read Jamf Protect Settings, Read Jamf
+  Protect Deployments and Update Jamf Protect Settings. Each is on Jamf Pro
+  11.33.1's privilege list and in its API description for the call Jamf
+  Deployer makes (checked by the existing privilege test). Jamf Pro has no
+  privilege for App Installers, so those calls name none.
+
 ## 0.8.4 (2026-10-26)
 The privilege table checked against Jamf Pro's own privilege list. One
 correction every app sending Update Inventory gets, and two names removed.

@@ -302,6 +302,17 @@ extension JamfPro {
         public static let updateOnboardingConfiguration: Privilege = "Update Onboarding Configuration"
         public static let readSSOSettings: Privilege = "Read SSO Settings"
         public static let updateSSOSettings: Privilege = "Update SSO Settings"
+        public static let readJSSURL: Privilege = "Read JSS URL"
+
+        // Day 0: Apple tokens, Self Service branding and Jamf Protect
+        public static let createDeviceEnrollmentProgramInstances: Privilege = "Create Device Enrollment Program Instances"
+        public static let readVolumePurchasingLocations: Privilege = "Read Volume Purchasing Locations"
+        public static let createVolumePurchasingLocations: Privilege = "Create Volume Purchasing Locations"
+        public static let readSelfServiceBrandingConfiguration: Privilege = "Read Self Service Branding Configuration"
+        public static let createSelfServiceBrandingConfiguration: Privilege = "Create Self Service Branding Configuration"
+        public static let readJamfProtectSettings: Privilege = "Read Jamf Protect Settings"
+        public static let readJamfProtectDeployments: Privilege = "Read Jamf Protect Deployments"
+        public static let updateJamfProtectSettings: Privilege = "Update Jamf Protect Settings"
     }
 }
 
