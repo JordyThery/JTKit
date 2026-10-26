@@ -40,6 +40,18 @@ struct HTTPClientTests {
         #expect(sent.url.absoluteString.hasSuffix("filter=deviceType%3D%3D%22COMPUTER%22"))
     }
 
+    @Test("A request's JSON filter reaches the recorder")
+    func recordedJSON() async throws {
+        let server = MockServer { _ in .json(200, #"{"keep":1,"drop":2}"#) }
+        let log = ActivityLog()
+        let response = try await makeClient(server, log: log).send(HTTPRequest(
+            path: "api/x", recordsBodies: true,
+            recordedJSON: { ($0 as? [String: Any])?.filter { $0.key == "keep" } ?? $0 }))
+        #expect(String(decoding: response.data, as: UTF8.self).contains("drop"))
+        let body = try #require(log.entries.first?.request?.responseBody)
+        #expect(body.contains("keep") && !body.contains("drop"))
+    }
+
     @Test("Classic API paths ask for XML")
     func classicXML() async throws {
         let server = MockServer { _ in .json(200, "<a/>") }

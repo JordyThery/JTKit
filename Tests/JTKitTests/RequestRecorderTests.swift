@@ -105,6 +105,52 @@ struct RequestRecorderTests {
         #expect(details.bodyNote == nil)
     }
 
+    @Test("A request's JSON filter trims what is recorded, not what the app receives")
+    func recordedJSONFilter() async throws {
+        let answer = #"{"results":[{"id":"1","general":{"name":"Lab Mac"},"localUserAccounts":[{"username":"admin"}],"certificates":[{"commonName":"cert"}]}]}"#
+        let server = MockServer { _ in .json(200, answer) }
+        let log = ActivityLog()
+        let keep: RecordedJSONFilter = { object in
+            guard var top = object as? [String: Any], let results = top["results"] as? [[String: Any]] else { return object }
+            top["results"] = results.map { $0.filter { ["id", "general"].contains($0.key) } }
+            return top
+        }
+        let (data, _) = try await RequestRecorder(session: server.session, log: log)
+            .send(request("GET", "https://example.com/api/v1/computers-inventory"), recordsBodies: true, recordedJSON: keep)
+
+        #expect(String(decoding: data, as: UTF8.self) == answer)
+        let entry = try #require(log.entries.first)
+        let body = try #require(entry.request?.responseBody)
+        #expect(body.contains("Lab Mac"))
+        #expect(!body.contains("localUserAccounts") && !body.contains("certificates") && !body.contains("admin"))
+        // identifiers come from what was recorded only
+        #expect(!entry.identifiers.contains { $0.value == "admin" })
+    }
+
+    @Test("The JSON filter also trims a recorded error answer")
+    func recordedJSONFilterOnErrors() async throws {
+        let server = MockServer { _ in .json(500, #"{"keep":"yes","drop":"no"}"#) }
+        let log = ActivityLog()
+        _ = try await RequestRecorder(session: server.session, log: log)
+            .send(request("GET", "https://example.com/a"),
+                  recordedJSON: { ($0 as? [String: Any])?.filter { $0.key == "keep" } ?? $0 })
+        let body = try #require(log.entries.first?.request?.responseBody)
+        #expect(body.contains("keep") && !body.contains("drop"))
+    }
+
+    @Test("With a JSON filter, an answer that isn't JSON isn't recorded at all")
+    func recordedJSONFilterRefusesText() async throws {
+        let server = MockServer { _ in
+            MockResponse(status: 200, headers: ["Content-Type": "text/plain"], body: Data("owner: Jane Doe".utf8))
+        }
+        let log = ActivityLog()
+        _ = try await RequestRecorder(session: server.session, log: log)
+            .send(request("GET", "https://example.com/a"), recordsBodies: true, recordedJSON: { $0 })
+        let details = try #require(log.entries.first?.request)
+        #expect(details.responseBody == nil)
+        #expect(details.bodyNote == "Response body not recorded: not JSON.")
+    }
+
     @Test("Bodies over 256 KB aren't recorded; long text is cut at 20,000 characters")
     func sizeLimits() async throws {
         let large = String(repeating: "a", count: RequestRecorder.maximumRecordedBodySize + 1)

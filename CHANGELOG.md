@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.6.2 (2026-10-26)
+For Checkpoint's adoption of step 5. Additions only.
+- `Redaction`: Jamf Pro extension attributes (`extensionAttributes`,
+  `extension_attributes`) are hidden whole, like the personal blocks: they
+  hold whatever an administrator's script reports, so they can hold a secret
+  no key list finds.
+- `HTTPRequest.recordedJSON` (and `RequestRecorder.send(recordedJSON:)`): an
+  app can trim a JSON body before it is redacted and recorded, e.g. to keep
+  only the inventory sections it asked for. The answer the app receives is
+  unchanged; identifiers are collected from what is recorded. With a filter,
+  a body that isn't JSON can't be trimmed, so it isn't recorded at all.
+
 ## 0.6.1 (2026-10-26)
 Fix, found while Serial Number Reader adopted step 5.
 - `IdentifierMasker`: "Export for Bug Report…" now also masks identifiers in

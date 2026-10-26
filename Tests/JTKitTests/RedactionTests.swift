@@ -46,6 +46,20 @@ struct RedactionTests {
         #expect(parsed["location"] as? String == hidden)
     }
 
+    @Test("Extension attributes are hidden whole, like the personal blocks")
+    func extensionAttributes() throws {
+        let body = Data(#"""
+        {"general":{"name":"Lab Mac","extensionAttributes":[{"name":"Wi-Fi key","values":["hunter2"]}]},
+         "extension_attributes":[{"name":"Setup","value":"s3cr3t"}]}
+        """#.utf8)
+        let text = try #require(Redaction.body(body))
+        #expect(!text.contains("hunter2") && !text.contains("s3cr3t") && !text.contains("Wi-Fi key"))
+        #expect(text.contains("Lab Mac"))
+        let parsed = try #require(try JSONSerialization.jsonObject(with: Data(text.utf8)) as? [String: Any])
+        #expect((parsed["general"] as? [String: Any])?["extensionAttributes"] as? String == hidden)
+        #expect(parsed["extension_attributes"] as? String == hidden)
+    }
+
     @Test("Classic API XML elements are hidden, also with attributes")
     func xml() {
         let xml = #"<computer><general><name>Lab</name><password type="x">hunter2</password></general><PIN>1234</PIN></computer>"#

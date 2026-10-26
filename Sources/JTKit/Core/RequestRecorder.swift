@@ -54,6 +54,8 @@ public nonisolated struct RequestRecorder: Sendable {
     ///   - attempt, maxAttempts: shown as "Attempt 2 of 4".
     ///   - recordsBodies: record both bodies, also of a success. Only for
     ///     requests the app knows carry nothing secret.
+    ///   - recordedJSON: trims a JSON body before it is redacted and recorded
+    ///     (see `HTTPRequest.recordedJSON`); what is returned is unchanged.
     ///   - redirects: what to do when the server redirects.
     /// - Throws: `CancellationError` when cancelled, otherwise the session's error.
     public func send(
@@ -62,13 +64,15 @@ public nonisolated struct RequestRecorder: Sendable {
         attempt: Int = 1,
         of maxAttempts: Int = 1,
         recordsBodies: Bool = false,
+        recordedJSON: RecordedJSONFilter? = nil,
         redirects: RedirectRule = .follow
     ) async throws -> (Data, HTTPURLResponse) {
         let date = Date()
         let started = ContinuousClock.now
         let delegate = redirects == .follow ? nil : RedirectDelegate(rule: redirects)
         let context = Context(request: request, category: category ?? self.category, date: date,
-                              attempt: attempt, maxAttempts: maxAttempts, recordsBodies: recordsBodies)
+                              attempt: attempt, maxAttempts: maxAttempts, recordsBodies: recordsBodies,
+                              recordedJSON: recordedJSON)
         let data: Data
         let response: URLResponse
         do {
@@ -122,6 +126,7 @@ public nonisolated struct RequestRecorder: Sendable {
         let attempt: Int
         let maxAttempts: Int
         let recordsBodies: Bool
+        let recordedJSON: RecordedJSONFilter?
     }
 
     private func record(
@@ -186,14 +191,14 @@ public nonisolated struct RequestRecorder: Sendable {
         var bodyNotes = [String]()
 
         var requestBody: String?
-        if let body = request.httpBody, !body.isEmpty {
-            if context.recordsBodies {
+        if let original = request.httpBody, !original.isEmpty {
+            if context.recordsBodies, let body = trimmed(original, by: context.recordedJSON) {
                 let recorded = recordedBody(body, contentType: request.value(forHTTPHeaderField: "Content-Type"), name: "request")
                 requestBody = recorded.text
                 if let note = recorded.note { bodyNotes.append(note) }
                 if recorded.text != nil { identifiers += IdentifierMasker.identifiers(inBody: body) }
             } else {
-                bodyNotes.append("Request body not recorded.")
+                bodyNotes.append(context.recordsBodies ? "Request body not recorded: not JSON." : "Request body not recorded.")
             }
         }
 
@@ -205,14 +210,16 @@ public nonisolated struct RequestRecorder: Sendable {
             }
             responseHeaders = Redaction.headers(headers)
             if !data.isEmpty {
-                if context.recordsBodies || response.statusCode >= 400 {
-                    let recorded = recordedBody(data, contentType: response.value(forHTTPHeaderField: "Content-Type"), name: "response",
+                if context.recordsBodies || response.statusCode >= 400,
+                   let body = trimmed(data, by: context.recordedJSON) {
+                    let recorded = recordedBody(body, contentType: response.value(forHTTPHeaderField: "Content-Type"), name: "response",
                                                 cleansFreeText: response.statusCode >= 400)
                     responseBody = recorded.text
                     if let note = recorded.note { bodyNotes.append(note) }
-                    if recorded.text != nil { identifiers += IdentifierMasker.identifiers(inBody: data) }
+                    if recorded.text != nil { identifiers += IdentifierMasker.identifiers(inBody: body) }
                 } else {
-                    bodyNotes.append("Response body not recorded.")
+                    bodyNotes.append(context.recordsBodies || response.statusCode >= 400
+                                     ? "Response body not recorded: not JSON." : "Response body not recorded.")
                 }
             }
         }
@@ -230,6 +237,18 @@ public nonisolated struct RequestRecorder: Sendable {
             identifiers: IdentifierMasker.unique(identifiers + IdentifierMasker.identifiers(inText: errorText ?? "")),
             date: context.date
         )
+    }
+
+    /// The body as the app's filter leaves it, for recording only. Without
+    /// a filter, or over the recording limit (not recorded anyway), the body
+    /// is left as it is. With a filter, a body that isn't JSON can't be
+    /// trimmed, so it isn't recorded at all (nil).
+    static func trimmed(_ data: Data, by filter: RecordedJSONFilter?) -> Data? {
+        guard let filter, data.count <= maximumRecordedBodySize else { return data }
+        guard let object = try? JSONSerialization.jsonObject(with: data, options: [.fragmentsAllowed]),
+              let shaped = try? JSONSerialization.data(withJSONObject: filter(object), options: [.fragmentsAllowed])
+        else { return nil }
+        return shaped
     }
 
     /// - Parameter cleansFreeText: also clean the text as a whole
@@ -250,6 +269,10 @@ public nonisolated struct RequestRecorder: Sendable {
         return String(text.prefix(maximumTextLength)) + "\n… truncated"
     }
 }
+
+/// Trims parsed JSON before it is recorded: gets a dictionary, array or
+/// value as `JSONSerialization` reads it, and returns what may be recorded.
+public typealias RecordedJSONFilter = @Sendable (Any) -> Any
 
 /// Requests whose contents are never recorded, in every app: they carry a
 /// device secret (Checkpoint's unlock token, erase PIN, FileVault recovery

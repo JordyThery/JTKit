@@ -23,6 +23,11 @@ public nonisolated struct HTTPRequest: Sendable {
     /// requests the app knows carry nothing secret: by default request
     /// bodies are never recorded and response bodies only for errors.
     public var recordsBodies: Bool
+    /// Trims a JSON body before it is redacted and recorded, e.g. to keep only
+    /// the inventory sections the app asked for. Gets the parsed JSON and
+    /// returns what may be recorded. A body that isn't JSON then isn't
+    /// recorded at all. The answer the app receives is unchanged.
+    public var recordedJSON: RecordedJSONFilter?
 
     public init(
         method: String = "GET",
@@ -33,7 +38,8 @@ public nonisolated struct HTTPRequest: Sendable {
         contentType: String? = nil,
         headers: [String: String] = [:],
         safeToRepeat: Bool = false,
-        recordsBodies: Bool = false
+        recordsBodies: Bool = false,
+        recordedJSON: RecordedJSONFilter? = nil
     ) {
         self.method = method
         self.path = path
@@ -44,6 +50,7 @@ public nonisolated struct HTTPRequest: Sendable {
         self.headers = headers
         self.safeToRepeat = safeToRepeat
         self.recordsBodies = recordsBodies
+        self.recordedJSON = recordedJSON
     }
 
     /// GET and HEAD.
@@ -321,7 +328,8 @@ public actor HTTPClient {
             let http: HTTPURLResponse
             do {
                 (data, http) = try await recorder.send(urlRequest, attempt: attempt, of: rules.maxAttempts,
-                                                       recordsBodies: request.recordsBodies, redirects: redirects)
+                                                       recordsBodies: request.recordsBodies, recordedJSON: request.recordedJSON,
+                                                       redirects: redirects)
             } catch let error as URLError {
                 if RetryRules.networkDrops.contains(error.code) && repeatable && attempt < rules.maxAttempts {
                     try await wait(rules.backoff(afterAttempt: attempt, random: random()),

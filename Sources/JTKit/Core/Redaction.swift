@@ -20,11 +20,14 @@ public nonisolated enum Redaction {
         "pin", "unlockToken", "escrowToken",
     ].map { $0.lowercased() })
 
-    /// Keys whose whole value is personal information about a person or a
-    /// place, replaced as one block (Checkpoint).
+    /// Keys whose whole value is replaced as one block: personal information
+    /// about a person or a place (Checkpoint), and Jamf Pro extension
+    /// attributes, which hold whatever an administrator's script reports and
+    /// so can hold a secret no key list finds.
     static let personalKeys: Set<String> = Set([
         "owner", "notes", "userAndLocation", "location",
         "actorName", "actorId", "subjectName",
+        "extensionAttributes", "extension_attributes",
     ].map { $0.lowercased() })
 
     /// Headers hidden entirely, except that Authorization and
