@@ -9,6 +9,9 @@ import Foundation
 /// - Reads the secret only when it signs in, so a new secret is used at once.
 /// - Sends the sign-in through the request recorder (category "Sign-in"); the
 ///   secret and the token are never recorded.
+/// - Follows a redirect only to HTTPS on the same host and port, in every app:
+///   a redirected POST can carry the client secret or password along, so it
+///   must never reach a server the user didn't enter.
 public actor JamfTokenProvider: BearerTokenSource {
     /// How it signs in.
     public enum Method: Sendable, Hashable {
@@ -133,7 +136,7 @@ public actor JamfTokenProvider: BearerTokenSource {
         let data: Data
         let response: HTTPURLResponse
         do {
-            (data, response) = try await recorder.send(request, category: "Sign-in")
+            (data, response) = try await recorder.send(request, category: "Sign-in", redirects: .sameHostHTTPSOnly)
         } catch let error as URLError {
             throw HTTPError.transport(method: "POST", path: tokenURL.path(), code: error.code,
                                       message: Redaction.text(error.localizedDescription))

@@ -170,4 +170,46 @@ struct JamfTokenProviderTests {
             _ = try JamfTokenProvider(connection: school, secret: { "" }, recorder: RequestRecorder(log: nil))
         }
     }
+
+    @Test("A sign-in redirected to another server is refused: the secret never leaves the host")
+    func signInRedirectToOtherHostRefused() async throws {
+        let server = MockServer { request in
+            request.url.host() == "us.api.jamfcloud.com"
+                ? .redirect(to: URL(string: "https://evil.example/auth/token")!)
+                : .json(200, tokenJSON("stolen"))
+        }
+        let tokens = try provider(server) { "s3cr3t" }
+        await #expect { _ = try await tokens.token() } throws: { error in
+            // the refused redirect itself is the answer: a failed sign-in
+            (error as? HTTPError)?.status == 307
+        }
+        #expect(server.requests.map { $0.url.host() } == ["us.api.jamfcloud.com"])
+        #expect(!server.requests.contains { $0.url.host() == "evil.example" })
+    }
+
+    @Test("A sign-in redirect over plain HTTP is refused, also on the same host")
+    func signInRedirectToHTTPRefused() async throws {
+        let server = MockServer { request in
+            request.url.scheme == "https"
+                ? .redirect(to: URL(string: "http://us.api.jamfcloud.com/auth/token")!)
+                : .json(200, tokenJSON("plain"))
+        }
+        let tokens = try provider(server) { "s3cr3t" }
+        await #expect { _ = try await tokens.token() } throws: { error in
+            // the refused redirect itself is the answer: a failed sign-in
+            (error as? HTTPError)?.status == 307
+        }
+        #expect(server.requests.count == 1)
+    }
+
+    @Test("A sign-in redirect to HTTPS on the same host is followed")
+    func signInRedirectSameHostFollowed() async throws {
+        let server = MockServer { request in
+            request.path == "/auth/token"
+                ? .redirect(to: URL(string: "https://us.api.jamfcloud.com/v2/auth/token")!)
+                : .json(200, tokenJSON("tok-moved"))
+        }
+        #expect(try await provider(server) { "s" }.token() == "tok-moved")
+        #expect(server.requests.map(\.path) == ["/auth/token", "/v2/auth/token"])
+    }
 }

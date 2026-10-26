@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.6.3 (2026-10-26)
+Fix, found while Jamf Deployer adopted step 5 (decided by Jordy: the default
+in every app, not an option).
+- `JamfTokenProvider`: the sign-in follows a redirect only to HTTPS on the
+  same host and port (`RedirectRule.sameHostHTTPSOnly`). Before, it followed
+  every redirect, and a 307 or 308 sends the POST again, with the client
+  secret, to wherever it points. A username and password sign-in is covered
+  too. Requests after the sign-in keep the client's own redirect rule.
+- `JTKitTestSupport`: `MockResponse.redirect(_:to:)` answers with a real
+  redirect, so a client's redirect rule can be tested. Other responses
+  behave as before.
+
 ## 0.6.2 (2026-10-26)
 For Checkpoint's adoption of step 5. Additions only.
 - `Redaction`: Jamf Pro extension attributes (`extensionAttributes`,
