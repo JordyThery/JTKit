@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.7.2 (2026-10-26)
+Step 6 for Profile2Blueprint. Additions only.
+- `JamfPlatform.PermissionProblem`: Test Connection's message when signing in
+  worked but a read permission is missing or couldn't be checked, built from
+  `checkPermissions`' results. Moved from AppSettings2Blueprint's
+  `ConnectionTestProblem` (also copied in Blueprint Managed Preferences
+  Editor), unchanged; those two keep their copies until their next update.
+
 ## 0.7.1 (2026-10-26)
 Step 6 for JamfMigrator. Additions; nothing an app calls today changes.
 - `JamfPlatform.Client` also reaches a Jamf Pro server directly

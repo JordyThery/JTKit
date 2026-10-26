@@ -481,6 +481,27 @@ struct JamfPlatformPermissionTests {
         #expect(pro.hint(on: .platformAPI) == pro.hint)
         #expect(JamfPlatform.PermissionCheck.blueprintsRead.hint(on: .jamfPro).contains("privilege for “Read Blueprints”"))
     }
+
+    @Test("Test Connection's message names what is missing, and why a check couldn't run")
+    func problem() throws {
+        #expect(JamfPlatform.PermissionProblem([(.blueprintsRead, .allowed), (.deviceGroupsRead, .allowed)]) == nil)
+
+        let missing = try #require(JamfPlatform.PermissionProblem([
+            (.blueprintsRead, .missingPermission), (.deviceGroupsRead, .notFound),
+        ]))
+        #expect(missing.errorDescription == "Signed in, but the API integration is missing a permission: blueprints:read.")
+        #expect(missing.failureReason == """
+            Add the “blueprints:read” permission to the API integration in Jamf Account.
+            Read device groups couldn’t be checked: not found (HTTP 404)
+            """)
+
+        let unchecked = try #require(JamfPlatform.PermissionProblem([
+            (.blueprintsRead, .failed(status: 500)), (.deviceGroupsRead, .unreachable("offline")),
+        ]))
+        #expect(unchecked.missing.isEmpty)
+        #expect(unchecked.errorDescription == "Signed in, but not every permission could be checked.")
+        #expect(unchecked.failureReason == "Read Blueprints couldn’t be checked: HTTP 500\nRead device groups couldn’t be checked: offline")
+    }
 }
 
 // MARK: - Blueprints
