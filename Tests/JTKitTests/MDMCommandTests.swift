@@ -65,9 +65,9 @@ private func dictionary(_ text: String) -> NSDictionary {
 @Suite("The command list")
 struct MDMCommandRuleTests {
 
-    @Test("Wipe and Remove MDM Profile can't be undone; everything else can")
+    @Test("Wipe, Remove MDM Profile and Delete Record can't be undone; everything else can")
     func undoable() {
-        #expect(Set(MDMCommand.allCases.filter { !$0.canBeUndone }) == [.wipeComputer, .wipeMobile, .unmanage])
+        #expect(Set(MDMCommand.allCases.filter { !$0.canBeUndone }) == [.wipeComputer, .wipeMobile, .unmanage, .deleteRecord])
     }
 
     @Test("A PIN for Lock and Wipe Computer, on Jamf Pro only")

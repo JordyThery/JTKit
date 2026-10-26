@@ -1,5 +1,33 @@
 # Changelog
 
+## 0.9.1 (2026-10-26)
+Step 8 for Checkpoint: Intune devices and commands. Additions; one label change.
+- `IntuneManagedDevice` (`Intune/IntuneDevices.swift`): a typed, tolerant
+  device record (only `id` required) with Checkpoint's 13 fields and its
+  derived values: kind (Macs and Windows are computers), ADE, still managed,
+  iPhone/iPad, compliance in words, the admin center link. Dates stay as
+  Graph writes them.
+- `Graph.Client.intuneDevices()` and `intuneDevicesBySerial()`: the whole
+  tenant with those fields, 1,000 per page, the answers recorded in the
+  activity log (`list`/`listRaw` gain `recordsBodies`). By serial: any case,
+  the first record wins, devices without a serial left out.
+  `intuneTestConnection()` reads one device ID.
+- `MDMCommand`: Intune is a product (`.intune`). Intune's own texts; its own
+  names for two commands, "Sync Device" and "Retire Device" (`title(on:)`;
+  confirmations use it). Which commands reach which Intune devices, each
+  command's Graph request (`intuneRequest(deviceID:)`) and permission
+  (`intunePermission`): PrivilegedOperations.All for every device action,
+  ReadWrite.All for the new `deleteRecord` (Intune only). Wipe, Retire and
+  Delete Record can't be undone: the connection is named and, from two
+  devices, the number typed. No PIN on Intune.
+- `Graph.Client.send(_:to:)` and `perform(_:intuneDeviceID:)`: one request per
+  device; never repeated after a server error or a dropped connection, only
+  after a 429; Delete Record is repeated (a 404 then means done). A refusal
+  names the command's permission.
+- **Changed:** Graph requests show "Intune" in the activity log's Source
+  column, not "Graph" (ROADMAP step 8, "Activity log"). Intune Deployer
+  shows it too once it builds against 0.9.1.
+
 ## 0.9.0 (2026-10-26)
 Step 8 for Intune Deployer: Microsoft Graph and Microsoft's sign-in.
 Additions, plus a new optional product. The Intune device list and commands

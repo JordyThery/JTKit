@@ -69,14 +69,14 @@ struct GraphClientTests {
         #expect(parts.query == "$filter=displayName%20eq%20'A%26B'&$select=id")
     }
 
-    @Test("Entries say service Intune, category Graph and the connection")
+    @Test("Entries say Intune as service and category, and the connection")
     func logEntries() async throws {
         let log = ActivityLog()
         let server = MockServer { _ in ok }
         _ = try await graphClient(server, log: log).getRaw("me", version: .v1)
         let entry = try #require(log.entries.first)
         #expect(entry.service == "Intune")
-        #expect(entry.category == "Graph")
+        #expect(entry.category == "Intune")
         #expect(entry.connection == "Contoso")
         #expect(entry.request?.maxAttempts == 4)
     }
