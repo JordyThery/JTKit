@@ -1,5 +1,24 @@
 # Changelog
 
+## 0.8.4 (2026-10-26)
+The privilege table checked against Jamf Pro's own privilege list. One
+correction every app sending Update Inventory gets, and two names removed.
+- **Fixed: Update Inventory names "Send Inventory Requests to Mobile
+  Devices"**, the privilege Jamf Pro has; "Update Inventory for Mobile
+  Devices" doesn't exist, so a refused Update Inventory pointed to a
+  privilege nobody could add. `sendInventoryRequestsToMobileDevices` is new;
+  `updateInventoryForMobileDevices` is deprecated and now holds the correct
+  name.
+- **Removed:** `updateLocalAdminPassword` ("Update Local Admin Password") and
+  `sendComputerRemoteCommand` ("Send Computer Remote Command"). Neither is a
+  Jamf Pro privilege and no app used them (decided by Jordy; removed rather
+  than deprecated).
+- The privilege test also checks every name in the table (apart from the
+  deprecated ones) against the 525 privileges Jamf Pro 11.33.1 offers for an
+  API role (`Fixtures/jamf-pro-11.33.1-privilege-names.json`, names only,
+  read from a test instance). Every other name, JamfMigrator's Classic-only
+  ones included, is on it.
+
 ## 0.8.3 (2026-10-26)
 Step 7 for JamfMigrator: the privileges its objects need, the "what to
 grant" sentence, several privileges on a paged list, and requests recorded

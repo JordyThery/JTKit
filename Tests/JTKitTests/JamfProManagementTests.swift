@@ -272,19 +272,17 @@ struct PrivilegeTableTests {
     /// missing from it is a renamed or misspelt privilege.
     static let notInDescription: [String: String] = [
         "Delete Mobile Devices": "Classic API (mobiledevices/id/{id}); not in this description",
-        "Update Inventory for Mobile Devices": "Classic API command; not in this description",
+        "Send Inventory Requests to Mobile Devices": "checked by Jamf Pro for the Classic command; not in this description",
         "Send Computer Remote Lock Command": "checked by Jamf Pro for the command; the description lists only View MDM command information",
         "Send Mobile Device Remote Lock Command": "checked by Jamf Pro for the command; the description lists only View MDM command information",
         "Send Mobile Device Remove Passcode Command": "checked by Jamf Pro for the command; the description lists only View MDM command information",
         "Send Mobile Device Restart Device Command": "checked by Jamf Pro for the command; the description lists only View MDM command information",
         "Send Mobile Device Shut Down Command": "checked by Jamf Pro for the command; the description lists only View MDM command information",
-        "Send Computer Remote Command": "unused by every app; Classic API",
         "Create Policies": "Classic API (policies); used by Jamf Deployer's preflight",
         "Read Patch Internal Source": "Classic API (patch sources)",
         "Read Patch External Source": "Classic API (patch sources)",
         "View License Serial": "deprecated: Jamf Pro names it View License Serial Numbers",
         "View License Serial Numbers": "Classic API (licensed software's serial numbers)",
-        "Update Local Admin Password": "unused by every app; the description has Update Local Admin Password Settings",
         "Send Blank Push": "deprecated: not a Jamf Pro privilege",
     ]
 
@@ -370,6 +368,25 @@ struct PrivilegeTableTests {
         "Delete Webhooks",
     ]
 
+    /// Every privilege name Jamf Pro 11.33.1 offers for an API role
+    /// (Fixtures/jamf-pro-11.33.1-privilege-names.json, read from a test
+    /// instance's `GET api/v1/api-role-privileges` on 2026-10-26; names only).
+    static let privilegeNames: Set<String> = {
+        let url = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
+            .appendingPathComponent("Fixtures/jamf-pro-11.33.1-privilege-names.json")
+        struct File: Decodable { let privileges: [String] }
+        return Set((try? JSONDecoder().decode(File.self, from: Data(contentsOf: url)).privileges) ?? [])
+    }()
+
+    /// Table entries marked deprecated: kept for old callers, not Jamf Pro names.
+    static let deprecated: Set<String> = {
+        let url = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
+            .appendingPathComponent("../../Sources/JTKit/Jamf/Pro/JamfPro.swift")
+        let source = (try? String(contentsOf: url, encoding: .utf8)) ?? ""
+        return Set(source.matches(of: /@available\(\*, deprecated[^\n]*\n\s*public static let \w+: Privilege = "([^"]+)"/)
+            .map { String($0.1) })
+    }()
+
     /// Every `Privilege` constant in JTKit's table.
     static let table: [String] = {
         let url = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
@@ -382,6 +399,14 @@ struct PrivilegeTableTests {
     func fixture() {
         #expect(Self.description.count > 400)
         #expect(Self.table.count > 40)
+    }
+
+    @Test("Every privilege in the table is one Jamf Pro offers for an API role")
+    func privilegeList() {
+        #expect(Self.privilegeNames.count == 525)
+        for name in Self.table where !Self.deprecated.contains(name) {
+            #expect(Self.privilegeNames.contains(name), "“\(name)” isn’t a Jamf Pro 11.33.1 privilege: renamed or misspelt?")
+        }
     }
 
     @Test("Every privilege in the table is one Jamf Pro lists, or explained")
