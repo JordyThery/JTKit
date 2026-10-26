@@ -62,6 +62,8 @@ public nonisolated struct RequestRecorder: Sendable {
     ///   - recordsOnlyFailures: add an entry only when the request fails (an
     ///     error, or status 400 and up), e.g. for the many blocks of one
     ///     upload that the app sums up in one entry of its own.
+    ///   - withholdsContents: record it as a sensitive call (see
+    ///     `HTTPRequest.withholdsContents`).
     /// - Throws: `CancellationError` when cancelled, otherwise the session's error.
     public func send(
         _ request: URLRequest,
@@ -71,7 +73,8 @@ public nonisolated struct RequestRecorder: Sendable {
         recordsBodies: Bool = false,
         recordedJSON: RecordedJSONFilter? = nil,
         redirects: RedirectRule = .follow,
-        recordsOnlyFailures: Bool = false
+        recordsOnlyFailures: Bool = false,
+        withholdsContents: Bool = false
     ) async throws -> (Data, HTTPURLResponse) {
         let request = request.withDefaultUserAgent()
         let date = Date()
@@ -79,7 +82,8 @@ public nonisolated struct RequestRecorder: Sendable {
         let delegate = redirects == .follow ? nil : RedirectDelegate(rule: redirects)
         let context = Context(request: request, category: category ?? self.category, date: date,
                               attempt: attempt, maxAttempts: maxAttempts, recordsBodies: recordsBodies,
-                              recordedJSON: recordedJSON, recordsOnlyFailures: recordsOnlyFailures)
+                              recordedJSON: recordedJSON, recordsOnlyFailures: recordsOnlyFailures,
+                              withholdsContents: withholdsContents)
         let data: Data
         let response: URLResponse
         do {
@@ -181,6 +185,7 @@ public nonisolated struct RequestRecorder: Sendable {
         let recordedJSON: RecordedJSONFilter?
         var recordsOnlyFailures = false
         var isDownload = false
+        var withholdsContents = false
     }
 
     private func record(
@@ -214,7 +219,8 @@ public nonisolated struct RequestRecorder: Sendable {
         let request = context.request
         let method = request.httpMethod ?? "GET"
         let url = request.url
-        let sensitive = url.map { SensitiveRequests.isSensitive(path: $0.path(percentEncoded: true)) } ?? false
+        let sensitive = context.withholdsContents
+            || (url.map { SensitiveRequests.isSensitive(path: $0.path(percentEncoded: true)) } ?? false)
         let redactedURL = url.map(Redaction.url) ?? ""
         let path = url?.path(percentEncoded: true) ?? ""
         let query = url?.query(percentEncoded: true).map { "?" + Redaction.formFields($0) } ?? ""

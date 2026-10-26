@@ -349,6 +349,15 @@ struct JamfProHintTests {
         #expect(error?.message().contains("The user account is missing the “Update Mobile Devices” privilege. Add it in Jamf Pro under Settings › User Accounts and Groups.") == true)
     }
 
+    @Test("A paged list that needs several privileges names them all when refused")
+    func pagedListPrivileges() async throws {
+        let server = MockServer { _ in .json(403, "{}") }
+        let error = await thrown(JamfPlatformError.self) {
+            _ = try await proClient(server).allPages("pro/v1/things", privileges: [.readSmartUserGroups, .readStaticUserGroups]) { $0 }
+        }
+        #expect(error?.message().contains("The API role is missing one of these privileges: “Read Smart User Groups”, “Read Static User Groups”.") == true)
+    }
+
     @Test("Without a known privilege, the general wording")
     func unknownPrivilege() async throws {
         let server = MockServer { _ in .json(403, "{}") }

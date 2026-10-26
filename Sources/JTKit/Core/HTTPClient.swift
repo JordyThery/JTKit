@@ -28,6 +28,11 @@ public nonisolated struct HTTPRequest: Sendable {
     /// returns what may be recorded. A body that isn't JSON then isn't
     /// recorded at all. The answer the app receives is unchanged.
     public var recordedJSON: RecordedJSONFilter?
+    /// Record only the method, path, status and duration, as for JTKit's
+    /// built-in sensitive calls: no headers, no bodies, not even an error
+    /// answer's. For requests whose contents the app knows can carry a
+    /// secret, e.g. licence serial numbers.
+    public var withholdsContents: Bool
 
     public init(
         method: String = "GET",
@@ -39,7 +44,8 @@ public nonisolated struct HTTPRequest: Sendable {
         headers: [String: String] = [:],
         safeToRepeat: Bool = false,
         recordsBodies: Bool = false,
-        recordedJSON: RecordedJSONFilter? = nil
+        recordedJSON: RecordedJSONFilter? = nil,
+        withholdsContents: Bool = false
     ) {
         self.method = method
         self.path = path
@@ -51,6 +57,7 @@ public nonisolated struct HTTPRequest: Sendable {
         self.safeToRepeat = safeToRepeat
         self.recordsBodies = recordsBodies
         self.recordedJSON = recordedJSON
+        self.withholdsContents = withholdsContents
     }
 
     /// GET and HEAD.
@@ -332,7 +339,7 @@ public actor HTTPClient {
             do {
                 (data, http) = try await recorder.send(urlRequest, attempt: attempt, of: rules.maxAttempts,
                                                        recordsBodies: request.recordsBodies, recordedJSON: request.recordedJSON,
-                                                       redirects: redirects)
+                                                       redirects: redirects, withholdsContents: request.withholdsContents)
             } catch let error as URLError {
                 if RetryRules.networkDrops.contains(error.code) && repeatable && attempt < rules.maxAttempts {
                     try await wait(rules.backoff(afterAttempt: attempt, random: random()),

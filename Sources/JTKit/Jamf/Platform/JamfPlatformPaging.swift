@@ -74,8 +74,22 @@ extension JamfPlatform.Client {
         privilege: JamfPro.Privilege? = nil,
         item: @escaping @Sendable (LosslessJSON) -> Item?
     ) async throws -> [Item] {
+        try await allPages(path, query: query, pageSize: pageSize, maxPages: maxPages,
+                           privileges: privilege.map { [$0] } ?? [], item: item)
+    }
+
+    /// As `allPages(_:privilege:)`, for a list that needs several
+    /// privileges, all named when Jamf Pro refuses it.
+    public func allPages<Item: Sendable>(
+        _ path: String,
+        query: [URLQueryItem] = [],
+        pageSize: Int = 100,
+        maxPages: Int = 1_000,
+        privileges: [JamfPro.Privilege],
+        item: @escaping @Sendable (LosslessJSON) -> Item?
+    ) async throws -> [Item] {
         try await JamfPlatform.allPages(of: path, pageSize: pageSize, maxPages: maxPages) { page in
-            try await self.page(path, page: page, pageSize: pageSize, query: query, privilege: privilege, item: item)
+            try await self.page(path, page: page, pageSize: pageSize, query: query, privileges: privileges, item: item)
         }
     }
 
@@ -88,7 +102,20 @@ extension JamfPlatform.Client {
         privilege: JamfPro.Privilege? = nil,
         item: (LosslessJSON) -> Item?
     ) async throws -> JamfPlatform.Page<Item> {
+        try await self.page(path, page: page, pageSize: pageSize, query: query,
+                            privileges: privilege.map { [$0] } ?? [], item: item)
+    }
+
+    /// One page of a list that needs several privileges.
+    public func page<Item: Sendable>(
+        _ path: String,
+        page: Int,
+        pageSize: Int,
+        query: [URLQueryItem] = [],
+        privileges: [JamfPro.Privilege],
+        item: (LosslessJSON) -> Item?
+    ) async throws -> JamfPlatform.Page<Item> {
         let paging = [URLQueryItem(name: "page", value: String(page)), URLQueryItem(name: "page-size", value: String(pageSize))]
-        return try JamfPlatform.Page(json: try await json(path, query: paging + query, privilege: privilege), item: item)
+        return try JamfPlatform.Page(json: try await json(path, query: paging + query, privileges: privileges), item: item)
     }
 }

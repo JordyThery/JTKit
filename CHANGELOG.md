@@ -1,5 +1,41 @@
 # Changelog
 
+## 0.8.3 (2026-10-26)
+Step 7 for JamfMigrator: the privileges its objects need, the "what to
+grant" sentence, several privileges on a paged list, and requests recorded
+without contents. Additions, plus one fix every app on 0.8.1 or later gets.
+- **Fix: a password in a Classic API error page could show in the error
+  message** (apps on 0.8.1 or later). Since 0.8.1 an HTML or XML error page
+  reads as its message, but the tags were taken out before secrets were
+  hidden, so `<password>…</password>` no longer marked the value as one. The
+  page is now redacted first, then read. Found by JamfMigrator's own
+  redaction test.
+- `JamfPro.Privilege`: Read, Create, Update and Delete for every object
+  JamfMigrator copies (sites, categories, buildings, departments, network
+  segments, extension attributes, scripts, packages, distribution points,
+  LDAP servers, accounts, users and user groups, directory bindings, software
+  update servers, smart and static groups, advanced searches, configuration
+  profiles, Mac and mobile device applications, eBooks, classes, restricted
+  and licensed software, printers, Dock items, policies, patch titles and
+  policies, enrollment customizations, PreStages, webhooks) and Read and
+  Update for its settings (check-in, inventory collection, SMTP server, Self
+  Service, re-enrollment, LAPS settings, onboarding, SSO). Those on the Jamf
+  Pro API match Jamf Pro 11.33.1's description; the Classic-only ones are
+  listed as explained exceptions in the privilege test. Added: Read Patch
+  External Source and View License Serial Numbers; `viewLicenseSerial`
+  ("View License Serial") is deprecated for the latter.
+- `JamfPlatform.PermissionCheck.hint(for:on:signIn:)`: one sentence naming
+  what to grant for several missing checks: the permissions in Jamf Account,
+  or on a Jamf Pro server the privileges, on the API role for an API client
+  and on the user account for a username and password.
+- `allPages`, `page` and `json` take `privileges:` for a list that needs
+  several; a refusal names them all. The one-privilege forms are unchanged.
+- `HTTPRequest.withholdsContents` (and `RequestRecorder.send(withholdsContents:)`):
+  the app marks a request to be recorded like JTKit's built-in sensitive
+  calls, only method, path, status and duration, also when it fails.
+  JamfMigrator uses it for licensed software, whose writes carry licence
+  serial numbers.
+
 ## 0.8.2 (2026-10-26)
 Step 7 for Checkpoint, part two: its remaining Jamf Pro calls, the secret
 rules, copying a secret, and the privilege table checked against Jamf Pro's
