@@ -74,7 +74,7 @@ Paths are relative to `~/Developer`. Line counts show how far copies have drifte
 
 Settings views exist in every app but are mostly app-specific; share sections (updates from step 3, connections from step 4), not whole screens. No app has a logging setting; logs are windows (activity log, ROADMAP step 5).
 
-Jamf Deployer's `DeployerKit` is an earlier shared package; its pieces move into JTKit (ROADMAP step 2). Not candidates: Jamf Deployer's `JamfDeployerCore` is app-specific. IntuneOnboard (with `OnboardCore`) and Device Assist are out of JTKit entirely.
+Jamf Deployer's `DeployerKit` was an earlier shared package. Its pieces moved into JTKit (ROADMAP steps 2 and 5; the version comparison for bundled components into the app), and the package was removed on 2026-10-26. Not candidates: Jamf Deployer's `JamfDeployerCore` is app-specific. IntuneOnboard (with `OnboardCore`) and Device Assist are out of JTKit entirely.
 
 ## Order and sources
 
