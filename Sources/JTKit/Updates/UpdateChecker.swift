@@ -122,7 +122,7 @@ public final class UpdateChecker {
         var request = URLRequest(url: url)
         request.setValue("application/vnd.github+json", forHTTPHeaderField: "Accept")
         do {
-            let (data, response) = try await session.data(for: request)
+            let (data, response) = try await session.data(for: request.withDefaultUserAgent())
             let status = (response as? HTTPURLResponse)?.statusCode ?? 0
             guard status == 200 else {
                 throw UpdateError(message: "GitHub did not answer (HTTP \(status)).")

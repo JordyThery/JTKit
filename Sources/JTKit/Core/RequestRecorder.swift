@@ -8,6 +8,8 @@ import Foundation
 /// What an entry records, the same in every app:
 /// - method, full address (secret query parameters redacted), status,
 ///   duration, attempt, and the request and response headers, redacted;
+/// - JTKit's User-Agent ("AppName/version", `JTKit.userAgent`) unless the
+///   request sets its own;
 /// - request bodies never, and response bodies only for errors (status 400
 ///   and up), unless the request is marked safe (`recordsBodies`). Bodies
 ///   can carry secrets that no key list finds, e.g. a Wi-Fi password inside
@@ -71,6 +73,7 @@ public nonisolated struct RequestRecorder: Sendable {
         redirects: RedirectRule = .follow,
         recordsOnlyFailures: Bool = false
     ) async throws -> (Data, HTTPURLResponse) {
+        let request = request.withDefaultUserAgent()
         let date = Date()
         let started = ContinuousClock.now
         let delegate = redirects == .follow ? nil : RedirectDelegate(rule: redirects)
@@ -110,6 +113,7 @@ public nonisolated struct RequestRecorder: Sendable {
         of maxAttempts: Int = 1,
         redirects: RedirectRule = .follow
     ) async throws -> (URL, HTTPURLResponse) {
+        let request = request.withDefaultUserAgent()
         let date = Date()
         let started = ContinuousClock.now
         let delegate = redirects == .follow ? nil : RedirectDelegate(rule: redirects)

@@ -40,9 +40,17 @@ extension JamfPlatform {
             "Add the “\(permission)” permission to the API integration in Jamf Account."
         }
 
-        /// The same for a Jamf Pro API role or user account.
+        /// The same for a Jamf Pro server reached directly.
         public var jamfProHint: String? {
-            jamfProPrivilege.map { "Add the “\($0)” privilege to the API role or user account in Jamf Pro." }
+            jamfProPrivilege.map { "Add the “\($0)” privilege to the API role in Jamf Pro under Settings › API Roles and Clients." }
+        }
+
+        /// What to do when the permission is missing on `server`: in Jamf
+        /// Account, or in Jamf Pro's API roles (naming the privilege when
+        /// the check knows it).
+        public func hint(on server: JamfPlatform.Server) -> String {
+            guard server == .jamfPro else { return hint }
+            return jamfProHint ?? "Add the privilege for “\(name)” to the API role in Jamf Pro under Settings › API Roles and Clients."
         }
     }
 

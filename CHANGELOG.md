@@ -1,5 +1,24 @@
 # Changelog
 
+## 0.7.1 (2026-10-26)
+Step 6 for JamfMigrator. Additions; nothing an app calls today changes.
+- `JamfPlatform.Client` also reaches a Jamf Pro server directly
+  (`JamfPlatform.Server.jamfPro`): built from a Jamf Pro `Connection`, or with
+  `server: .jamfPro` and `.organization` scope. Gateway-form paths are mapped
+  (`pro/…` → `api/…`, `proclassic/…` → `JSSResource/…`); Platform-only paths
+  are refused before sending. `server` tells which one a client uses.
+- `JamfPlatform.Client`: `headers:` for headers of the app's own on every
+  request, and `recorder` for the few requests that don't go through the
+  client (e.g. an image on another host).
+- The "forbidden" hint depends on where the request went: on a Jamf Pro
+  server it says a privilege is missing and points to Settings › API Roles
+  and Clients, on the Platform API to Jamf Account. `JamfPlatformError.server`
+  carries it; the client sets it. `PermissionCheck.jamfProHint` names the
+  privilege and points to the same place; `hint(on:)` picks the right hint.
+- JTKit sends "AppName/version" as the User-Agent of every request it makes
+  (`JTKit.userAgent`: the bundle name without spaces), unless the request
+  sets its own: the request recorder, sign-ins and the update checker.
+
 ## 0.7.0 (2026-10-26)
 Step 6: the Jamf Platform API, built with AppSettings2Blueprint. Additions,
 plus one new option in the shared connection editor. The device, DDM and

@@ -147,6 +147,75 @@ struct JamfPlatformClientTests {
         #expect(log.entries.count == 1)
         #expect(log.entries.first?.service == "Jamf Platform API")
     }
+
+    @Test("A Jamf Pro connection goes straight to the server: paths mapped, no scope header, Platform-only paths refused")
+    func jamfProDirect() async throws {
+        let server = MockServer { $0.path == "/api/oauth/token" ? .json(200, tokenJSON("pro-tok")) : .json(200, "{}") }
+        let connection = Connection(name: "Lab", service: .jamfPro, serverURL: "https://lab.jamfcloud.com", clientID: "client-1")
+        let client = try JamfPlatform.Client(connection: connection, secret: { "s" },
+                                             recorder: RequestRecorder(session: server.session, log: nil))
+        #expect(client.server == .jamfPro && client.scope == .organization)
+        _ = try await client.json("pro/v1/categories")
+        _ = try await client.send(HTTPRequest(path: "proclassic/policies", accept: "application/xml"))
+        let paths = server.requests.map(\.path)
+        #expect(paths.contains("/api/v1/categories") && paths.contains("/JSSResource/policies"))
+        #expect(server.requests.allSatisfy { $0.url.host() == "lab.jamfcloud.com" && $0.header("X-Environment-Id") == nil })
+        let error = await thrown { _ = try await client.json("blueprints/v1/blueprints") }
+        guard case .invalidResponse? = error?.kind else { Issue.record("Got \(String(describing: error))"); return }
+        #expect(error?.server == .jamfPro)
+    }
+
+    @Test("Extra headers go with every request; JTKit's User-Agent is sent unless the app sets its own")
+    func headersAndUserAgent() async throws {
+        let server = MockServer { _ in .json(200, "{}") }
+        let recorder = RequestRecorder(session: server.session, log: nil)
+        let plain = try JamfPlatform.Client(baseURL: gateway, scope: .environment(environmentID), tokens: FixedToken("t"),
+                                            recorder: recorder, headers: ["X-Extra": "1"])
+        _ = try await plain.json("/x")
+        #expect(server.requests[0].header("X-Extra") == "1")
+        #expect(server.requests[0].header("User-Agent") == JTKit.userAgent)
+        #expect(plain.recorder.session === server.session)
+        let own = try JamfPlatform.Client(baseURL: gateway, scope: .environment(environmentID), tokens: FixedToken("t"),
+                                          recorder: recorder, headers: ["User-Agent": "Custom/2"])
+        _ = try await own.json("/x")
+        #expect(server.requests[1].header("User-Agent") == "Custom/2")
+    }
+
+    @Test("A missing permission on a Jamf Pro server points to its API roles, on the Platform API to Jamf Account")
+    func forbiddenHintByServer() async throws {
+        let server = MockServer { _ in .json(403, #"{"httpStatus":403,"errors":[{"code":"INVALID_PRIVILEGE"}]}"#) }
+        let recorder = RequestRecorder(session: server.session, log: nil)
+        let pro = try JamfPlatform.Client(baseURL: URL(string: "https://lab.jamfcloud.com")!, scope: .organization, server: .jamfPro,
+                                          tokens: FixedToken("t"), recorder: recorder)
+        let proError = await thrown { _ = try await pro.json("pro/v1/scripts") }
+        #expect(proError?.message().contains("Settings › API Roles and Clients") == true)
+        #expect(proError?.message().contains("Jamf Account") == false)
+        let platformError = await thrown { _ = try await platformClient(server).json("pro/v1/scripts") }
+        #expect(platformError?.message().contains("Check its permissions in Jamf Account") == true)
+        #expect(platformError?.message().contains("API Roles and Clients") == false)
+    }
+}
+
+@Suite("User-Agent")
+@MainActor
+struct UserAgentTests {
+    @Test("AppName/version, without the spaces of the bundle name")
+    func format() {
+        #expect(JTKit.userAgent(info: ["CFBundleName": "Jamf Migrator", "CFBundleShortVersionString": "1.0.5"]) == "JamfMigrator/1.0.5")
+        #expect(JTKit.userAgent(info: ["CFBundleName": "Checkpoint"]) == "Checkpoint/0")
+    }
+
+    @Test("The recorder adds it to a request without one, e.g. an image on another host, and records no body of a success")
+    func recorder() async throws {
+        let log = ActivityLog()
+        let server = MockServer { _ in .json(200, #"{"image":"bytes"}"#) }
+        let recorder = RequestRecorder(session: server.session, log: log)
+        _ = try await recorder.send(URLRequest(url: URL(string: "https://icons.example/abc.png")!), category: "Icons")
+        #expect(server.requests.first?.header("User-Agent") == JTKit.userAgent)
+        let entry = try #require(log.entries.first)
+        #expect(entry.request?.responseBody == nil)
+        #expect(entry.request?.requestHeaders.contains { $0.name == "User-Agent" && $0.value == JTKit.userAgent } == true)
+    }
 }
 
 // MARK: - Errors
@@ -407,7 +476,10 @@ struct JamfPlatformPermissionTests {
     func hints() {
         #expect(JamfPlatform.PermissionCheck.blueprintsRead.hint == "Add the “blueprints:read” permission to the API integration in Jamf Account.")
         let pro = JamfPlatform.PermissionCheck("Read scripts", path: "/pro/v1/scripts", permission: "scripts:read", jamfProPrivilege: "Read Scripts")
-        #expect(pro.jamfProHint == "Add the “Read Scripts” privilege to the API role or user account in Jamf Pro.")
+        #expect(pro.jamfProHint == "Add the “Read Scripts” privilege to the API role in Jamf Pro under Settings › API Roles and Clients.")
+        #expect(pro.hint(on: .jamfPro) == pro.jamfProHint)
+        #expect(pro.hint(on: .platformAPI) == pro.hint)
+        #expect(JamfPlatform.PermissionCheck.blueprintsRead.hint(on: .jamfPro).contains("privilege for “Read Blueprints”"))
     }
 }
 
