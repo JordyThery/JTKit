@@ -47,6 +47,10 @@ extension JamfPlatform {
         public var recorder: RequestRecorder { http.recorder }
         private let tokens: any BearerTokenSource
         private let hints: @Sendable (JamfPlatformError) -> [String]
+        /// Tests only: told the path, method and privileges of every request,
+        /// so the privilege table can be checked against Jamf Pro's API
+        /// description.
+        var observePrivileges: (@Sendable (_ path: String, _ method: String, _ privileges: [JamfPro.Privilege]) -> Void)?
 
         /// A client for a saved connection.
         ///
@@ -148,13 +152,20 @@ extension JamfPlatform {
         ///   named in the hint when Jamf Pro refuses it.
         /// - Throws: `JamfPlatformError`, `CancellationError`, or the secret's own error.
         public func send(_ request: HTTPRequest, privilege: JamfPro.Privilege? = nil) async throws -> HTTPResponse {
+            try await send(request, privileges: privilege.map { [$0] } ?? [])
+        }
+
+        /// As `send(_:privilege:)`, for a request that needs several
+        /// privileges, all named when Jamf Pro refuses it.
+        public func send(_ request: HTTPRequest, privileges: [JamfPro.Privilege]) async throws -> HTTPResponse {
+            observePrivileges?(request.path, request.method, privileges)
             do {
                 return try await http.send(request)
             } catch let HTTPError.status(response, _, _, duringSignIn) where !duringSignIn && errorStatus == .returned {
                 return response
             } catch let error as HTTPError {
                 var error = JamfPlatformError(error)
-                error.privilege = privilege
+                error.privileges = privileges
                 throw failure(error)
             }
         }
@@ -162,10 +173,14 @@ extension JamfPlatform {
         /// `send`, but an error status is always thrown, also by a client
         /// that returns them (`errorStatus: .returned`): for JTKit's own calls.
         func sendThrowing(_ request: HTTPRequest, privilege: JamfPro.Privilege? = nil) async throws -> HTTPResponse {
-            let response = try await send(request, privilege: privilege)
+            try await sendThrowing(request, privileges: privilege.map { [$0] } ?? [])
+        }
+
+        func sendThrowing(_ request: HTTPRequest, privileges: [JamfPro.Privilege]) async throws -> HTTPResponse {
+            let response = try await send(request, privileges: privileges)
             guard (200..<300).contains(response.status) else {
                 var error = JamfPlatformError(HTTPError.status(response, method: request.method, path: request.path, duringSignIn: false))
-                error.privilege = privilege
+                error.privileges = privileges
                 throw failure(error)
             }
             return response

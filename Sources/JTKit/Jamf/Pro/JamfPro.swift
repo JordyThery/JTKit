@@ -75,6 +75,8 @@ extension JamfPro {
         public static let readDeviceEnrollmentProgramInstances: Privilege = "Read Device Enrollment Program Instances"
         public static let updateComputerPreStageEnrollments: Privilege = "Update Computer PreStage Enrollments"
         public static let updateMobileDevicePreStageEnrollments: Privilege = "Update Mobile Device PreStage Enrollments"
+        public static let readComputerPreStageEnrollments: Privilege = "Read Computer PreStage Enrollments"
+        public static let readMobileDevicePreStageEnrollments: Privilege = "Read Mobile Device PreStage Enrollments"
         public static let readUserInitiatedEnrollment: Privilege = "Read User-Initiated Enrollment"
 
         // Compliance
@@ -89,6 +91,7 @@ extension JamfPro {
         public static let updateLocalAdminPassword: Privilege = "Update Local Admin Password"
 
         // Commands
+        @available(*, deprecated, message: "Not a Jamf Pro privilege: v2/mdm/blank-push needs viewMDMCommandInformation.")
         public static let sendBlankPush: Privilege = "Send Blank Push"
         public static let sendComputerRemoteCommand: Privilege = "Send Computer Remote Command"
         public static let sendComputerRemoteLockCommand: Privilege = "Send Computer Remote Lock Command"

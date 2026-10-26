@@ -71,10 +71,11 @@ extension JamfPlatform.Client {
         query: [URLQueryItem] = [],
         pageSize: Int = 100,
         maxPages: Int = 1_000,
+        privilege: JamfPro.Privilege? = nil,
         item: @escaping @Sendable (LosslessJSON) -> Item?
     ) async throws -> [Item] {
         try await JamfPlatform.allPages(of: path, pageSize: pageSize, maxPages: maxPages) { page in
-            try await self.page(path, page: page, pageSize: pageSize, query: query, item: item)
+            try await self.page(path, page: page, pageSize: pageSize, query: query, privilege: privilege, item: item)
         }
     }
 
@@ -84,9 +85,10 @@ extension JamfPlatform.Client {
         page: Int,
         pageSize: Int,
         query: [URLQueryItem] = [],
+        privilege: JamfPro.Privilege? = nil,
         item: (LosslessJSON) -> Item?
     ) async throws -> JamfPlatform.Page<Item> {
         let paging = [URLQueryItem(name: "page", value: String(page)), URLQueryItem(name: "page-size", value: String(pageSize))]
-        return try JamfPlatform.Page(json: try await json(path, query: paging + query), item: item)
+        return try JamfPlatform.Page(json: try await json(path, query: paging + query, privilege: privilege), item: item)
     }
 }

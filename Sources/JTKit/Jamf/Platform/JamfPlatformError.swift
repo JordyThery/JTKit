@@ -138,9 +138,17 @@ public nonisolated struct JamfPlatformError: Error, LocalizedError, Sendable {
     /// How the client signs in, which decides where a Jamf Pro privilege is
     /// added (an API role, or a user account); the client sets it.
     public var signIn: SignInMethod
-    /// The Jamf Pro privilege the request needs, named in the hint when Jamf
-    /// Pro refuses it (403); the calls set it from `JamfPro.Privilege`.
-    public var privilege: JamfPro.Privilege?
+    /// The Jamf Pro privileges the request needs, named in the hint when
+    /// Jamf Pro refuses it (403); the calls set them from `JamfPro.Privilege`.
+    /// Usually one; an MDM command needs two (View MDM command information,
+    /// and the command's own).
+    public var privileges: [JamfPro.Privilege]
+
+    /// The first of `privileges`; setting it replaces them.
+    public var privilege: JamfPro.Privilege? {
+        get { privileges.first }
+        set { privileges = newValue.map { [$0] } ?? [] }
+    }
 
     public init(_ kind: Kind, appHints: [String] = [], server: JamfPlatform.Server = .platformAPI,
                 signIn: SignInMethod = .apiClient, privilege: JamfPro.Privilege? = nil) {
@@ -148,7 +156,7 @@ public nonisolated struct JamfPlatformError: Error, LocalizedError, Sendable {
         self.appHints = appHints
         self.server = server
         self.signIn = signIn
-        self.privilege = privilege
+        self.privileges = privilege.map { [$0] } ?? []
     }
 
     /// JTKit's HTTP error in the Platform API's terms, with the error body read.
@@ -238,7 +246,11 @@ public nonisolated struct JamfPlatformError: Error, LocalizedError, Sendable {
     /// Names the privilege when the request carries one: an API client gets
     /// it from its API role, a user account from its own privileges.
     private var jamfProPrivilegeHint: String {
-        let missing = privilege.map { "the “\($0.rawValue)” privilege" } ?? "a privilege for this request"
+        let missing = switch privileges.count {
+        case 0: "a privilege for this request"
+        case 1: "the “\(privileges[0].rawValue)” privilege"
+        default: "one of these privileges: " + privileges.map { "“\($0.rawValue)”" }.joined(separator: ", ")
+        }
         return signIn == .usernamePassword
             ? "The user account is missing \(missing). Add it in Jamf Pro under Settings › User Accounts and Groups."
             : "The API role is missing \(missing). Add it in Jamf Pro under Settings › API Roles and Clients."
@@ -278,6 +290,23 @@ public nonisolated struct JamfPlatformError: Error, LocalizedError, Sendable {
     }
 
     public var errorDescription: String? { message() }
+
+    /// The same error without anything the server wrote (its error lines,
+    /// Trace ID and text): only the status and JTKit's own hints. For the
+    /// secret reads, whose failure is recorded and could otherwise carry the
+    /// secret in the server's words (ROADMAP step 7, decided by Jordy).
+    public var withoutServerText: JamfPlatformError {
+        var copy = self
+        switch kind {
+        case let .status(status, _, _, method, path):
+            copy.kind = .status(status, body: nil, text: nil, method: method, path: path)
+        case let .signIn(status, _, _):
+            copy.kind = .signIn(status: status, body: nil, text: nil)
+        default:
+            break
+        }
+        return copy
+    }
 
     /// Everything about the error for a bug report, ready to copy: the
     /// request and the message (with the start of an answer that wasn't in a

@@ -15,6 +15,7 @@ let package = Package(
     targets: [
         .target(name: "JTKit"),
         .target(name: "JTKitTestSupport", dependencies: ["JTKit"]),
-        .testTarget(name: "JTKitTests", dependencies: ["JTKit", "JTKitTestSupport"]),
+        // Fixtures are read from disk by path, not bundled
+        .testTarget(name: "JTKitTests", dependencies: ["JTKit", "JTKitTestSupport"], exclude: ["Fixtures"]),
     ]
 )

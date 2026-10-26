@@ -1,5 +1,40 @@
 # Changelog
 
+## 0.8.2 (2026-10-26)
+Step 7 for Checkpoint, part two: its remaining Jamf Pro calls, the secret
+rules, copying a secret, and the privilege table checked against Jamf Pro's
+own API description. Additions, plus three corrections every app gets.
+- PreStages (list, scope, add, remove with the version lock), Automated
+  Device Enrollment (Apple's server IDs, serial → token), compliance (feature
+  switch, per device, recorded), the DDM status report (`ddmStatusItems`,
+  recorded) and Jamf Pro's flattened declaration text
+  (`JamfPro.flattenedDeclarations`), one declaration (`declaration(id:kind:)`,
+  never recorded), sites, site moves (safe to repeat, decided by Jordy),
+  department and building names (more than ten pages is an error, never a
+  list cut short).
+- The four secrets: `fileVaultKey`, `recoveryLockPassword`, `deviceLockPIN`,
+  `localAdminAccounts`, `localAdminPassword`, `localAdminRotationTime`.
+  Never recorded with contents. **A failed read carries only the status and
+  JTKit's hints, never the server's text** (`JamfPlatformError.withoutServerText`,
+  decided by Jordy): Checkpoint's tests showed a failed read's Action entry
+  could carry the secret in the server's words.
+- `JamfPro.Secret`: each secret's title, privilege and Action entry text;
+  only the LAPS password `rotatesWhenViewed`, with the question to ask first.
+- `SecretPasteboard.copy`: a secret on the clipboard is marked concealed
+  (`org.nspasteboard.ConcealedType`), kept on this Mac (not Universal
+  Clipboard), and cleared after 60 seconds if the clipboard still holds it.
+- Privileges checked against Jamf Pro 11.33.1's API description (a saved
+  extract of its `x-required-privileges` in the tests). Corrected:
+  **Blank Push** needs "View MDM command information in Jamf Pro API" (there
+  is no "Send Blank Push"; `sendBlankPush` is deprecated); **MDM commands**
+  (`v2/mdm/commands`) now name both that privilege and the command's own;
+  the **LAPS rotation setting** names "Read User-Initiated Enrollment", as the
+  description does. Added: Read Computer and Read Mobile Device PreStage
+  Enrollments. DDM status and declarations name Read Computers or Read
+  Mobile Devices, by device.
+- `JamfPlatformError.privileges`: a request can name several; the hint lists
+  them ("one of these privileges: …"). `privilege` still reads and sets the first.
+
 ## 0.8.1 (2026-10-26)
 Step 7 for Checkpoint: the MDM command list, the Platform API device calls
 deferred from step 6, the Classic API basics, and Jamf School's commands,

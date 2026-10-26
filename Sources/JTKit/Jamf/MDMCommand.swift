@@ -128,7 +128,9 @@ public nonisolated enum MDMCommand: String, CaseIterable, Sendable, Hashable {
         switch self {
         case .lockComputer: .sendComputerRemoteLockCommand
         case .wipeComputer: .sendComputerRemoteWipeCommand
-        case .blankPush: .sendBlankPush
+        // Jamf Pro's API description: v2/mdm/blank-push needs View MDM
+        // command information (there is no "Send Blank Push")
+        case .blankPush: .viewMDMCommandInformation
         case .renewProfile: .sendRenewMDMProfileCommand
         case .redeployFramework: .sendComputerInstallPackageCommand
         case .updateInventory: .updateInventoryForMobileDevices

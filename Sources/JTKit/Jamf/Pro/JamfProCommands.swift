@@ -156,12 +156,16 @@ extension JamfPlatform.Client {
         _ = try await sendThrowing(request, privilege: privilege)
     }
 
+    /// `v2/mdm/commands`. Jamf Pro's API description names only “View MDM
+    /// command information in Jamf Pro API” for it; Jamf Pro also checks the
+    /// command's own privilege, so a refusal names both.
     private func modernCommand(_ data: [String: any Sendable], managementIDs: [String], privilege: JamfPro.Privilege) async throws {
         let body = try JSONSerialization.data(withJSONObject: [
             "clientData": managementIDs.map { ["managementId": $0] },
             "commandData": data,
         ] as [String: Any])
-        _ = try await sendThrowing(HTTPRequest(method: "POST", path: "pro/v2/mdm/commands", body: body), privilege: privilege)
+        let privileges = privilege == .viewMDMCommandInformation ? [privilege] : [.viewMDMCommandInformation, privilege]
+        _ = try await sendThrowing(HTTPRequest(method: "POST", path: "pro/v2/mdm/commands", body: body), privileges: privileges)
     }
 
     /// Read when the command is sent, never during a lookup; the call is
@@ -227,7 +231,7 @@ extension JamfPlatform.Client {
         if !fallback.isEmpty {
             do {
                 try await modernCommand(["commandType": "DEVICE_INFORMATION", "queries": ["DeviceName"]],
-                                        managementIDs: fallback, privilege: .sendBlankPush)
+                                        managementIDs: fallback, privilege: .viewMDMCommandInformation)
             } catch is CancellationError {
                 throw CancellationError()
             } catch {
@@ -238,7 +242,7 @@ extension JamfPlatform.Client {
         do {
             let body = try JSONSerialization.data(withJSONObject: ["clientManagementIds": managementIDs])
             let response = try await sendThrowing(HTTPRequest(method: "POST", path: "pro/v2/mdm/blank-push", body: body),
-                                                  privilege: .sendBlankPush)
+                                                  privilege: .viewMDMCommandInformation)
             let failed = Set(((try? JSONDecoder().decode(Answer.self, from: response.data))?.errorUuids ?? []).map { $0.lowercased() })
             for target in receiving {
                 run.set(target, failed.contains((target.managementID ?? "").lowercased()) ? .notProcessed : .sent)

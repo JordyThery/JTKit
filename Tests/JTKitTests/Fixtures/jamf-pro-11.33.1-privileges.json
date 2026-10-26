@@ -1,0 +1,3242 @@
+{
+ "infoVersion": "production",
+ "openapi": "3.0.1",
+ "paths": {
+  "/devices/extensionAttributes": {
+   "get": [
+    "Read Mobile Device Extension Attributes"
+   ]
+  },
+  "/ldap/groups": {
+   "get": [
+    "Read LDAP Servers"
+   ]
+  },
+  "/ldap/servers": {
+   "get": [
+    "Read LDAP Servers"
+   ]
+  },
+  "/preview/computers": {
+   "get": [
+    "Read Computers"
+   ]
+  },
+  "/preview/remote-administration-configurations": {
+   "get": [
+    "Read Remote Administration"
+   ]
+  },
+  "/preview/remote-administration-configurations/team-viewer": {
+   "post": [
+    "Create Remote Administration"
+   ]
+  },
+  "/preview/remote-administration-configurations/team-viewer/{configurationId}/sessions": {
+   "get": [
+    "Read Remote Administration"
+   ],
+   "post": [
+    "Create Remote Administration"
+   ]
+  },
+  "/preview/remote-administration-configurations/team-viewer/{configurationId}/sessions/{sessionId}": {
+   "get": [
+    "Read Remote Administration"
+   ]
+  },
+  "/preview/remote-administration-configurations/team-viewer/{configurationId}/sessions/{sessionId}/close": {
+   "post": [
+    "Update Remote Administration"
+   ]
+  },
+  "/preview/remote-administration-configurations/team-viewer/{configurationId}/sessions/{sessionId}/resend-notification": {
+   "post": [
+    "Update Remote Administration"
+   ]
+  },
+  "/preview/remote-administration-configurations/team-viewer/{configurationId}/sessions/{sessionId}/status": {
+   "get": [
+    "Read Remote Administration"
+   ]
+  },
+  "/preview/remote-administration-configurations/team-viewer/{id}": {
+   "delete": [
+    "Delete Remote Administration"
+   ],
+   "get": [
+    "Read Remote Administration"
+   ],
+   "patch": [
+    "Update Remote Administration"
+   ]
+  },
+  "/preview/remote-administration-configurations/team-viewer/{id}/status": {
+   "get": [
+    "Read Remote Administration"
+   ]
+  },
+  "/self-service/branding/images": {
+   "post": [
+    "Update Self Service Branding Configuration"
+   ]
+  },
+  "/settings/issueTomcatSslCertificate": {
+   "post": [
+    "Update Apache Tomcat Settings"
+   ]
+  },
+  "/settings/obj/policyProperties": {
+   "get": [
+    "Read Policies"
+   ],
+   "put": [
+    "Update Policies"
+   ]
+  },
+  "/user": {
+   "get": [
+    "Read Accounts"
+   ]
+  },
+  "/v1/account-groups": {
+   "get": [
+    "Read Account Groups"
+   ]
+  },
+  "/v1/account-groups/{id}": {
+   "get": [
+    "Read Account Groups"
+   ]
+  },
+  "/v1/accounts": {
+   "get": [
+    "Read Accounts"
+   ],
+   "post": [
+    "Create Accounts"
+   ]
+  },
+  "/v1/accounts/{id}": {
+   "delete": [
+    "Delete Accounts"
+   ],
+   "get": [
+    "Read Accounts"
+   ],
+   "put": [
+    "Update Accounts"
+   ]
+  },
+  "/v1/activation-code": {
+   "put": [
+    "Update License Information"
+   ]
+  },
+  "/v1/activation-code/history": {
+   "get": [
+    "Read License Information"
+   ],
+   "post": [
+    "Update License Information"
+   ]
+  },
+  "/v1/activation-code/history/export": {
+   "post": [
+    "Read License Information"
+   ]
+  },
+  "/v1/activation-code/organization-name": {
+   "patch": [
+    "Update License Information"
+   ]
+  },
+  "/v1/adue-session-token-settings": {
+   "get": [
+    "Read User-Initiated Enrollment"
+   ],
+   "put": [
+    "Update User-Initiated Enrollment"
+   ]
+  },
+  "/v1/advanced-mobile-device-searches": {
+   "get": [
+    "Read Advanced Mobile Device Searches"
+   ],
+   "post": [
+    "Create Advanced Mobile Device Searches"
+   ]
+  },
+  "/v1/advanced-mobile-device-searches/choices": {
+   "get": [
+    "Read Advanced Mobile Device Searches"
+   ]
+  },
+  "/v1/advanced-mobile-device-searches/delete-multiple": {
+   "post": [
+    "Delete Advanced Mobile Device Searches"
+   ]
+  },
+  "/v1/advanced-mobile-device-searches/{id}": {
+   "delete": [
+    "Delete Advanced Mobile Device Searches"
+   ],
+   "get": [
+    "Read Advanced Mobile Device Searches"
+   ],
+   "put": [
+    "Update Advanced Mobile Device Searches"
+   ]
+  },
+  "/v1/advanced-user-content-searches": {
+   "get": [
+    "Read Advanced User Content Searches"
+   ],
+   "post": [
+    "Create Advanced User Content Searches"
+   ]
+  },
+  "/v1/advanced-user-content-searches/{id}": {
+   "delete": [
+    "Delete Advanced User Content Searches"
+   ],
+   "get": [
+    "Read Advanced User Content Searches"
+   ],
+   "put": [
+    "Update Advanced User Content Searches"
+   ]
+  },
+  "/v1/api-integrations": {
+   "get": [
+    "Read API Integrations"
+   ],
+   "post": [
+    "Create API Integrations"
+   ]
+  },
+  "/v1/api-integrations/{id}": {
+   "delete": [
+    "Delete API Integrations"
+   ],
+   "get": [
+    "Read API Integrations"
+   ],
+   "put": [
+    "Update API Integrations"
+   ]
+  },
+  "/v1/api-integrations/{id}/client-credentials": {
+   "post": [
+    "Create API Integrations"
+   ]
+  },
+  "/v1/api-role-privileges": {
+   "get": [
+    "Read API Roles"
+   ]
+  },
+  "/v1/api-role-privileges/search": {
+   "get": [
+    "Read API Roles"
+   ]
+  },
+  "/v1/api-roles": {
+   "get": [
+    "Read API Roles"
+   ],
+   "post": [
+    "Create API Roles"
+   ]
+  },
+  "/v1/api-roles/{id}": {
+   "delete": [
+    "Delete API Roles"
+   ],
+   "get": [
+    "Read API Roles"
+   ],
+   "put": [
+    "Update API Roles"
+   ]
+  },
+  "/v1/apns-client-push-status": {
+   "get": [
+    "View MDM command information in Jamf Pro API"
+   ]
+  },
+  "/v1/apns-client-push-status/enable-all-clients": {
+   "post": [
+    "Send MDM command information in Jamf Pro API"
+   ]
+  },
+  "/v1/apns-client-push-status/enable-all-clients/status": {
+   "get": [
+    "View MDM command information in Jamf Pro API"
+   ]
+  },
+  "/v1/apns-client-push-status/enable-client": {
+   "post": [
+    "Send MDM command information in Jamf Pro API"
+   ]
+  },
+  "/v1/app-request/form-input-fields": {
+   "get": [
+    "Read App Request Settings"
+   ],
+   "post": [
+    "Update App Request Settings"
+   ],
+   "put": [
+    "Update App Request Settings"
+   ]
+  },
+  "/v1/app-request/form-input-fields/{id}": {
+   "delete": [
+    "Update App Request Settings"
+   ],
+   "get": [
+    "Read App Request Settings"
+   ],
+   "put": [
+    "Update App Request Settings"
+   ]
+  },
+  "/v1/app-request/settings": {
+   "get": [
+    "Read App Request Settings"
+   ],
+   "put": [
+    "Update App Request Settings"
+   ]
+  },
+  "/v1/buildings": {
+   "get": [
+    "Read Buildings"
+   ],
+   "post": [
+    "Create Buildings"
+   ]
+  },
+  "/v1/buildings/delete-multiple": {
+   "post": [
+    "Delete Buildings"
+   ]
+  },
+  "/v1/buildings/export": {
+   "post": [
+    "Read Buildings"
+   ]
+  },
+  "/v1/buildings/{id}": {
+   "delete": [
+    "Delete Buildings"
+   ],
+   "get": [
+    "Read Buildings"
+   ],
+   "put": [
+    "Update Buildings"
+   ]
+  },
+  "/v1/buildings/{id}/history": {
+   "get": [
+    "Read Buildings"
+   ],
+   "post": [
+    "Update Buildings"
+   ]
+  },
+  "/v1/buildings/{id}/history/export": {
+   "post": [
+    "Read Buildings"
+   ]
+  },
+  "/v1/cache-settings": {
+   "get": [
+    "Read Cache"
+   ],
+   "put": [
+    "Update Cache"
+   ]
+  },
+  "/v1/categories": {
+   "get": [
+    "Read Categories",
+    "Read Self Service"
+   ],
+   "post": [
+    "Create Categories"
+   ]
+  },
+  "/v1/categories/delete-multiple": {
+   "post": [
+    "Delete Categories"
+   ]
+  },
+  "/v1/categories/{id}": {
+   "delete": [
+    "Delete Categories"
+   ],
+   "get": [
+    "Read Categories"
+   ],
+   "put": [
+    "Update Categories"
+   ]
+  },
+  "/v1/categories/{id}/history": {
+   "get": [
+    "Read Categories"
+   ],
+   "post": [
+    "Update Categories"
+   ]
+  },
+  "/v1/classic-ldap/{id}": {
+   "get": [
+    "Read LDAP Servers"
+   ]
+  },
+  "/v1/cloud-azure": {
+   "post": [
+    "Create LDAP Servers"
+   ]
+  },
+  "/v1/cloud-azure/defaults/mappings": {
+   "get": [
+    "Read LDAP Servers"
+   ]
+  },
+  "/v1/cloud-azure/defaults/server-configuration": {
+   "get": [
+    "Read LDAP Servers"
+   ]
+  },
+  "/v1/cloud-azure/{id}": {
+   "delete": [
+    "Delete LDAP Servers"
+   ],
+   "get": [
+    "Read LDAP Servers"
+   ],
+   "put": [
+    "Update LDAP Servers"
+   ]
+  },
+  "/v1/cloud-distribution-point": {
+   "delete": [
+    "Update Cloud Distribution Point"
+   ],
+   "get": [
+    "Read Cloud Distribution Point"
+   ],
+   "patch": [
+    "Update Cloud Distribution Point"
+   ],
+   "post": [
+    "Update Cloud Distribution Point"
+   ]
+  },
+  "/v1/cloud-distribution-point/fail-upload/{id}": {
+   "post": [
+    "Update Cloud Distribution Point"
+   ]
+  },
+  "/v1/cloud-distribution-point/files": {
+   "get": [
+    "Read Cloud Distribution Point"
+   ]
+  },
+  "/v1/cloud-distribution-point/history": {
+   "get": [
+    "Read Cloud Distribution Point"
+   ],
+   "post": [
+    "Update Cloud Distribution Point"
+   ]
+  },
+  "/v1/cloud-distribution-point/refresh-inventory": {
+   "post": [
+    "Read Cloud Distribution Point"
+   ]
+  },
+  "/v1/cloud-distribution-point/test-connection": {
+   "get": [
+    "Read Cloud Distribution Point"
+   ]
+  },
+  "/v1/cloud-idp": {
+   "get": [
+    "Read LDAP Servers"
+   ]
+  },
+  "/v1/cloud-idp/export": {
+   "post": [
+    "Read LDAP Servers"
+   ]
+  },
+  "/v1/cloud-idp/{id}": {
+   "get": [
+    "Read LDAP Servers"
+   ]
+  },
+  "/v1/cloud-idp/{id}/history": {
+   "get": [
+    "Read LDAP Servers"
+   ],
+   "post": [
+    "Update LDAP Servers"
+   ]
+  },
+  "/v1/cloud-idp/{id}/test-group": {
+   "post": [
+    "Read LDAP Servers"
+   ]
+  },
+  "/v1/cloud-idp/{id}/test-user": {
+   "post": [
+    "Read LDAP Servers"
+   ]
+  },
+  "/v1/cloud-idp/{id}/test-user-membership": {
+   "post": [
+    "Read LDAP Servers"
+   ]
+  },
+  "/v1/computer-extension-attributes": {
+   "get": [
+    "Read Computer Extension Attributes"
+   ],
+   "post": [
+    "Create Computer Extension Attributes"
+   ]
+  },
+  "/v1/computer-extension-attributes/delete-multiple": {
+   "post": [
+    "Delete Computer Extension Attributes"
+   ]
+  },
+  "/v1/computer-extension-attributes/templates": {
+   "get": [
+    "Read Computer Extension Attributes"
+   ]
+  },
+  "/v1/computer-extension-attributes/templates/{id}": {
+   "get": [
+    "Read Computer Extension Attributes"
+   ]
+  },
+  "/v1/computer-extension-attributes/upload": {
+   "post": [
+    "Create Computer Extension Attributes",
+    "Read Computer Extension Attributes"
+   ]
+  },
+  "/v1/computer-extension-attributes/{id}": {
+   "delete": [
+    "Delete Computer Extension Attributes"
+   ],
+   "get": [
+    "Read Computer Extension Attributes"
+   ],
+   "put": [
+    "Update Computer Extension Attributes"
+   ]
+  },
+  "/v1/computer-extension-attributes/{id}/data-dependency": {
+   "get": [
+    "Read Computer Extension Attributes"
+   ]
+  },
+  "/v1/computer-extension-attributes/{id}/download": {
+   "get": [
+    "Read Computer Extension Attributes"
+   ]
+  },
+  "/v1/computer-extension-attributes/{id}/history": {
+   "get": [
+    "Read Computer Extension Attributes"
+   ],
+   "post": [
+    "Update Computer Extension Attributes"
+   ]
+  },
+  "/v1/computer-groups": {
+   "get": [
+    "Read Smart Computer Groups",
+    "Read Static Computer Groups"
+   ]
+  },
+  "/v1/computer-inventory-collection-settings": {
+   "get": [
+    "Read Computer Inventory Collection Settings"
+   ],
+   "patch": [
+    "Update Computer Inventory Collection Settings"
+   ]
+  },
+  "/v1/computer-inventory-collection-settings/custom-path": {
+   "post": [
+    "Create Custom Paths"
+   ]
+  },
+  "/v1/computer-inventory-collection-settings/custom-path/{id}": {
+   "delete": [
+    "Delete Custom Paths"
+   ]
+  },
+  "/v1/computer-inventory/{id}/erase": {
+   "post": [
+    "Send Computer Remote Wipe Command"
+   ]
+  },
+  "/v1/computer-inventory/{id}/remove-mdm-profile": {
+   "post": [
+    "Send Computer Unmanage Command"
+   ]
+  },
+  "/v1/computers-inventory": {
+   "get": [
+    "Read Computers"
+   ],
+   "post": [
+    "Create Computers"
+   ]
+  },
+  "/v1/computers-inventory-detail/{id}": {
+   "get": [
+    "Read Computers"
+   ],
+   "patch": [
+    "Update Computers"
+   ]
+  },
+  "/v1/computers-inventory/filevault": {
+   "get": [
+    "View Disk Encryption Recovery Key"
+   ]
+  },
+  "/v1/computers-inventory/{id}": {
+   "delete": [
+    "Delete Computers"
+   ],
+   "get": [
+    "Read Computers"
+   ]
+  },
+  "/v1/computers-inventory/{id}/attachments": {
+   "post": [
+    "Update Computers"
+   ]
+  },
+  "/v1/computers-inventory/{id}/attachments/{attachmentId}": {
+   "delete": [
+    "Update Computers"
+   ],
+   "get": [
+    "Read Computers"
+   ]
+  },
+  "/v1/computers-inventory/{id}/filevault": {
+   "get": [
+    "View Disk Encryption Recovery Key"
+   ]
+  },
+  "/v1/computers-inventory/{id}/view-device-lock-pin": {
+   "get": [
+    "View Computer Device Lock Pin"
+   ]
+  },
+  "/v1/computers-inventory/{id}/view-recovery-lock-password": {
+   "get": [
+    "View Recovery Lock"
+   ]
+  },
+  "/v1/computers/{id}/recalculate-smart-groups": {
+   "post": [
+    "Update Smart Computer Groups"
+   ]
+  },
+  "/v1/conditional-access/device-compliance-information/computer/{deviceId}": {
+   "get": [
+    "Read Device Compliance Information"
+   ]
+  },
+  "/v1/conditional-access/device-compliance-information/mobile/{deviceId}": {
+   "get": [
+    "Read Device Compliance Information"
+   ]
+  },
+  "/v1/conditional-access/device-compliance/feature-toggle": {
+   "get": [
+    "Read Conditional Access"
+   ]
+  },
+  "/v1/csa/token": {
+   "delete": [
+    "Update Cloud Services Settings"
+   ],
+   "get": [
+    "Read Cloud Services Settings"
+   ]
+  },
+  "/v1/ddm/{clientManagementId}/status-items": {
+   "get": [
+    "Read Mobile Devices",
+    "Read Computers"
+   ]
+  },
+  "/v1/ddm/{clientManagementId}/status-items/{key}": {
+   "get": [
+    "Read Mobile Devices",
+    "Read Computers"
+   ]
+  },
+  "/v1/ddm/{clientManagementId}/sync": {
+   "post": [
+    "Send Declarative Management Command"
+   ]
+  },
+  "/v1/departments": {
+   "get": [
+    "Read Departments"
+   ],
+   "post": [
+    "Create Departments"
+   ]
+  },
+  "/v1/departments/delete-multiple": {
+   "post": [
+    "Delete Departments"
+   ]
+  },
+  "/v1/departments/{id}": {
+   "delete": [
+    "Delete Departments"
+   ],
+   "get": [
+    "Read Departments"
+   ],
+   "put": [
+    "Update Departments"
+   ]
+  },
+  "/v1/departments/{id}/history": {
+   "get": [
+    "Read Departments"
+   ],
+   "post": [
+    "Update Departments"
+   ]
+  },
+  "/v1/deploy-package": {
+   "post": [
+    "Send Computer Remote Command to Install Package"
+   ]
+  },
+  "/v1/device-communication-settings": {
+   "get": [
+    "Read Automatically Renew MDM Profile Settings"
+   ],
+   "put": [
+    "Update Automatically Renew MDM Profile Settings"
+   ]
+  },
+  "/v1/device-communication-settings/history": {
+   "get": [
+    "Read Automatically Renew MDM Profile Settings"
+   ],
+   "post": [
+    "Update Automatically Renew MDM Profile Settings"
+   ]
+  },
+  "/v1/device-enrollments": {
+   "get": [
+    "Read Device Enrollment Program Instances"
+   ]
+  },
+  "/v1/device-enrollments/public-key": {
+   "get": [
+    "Read Device Enrollment Program Instances"
+   ]
+  },
+  "/v1/device-enrollments/syncs": {
+   "get": [
+    "Read Device Enrollment Program Instances"
+   ]
+  },
+  "/v1/device-enrollments/upload-token": {
+   "post": [
+    "Create Device Enrollment Program Instances"
+   ]
+  },
+  "/v1/device-enrollments/{id}": {
+   "delete": [
+    "Delete Device Enrollment Program Instances"
+   ],
+   "get": [
+    "Read Device Enrollment Program Instances"
+   ],
+   "put": [
+    "Update Device Enrollment Program Instances"
+   ]
+  },
+  "/v1/device-enrollments/{id}/devices": {
+   "get": [
+    "Read Device Enrollment Program Instances"
+   ]
+  },
+  "/v1/device-enrollments/{id}/disown": {
+   "post": [
+    "Update Device Enrollment Program Instances"
+   ]
+  },
+  "/v1/device-enrollments/{id}/history": {
+   "get": [
+    "Read Device Enrollment Program Instances"
+   ],
+   "post": [
+    "Update Device Enrollment Program Instances"
+   ]
+  },
+  "/v1/device-enrollments/{id}/syncs": {
+   "get": [
+    "Read Device Enrollment Program Instances"
+   ]
+  },
+  "/v1/device-enrollments/{id}/syncs/latest": {
+   "get": [
+    "Read Device Enrollment Program Instances"
+   ]
+  },
+  "/v1/device-enrollments/{id}/upload-token": {
+   "put": [
+    "Update Device Enrollment Program Instances"
+   ]
+  },
+  "/v1/devices/{id}/groups": {
+   "get": [
+    "Read Computers",
+    "Read Mobile Devices"
+   ]
+  },
+  "/v1/distribution-points": {
+   "get": [
+    "Read Distribution Points"
+   ],
+   "post": [
+    "Create Distribution Points"
+   ]
+  },
+  "/v1/distribution-points/delete-multiple": {
+   "post": [
+    "Delete Distribution Points"
+   ]
+  },
+  "/v1/distribution-points/{id}": {
+   "delete": [
+    "Delete Distribution Points"
+   ],
+   "get": [
+    "Read Distribution Points"
+   ],
+   "patch": [
+    "Read Distribution Points",
+    "Update Distribution Points"
+   ],
+   "put": [
+    "Read Distribution Points",
+    "Update Distribution Points"
+   ]
+  },
+  "/v1/distribution-points/{id}/history": {
+   "get": [
+    "Read Distribution Points"
+   ],
+   "post": [
+    "Update Distribution Points"
+   ]
+  },
+  "/v1/dock-items": {
+   "post": [
+    "Create Dock Items"
+   ]
+  },
+  "/v1/dock-items/{id}": {
+   "delete": [
+    "Delete Dock Items"
+   ],
+   "get": [
+    "Read Dock Items"
+   ],
+   "put": [
+    "Update Dock Items"
+   ]
+  },
+  "/v1/dss-declarations/{declarationId}": {
+   "get": [
+    "Read Mobile Devices",
+    "Read Computers"
+   ]
+  },
+  "/v1/ebooks": {
+   "get": [
+    "Read eBooks"
+   ]
+  },
+  "/v1/ebooks/{id}": {
+   "get": [
+    "Read eBooks"
+   ]
+  },
+  "/v1/ebooks/{id}/scope": {
+   "get": [
+    "Read eBooks"
+   ]
+  },
+  "/v1/enrollment-customization/parse-markdown": {
+   "post": [
+    "Read Enrollment Customizations"
+   ]
+  },
+  "/v1/enrollment-customization/{id}/all": {
+   "get": [
+    "Read Enrollment Customizations"
+   ]
+  },
+  "/v1/enrollment-customization/{id}/all/{panel-id}": {
+   "delete": [
+    "Update Enrollment Customizations"
+   ],
+   "get": [
+    "Read Enrollment Customizations"
+   ]
+  },
+  "/v1/enrollment-customization/{id}/ldap": {
+   "post": [
+    "Update Enrollment Customizations"
+   ]
+  },
+  "/v1/enrollment-customization/{id}/ldap/{panel-id}": {
+   "delete": [
+    "Update Enrollment Customizations"
+   ],
+   "get": [
+    "Read Enrollment Customizations"
+   ],
+   "put": [
+    "Update Enrollment Customizations"
+   ]
+  },
+  "/v1/enrollment-customization/{id}/sso": {
+   "post": [
+    "Update Enrollment Customizations"
+   ]
+  },
+  "/v1/enrollment-customization/{id}/sso/{panel-id}": {
+   "delete": [
+    "Update Enrollment Customizations"
+   ],
+   "get": [
+    "Read Enrollment Customizations"
+   ],
+   "put": [
+    "Update Enrollment Customizations"
+   ]
+  },
+  "/v1/enrollment-customization/{id}/text": {
+   "post": [
+    "Update Enrollment Customizations"
+   ]
+  },
+  "/v1/enrollment-customization/{id}/text/{panel-id}": {
+   "delete": [
+    "Update Enrollment Customizations"
+   ],
+   "get": [
+    "Read Enrollment Customizations"
+   ],
+   "put": [
+    "Update Enrollment Customizations"
+   ]
+  },
+  "/v1/enrollment-customization/{id}/text/{panel-id}/markdown": {
+   "get": [
+    "Read Enrollment Customizations"
+   ]
+  },
+  "/v1/gsx-connection": {
+   "get": [
+    "Read GSX Connection",
+    "Read Push Certificates"
+   ],
+   "patch": [
+    "Update GSX Connection",
+    "Update Push Certificates"
+   ],
+   "put": [
+    "Update GSX Connection",
+    "Update Push Certificates"
+   ]
+  },
+  "/v1/gsx-connection/history": {
+   "get": [
+    "Read GSX Connection"
+   ],
+   "post": [
+    "Update GSX Connection"
+   ]
+  },
+  "/v1/gsx-connection/test": {
+   "post": [
+    "Read GSX Connection"
+   ]
+  },
+  "/v1/impact-alert-notification-settings": {
+   "get": [
+    "Read Impact Alert Notification Settings"
+   ],
+   "put": [
+    "Update Impact Alert Notification Settings"
+   ]
+  },
+  "/v1/jamf-connect": {
+   "get": [
+    "Read Jamf Connect Settings",
+    "Read Jamf Connect Deployments"
+   ]
+  },
+  "/v1/jamf-connect/config-profiles": {
+   "get": [
+    "Read Jamf Connect Deployments"
+   ]
+  },
+  "/v1/jamf-connect/config-profiles/{id}": {
+   "put": [
+    "Update Jamf Connect Deployments"
+   ]
+  },
+  "/v1/jamf-connect/deployments/{id}/tasks": {
+   "get": [
+    "Read Jamf Connect Deployments"
+   ]
+  },
+  "/v1/jamf-connect/deployments/{id}/tasks/retry": {
+   "post": [
+    "Jamf Connect Deployment Retry"
+   ]
+  },
+  "/v1/jamf-connect/history": {
+   "get": [
+    "Read Jamf Connect Settings"
+   ],
+   "post": [
+    "Update Jamf Connect Settings"
+   ]
+  },
+  "/v1/jamf-management-framework/redeploy/{id}": {
+   "post": [
+    "Send Computer Remote Command to Install Package",
+    "Read Computer Check-In"
+   ]
+  },
+  "/v1/jamf-package": {
+   "get": [
+    "Jamf Packages Action"
+   ]
+  },
+  "/v1/jamf-pro-server-url": {
+   "get": [
+    "Read JSS URL"
+   ],
+   "put": [
+    "Update JSS URL"
+   ]
+  },
+  "/v1/jamf-pro-server-url/history": {
+   "get": [
+    "Read JSS URL"
+   ],
+   "post": [
+    "Update JSS URL"
+   ]
+  },
+  "/v1/jamf-protect": {
+   "delete": [
+    "Update Jamf Protect Settings"
+   ],
+   "get": [
+    "Read Jamf Protect Settings",
+    "Read Jamf Protect Deployments"
+   ],
+   "put": [
+    "Update Jamf Protect Settings"
+   ]
+  },
+  "/v1/jamf-protect/deployments/{id}/tasks": {
+   "get": [
+    "Read Jamf Protect Deployments"
+   ]
+  },
+  "/v1/jamf-protect/deployments/{id}/tasks/retry": {
+   "post": [
+    "Jamf Protect Deployment Retry"
+   ]
+  },
+  "/v1/jamf-protect/history": {
+   "get": [
+    "Read Jamf Protect Settings"
+   ],
+   "post": [
+    "Update Jamf Protect Settings"
+   ]
+  },
+  "/v1/jamf-protect/plans": {
+   "get": [
+    "Read Jamf Protect Deployments"
+   ]
+  },
+  "/v1/jamf-protect/plans/sync": {
+   "post": [
+    "Read Jamf Protect Settings"
+   ]
+  },
+  "/v1/jamf-protect/register": {
+   "post": [
+    "Update Jamf Protect Settings"
+   ]
+  },
+  "/v1/jamf-remote-assist/session": {
+   "get": [
+    "Read Remote Assist"
+   ]
+  },
+  "/v1/jamf-remote-assist/session/{id}": {
+   "get": [
+    "Read Remote Assist"
+   ]
+  },
+  "/v1/jcds/files": {
+   "get": [
+    "Read Jamf Cloud Distribution Service Files"
+   ],
+   "post": [
+    "Create Jamf Cloud Distribution Service Files"
+   ]
+  },
+  "/v1/jcds/files/{fileName}": {
+   "delete": [
+    "Delete Jamf Cloud Distribution Service Files"
+   ],
+   "get": [
+    "Read Jamf Cloud Distribution Service Files"
+   ]
+  },
+  "/v1/jcds/refresh-inventory": {
+   "post": [
+    "Read Jamf Cloud Distribution Service Files"
+   ]
+  },
+  "/v1/jcds/renew-credentials": {
+   "post": [
+    "Create Jamf Cloud Distribution Service Files"
+   ]
+  },
+  "/v1/last-login": {
+   "get": [
+    "Read Last Login"
+   ]
+  },
+  "/v1/ldap-keystore/verify": {
+   "post": [
+    "Create LDAP Servers"
+   ]
+  },
+  "/v1/ldap/groups": {
+   "get": [
+    "Read LDAP Servers"
+   ]
+  },
+  "/v1/ldap/ldap-servers": {
+   "get": [
+    "Read LDAP Servers"
+   ]
+  },
+  "/v1/ldap/servers": {
+   "get": [
+    "Read LDAP Servers"
+   ]
+  },
+  "/v1/log-flushing": {
+   "get": [
+    "Read Retention Policy"
+   ]
+  },
+  "/v1/log-flushing/task": {
+   "get": [
+    "Read Retention Policy"
+   ],
+   "post": [
+    "Update Retention Policy"
+   ]
+  },
+  "/v1/log-flushing/task/{id}": {
+   "delete": [
+    "Update Retention Policy"
+   ],
+   "get": [
+    "Read Retention Policy"
+   ]
+  },
+  "/v1/login-customization": {
+   "put": [
+    "Update Login Disclaimer"
+   ]
+  },
+  "/v1/macos-managed-software-updates/send-updates": {
+   "post": [
+    "Send Computer Remote Command to Download and Install OS X Update"
+   ]
+  },
+  "/v1/managed-software-updates/plans": {
+   "get": [
+    "Read Managed Software Updates",
+    "Read Computers",
+    "Read Mobile Devices"
+   ],
+   "post": [
+    "Create Managed Software Updates",
+    "Read Computers",
+    "Read Mobile Devices",
+    "Send Computer Remote Command to Download and Install OS X Update",
+    "Send Mobile Device Remote Command to Download and Install iOS Update"
+   ]
+  },
+  "/v1/managed-software-updates/plans/feature-toggle": {
+   "get": [
+    "Read Managed Software Updates"
+   ],
+   "put": [
+    "Read Managed Software Updates",
+    "Create Managed Software Updates",
+    "Update Managed Software Updates"
+   ]
+  },
+  "/v1/managed-software-updates/plans/feature-toggle/abandon": {
+   "post": [
+    "Read Managed Software Updates",
+    "Create Managed Software Updates",
+    "Update Managed Software Updates"
+   ]
+  },
+  "/v1/managed-software-updates/plans/feature-toggle/status": {
+   "get": [
+    "Read Managed Software Updates"
+   ]
+  },
+  "/v1/managed-software-updates/plans/group": {
+   "post": [
+    "Create Managed Software Updates",
+    "Read Computers",
+    "Read Mobile Devices",
+    "Read Smart Computer Groups",
+    "Read Static Computer Groups",
+    "Read Smart Mobile Device Groups",
+    "Read Static Mobile Device Groups",
+    "Send Computer Remote Command to Download and Install OS X Update",
+    "Send Mobile Device Remote Command to Download and Install iOS Update"
+   ]
+  },
+  "/v1/managed-software-updates/plans/group/{id}": {
+   "get": [
+    "Read Managed Software Updates",
+    "Read Computers",
+    "Read Smart Computer Groups",
+    "Read Static Computer Groups",
+    "Read Mobile Devices",
+    "Read Smart Mobile Device Groups",
+    "Read Static Mobile Device Groups"
+   ]
+  },
+  "/v1/managed-software-updates/plans/{id}": {
+   "get": [
+    "Read Managed Software Updates",
+    "Read Computers",
+    "Read Mobile Devices"
+   ]
+  },
+  "/v1/managed-software-updates/plans/{id}/declarations": {
+   "get": [
+    "Read Managed Software Updates",
+    "Read Computers",
+    "Read Mobile Devices"
+   ]
+  },
+  "/v1/managed-software-updates/plans/{id}/events": {
+   "get": [
+    "Read Managed Software Updates",
+    "Read Computers",
+    "Read Mobile Devices"
+   ]
+  },
+  "/v1/managed-software-updates/update-statuses": {
+   "get": [
+    "Read Computers",
+    "Read Mobile Devices"
+   ]
+  },
+  "/v1/managed-software-updates/update-statuses/computer-groups/{id}": {
+   "get": [
+    "Read Computers",
+    "Read Smart Computer Groups",
+    "Read Static Computer Groups"
+   ]
+  },
+  "/v1/managed-software-updates/update-statuses/computers/{id}": {
+   "get": [
+    "Read Computers"
+   ]
+  },
+  "/v1/managed-software-updates/update-statuses/mobile-device-groups/{id}": {
+   "get": [
+    "Read Mobile Devices",
+    "Read Smart Mobile Device Groups",
+    "Read Static Mobile Device Groups"
+   ]
+  },
+  "/v1/managed-software-updates/update-statuses/mobile-devices/{id}": {
+   "get": [
+    "Read Mobile Devices"
+   ]
+  },
+  "/v1/mdm-renewal/device-common-details": {
+   "patch": [
+    "Send Command to Renew MDM Profile"
+   ]
+  },
+  "/v1/mdm-renewal/device-common-details/{clientManagementId}": {
+   "get": [
+    "Send Command to Renew MDM Profile"
+   ]
+  },
+  "/v1/mdm-renewal/renewal-strategies/{clientManagementId}": {
+   "delete": [
+    "Send Command to Renew MDM Profile"
+   ],
+   "get": [
+    "Send Command to Renew MDM Profile"
+   ]
+  },
+  "/v1/mdm/commands": {
+   "get": [
+    "View MDM command information in Jamf Pro API"
+   ]
+  },
+  "/v1/mdm/renew-profile": {
+   "post": [
+    "Send Command to Renew MDM Profile"
+   ]
+  },
+  "/v1/mobile-device-enrollment-profile/{id}/download-profile": {
+   "get": [
+    "Read Enrollment Profiles"
+   ]
+  },
+  "/v1/mobile-device-extension-attributes": {
+   "get": [
+    "Read Mobile Device Extension Attributes"
+   ],
+   "post": [
+    "Create Mobile Device Extension Attributes"
+   ]
+  },
+  "/v1/mobile-device-extension-attributes/{id}": {
+   "delete": [
+    "Delete Mobile Device Extension Attributes"
+   ],
+   "get": [
+    "Read Mobile Device Extension Attributes"
+   ],
+   "put": [
+    "Update Mobile Device Extension Attributes"
+   ]
+  },
+  "/v1/mobile-device-extension-attributes/{id}/data-dependency": {
+   "get": [
+    "Read Mobile Device Extension Attributes"
+   ]
+  },
+  "/v1/mobile-device-extension-attributes/{id}/history": {
+   "get": [
+    "Read Mobile Device Extension Attributes"
+   ],
+   "post": [
+    "Update Mobile Device Extension Attributes"
+   ]
+  },
+  "/v1/mobile-device-groups": {
+   "get": [
+    "Read Smart Mobile Device Groups",
+    "Read Static Mobile Device Groups"
+   ]
+  },
+  "/v1/mobile-device-groups/smart-group-membership/{id}": {
+   "get": [
+    "Read Smart Mobile Device Groups",
+    "Read Mobile Devices"
+   ]
+  },
+  "/v1/mobile-device-groups/smart-groups": {
+   "get": [
+    "Read Smart Mobile Device Groups"
+   ],
+   "post": [
+    "Create Smart Mobile Device Groups"
+   ]
+  },
+  "/v1/mobile-device-groups/smart-groups/{id}": {
+   "delete": [
+    "Delete Smart Mobile Device Groups"
+   ],
+   "get": [
+    "Read Smart Mobile Device Groups"
+   ],
+   "put": [
+    "Update Smart Mobile Device Groups"
+   ]
+  },
+  "/v1/mobile-device-groups/static-group-membership/{id}": {
+   "get": [
+    "Read Static Mobile Device Groups",
+    "Read Mobile Devices"
+   ]
+  },
+  "/v1/mobile-device-groups/static-groups": {
+   "get": [
+    "Read Static Mobile Device Groups"
+   ],
+   "post": [
+    "Create Static Mobile Device Groups"
+   ]
+  },
+  "/v1/mobile-device-groups/static-groups/{id}": {
+   "delete": [
+    "Delete Static Mobile Device Groups"
+   ],
+   "get": [
+    "Read Static Mobile Device Groups"
+   ],
+   "patch": [
+    "Update Static Mobile Device Groups"
+   ]
+  },
+  "/v1/mobile-device-groups/{id}/erase": {
+   "post": [
+    "Send MDM command information in Jamf Pro API"
+   ]
+  },
+  "/v1/mobile-devices/{id}/recalculate-smart-groups": {
+   "post": [
+    "Update Smart Mobile Device Groups"
+   ]
+  },
+  "/v1/notifications": {
+   "delete": [
+    "Dismiss Notifications"
+   ]
+  },
+  "/v1/notifications/{type}/{id}": {
+   "delete": [
+    "Dismiss Notifications"
+   ]
+  },
+  "/v1/oidc/generate-certificate": {
+   "post": [
+    "Update SSO Settings"
+   ]
+  },
+  "/v1/onboarding": {
+   "get": [
+    "Read Onboarding Configuration"
+   ],
+   "put": [
+    "Update Onboarding Configuration"
+   ]
+  },
+  "/v1/onboarding/eligible-apps": {
+   "get": [
+    "Read Onboarding Configuration"
+   ]
+  },
+  "/v1/onboarding/eligible-configuration-profiles": {
+   "get": [
+    "Read Onboarding Configuration"
+   ]
+  },
+  "/v1/onboarding/eligible-policies": {
+   "get": [
+    "Read Onboarding Configuration"
+   ]
+  },
+  "/v1/onboarding/history": {
+   "get": [
+    "Read Onboarding Configuration"
+   ],
+   "post": [
+    "Update Onboarding Configuration"
+   ]
+  },
+  "/v1/onboarding/history/export": {
+   "post": [
+    "Read Onboarding Configuration"
+   ]
+  },
+  "/v1/packages": {
+   "get": [
+    "Read Packages"
+   ],
+   "post": [
+    "Create Packages"
+   ]
+  },
+  "/v1/packages/delete-multiple": {
+   "post": [
+    "Delete Packages"
+   ]
+  },
+  "/v1/packages/export": {
+   "post": [
+    "Read Packages"
+   ]
+  },
+  "/v1/packages/{id}": {
+   "delete": [
+    "Delete Packages"
+   ],
+   "get": [
+    "Read Packages"
+   ],
+   "put": [
+    "Update Packages"
+   ]
+  },
+  "/v1/packages/{id}/history": {
+   "get": [
+    "Read Packages"
+   ],
+   "post": [
+    "Update Packages"
+   ]
+  },
+  "/v1/packages/{id}/history/export": {
+   "post": [
+    "Read Packages"
+   ]
+  },
+  "/v1/packages/{id}/manifest": {
+   "delete": [
+    "Update Packages",
+    "Read Packages"
+   ],
+   "post": [
+    "Update Packages",
+    "Read Packages"
+   ]
+  },
+  "/v1/packages/{id}/upload": {
+   "post": [
+    "Update Packages",
+    "Read Packages"
+   ]
+  },
+  "/v1/parent-app": {
+   "get": [
+    "Read Parent App Settings"
+   ],
+   "put": [
+    "Update Parent App Settings"
+   ]
+  },
+  "/v1/parent-app/history": {
+   "get": [
+    "Read Parent App Settings"
+   ],
+   "post": [
+    "Update Parent App Settings"
+   ]
+  },
+  "/v1/pki/adcs-settings": {
+   "post": [
+    "Create AD CS Settings"
+   ]
+  },
+  "/v1/pki/adcs-settings/validate-certificate": {
+   "post": [
+    "Update AD CS Settings",
+    "Create AD CS Settings"
+   ]
+  },
+  "/v1/pki/adcs-settings/validate-client-certificate": {
+   "post": [
+    "Update AD CS Settings",
+    "Create AD CS Settings"
+   ]
+  },
+  "/v1/pki/adcs-settings/{id}": {
+   "delete": [
+    "Delete AD CS Settings"
+   ],
+   "get": [
+    "Read AD CS Settings"
+   ],
+   "patch": [
+    "Update AD CS Settings"
+   ]
+  },
+  "/v1/pki/adcs-settings/{id}/dependencies": {
+   "get": [
+    "Read AD CS Settings"
+   ]
+  },
+  "/v1/pki/adcs-settings/{id}/history": {
+   "get": [
+    "Read AD CS Settings"
+   ],
+   "post": [
+    "Update AD CS Settings"
+   ]
+  },
+  "/v1/pki/certificate-authority/{id}": {
+   "get": [
+    "Read PKI"
+   ]
+  },
+  "/v1/pki/certificate-authority/{id}/der": {
+   "get": [
+    "Read PKI"
+   ]
+  },
+  "/v1/pki/certificate-authority/{id}/pem": {
+   "get": [
+    "Read PKI"
+   ]
+  },
+  "/v1/pki/digicert/trust-lifecycle-manager": {
+   "post": [
+    "Create DigiCert Settings"
+   ]
+  },
+  "/v1/pki/digicert/trust-lifecycle-manager/validate-client-certificate": {
+   "post": [
+    "Create DigiCert Settings",
+    "Update DigiCert Settings"
+   ]
+  },
+  "/v1/pki/digicert/trust-lifecycle-manager/{id}": {
+   "delete": [
+    "Delete DigiCert Settings"
+   ],
+   "get": [
+    "Read DigiCert Settings"
+   ],
+   "patch": [
+    "Update DigiCert Settings"
+   ]
+  },
+  "/v1/pki/digicert/trust-lifecycle-manager/{id}/connection-status": {
+   "get": [
+    "Read DigiCert Settings"
+   ]
+  },
+  "/v1/pki/digicert/trust-lifecycle-manager/{id}/dependencies": {
+   "get": [
+    "Read DigiCert Settings"
+   ]
+  },
+  "/v1/pki/digicert/trust-lifecycle-manager/{id}/privilege-check": {
+   "get": [
+    "Read DigiCert Settings"
+   ]
+  },
+  "/v1/pki/venafi": {
+   "post": [
+    "Update PKI"
+   ]
+  },
+  "/v1/pki/venafi/{id}": {
+   "delete": [
+    "Update PKI"
+   ],
+   "get": [
+    "Read PKI"
+   ],
+   "patch": [
+    "Update PKI"
+   ]
+  },
+  "/v1/pki/venafi/{id}/connection-status": {
+   "get": [
+    "Read PKI"
+   ]
+  },
+  "/v1/pki/venafi/{id}/dependent-profiles": {
+   "get": [
+    "Read PKI"
+   ]
+  },
+  "/v1/pki/venafi/{id}/history": {
+   "get": [
+    "Read PKI"
+   ],
+   "post": [
+    "Update PKI"
+   ]
+  },
+  "/v1/pki/venafi/{id}/jamf-public-key": {
+   "get": [
+    "Read PKI"
+   ]
+  },
+  "/v1/pki/venafi/{id}/jamf-public-key/regenerate": {
+   "post": [
+    "Update PKI"
+   ]
+  },
+  "/v1/pki/venafi/{id}/proxy-trust-store": {
+   "delete": [
+    "Update PKI"
+   ],
+   "get": [
+    "Read PKI"
+   ],
+   "post": [
+    "Update PKI"
+   ]
+  },
+  "/v1/policy-properties": {
+   "get": [
+    "Read Policies"
+   ],
+   "put": [
+    "Update Policies"
+   ]
+  },
+  "/v1/reenrollment": {
+   "get": [
+    "Read Re-enrollment"
+   ],
+   "put": [
+    "Update Re-enrollment"
+   ]
+  },
+  "/v1/reenrollment/history": {
+   "get": [
+    "Read Re-enrollment"
+   ],
+   "post": [
+    "Update Re-enrollment"
+   ]
+  },
+  "/v1/reenrollment/history/export": {
+   "post": [
+    "Read Re-enrollment"
+   ]
+  },
+  "/v1/return-to-service": {
+   "get": [
+    "View Return To Service Configurations"
+   ],
+   "post": [
+    "Edit Return To Service Configurations"
+   ]
+  },
+  "/v1/return-to-service/{id}": {
+   "delete": [
+    "Delete Return To Service Configurations"
+   ],
+   "get": [
+    "View Return To Service Configurations"
+   ],
+   "put": [
+    "Edit Return To Service Configurations"
+   ]
+  },
+  "/v1/scripts": {
+   "get": [
+    "Read Scripts"
+   ],
+   "post": [
+    "Create Scripts"
+   ]
+  },
+  "/v1/scripts/{id}": {
+   "delete": [
+    "Delete Scripts"
+   ],
+   "get": [
+    "Read Scripts"
+   ],
+   "put": [
+    "Update Scripts"
+   ]
+  },
+  "/v1/scripts/{id}/download": {
+   "get": [
+    "Read Scripts"
+   ]
+  },
+  "/v1/scripts/{id}/history": {
+   "get": [
+    "Read Scripts"
+   ],
+   "post": [
+    "Update Scripts"
+   ]
+  },
+  "/v1/self-service-plus/settings": {
+   "get": [
+    "Read Self Service"
+   ],
+   "put": [
+    "Update Self Service"
+   ]
+  },
+  "/v1/self-service/branding/ios": {
+   "get": [
+    "Read Self Service Branding Configuration"
+   ],
+   "post": [
+    "Create Self Service Branding Configuration"
+   ]
+  },
+  "/v1/self-service/branding/ios/{id}": {
+   "delete": [
+    "Delete Self Service Branding Configuration"
+   ],
+   "get": [
+    "Read Self Service Branding Configuration"
+   ],
+   "put": [
+    "Update Self Service Branding Configuration"
+   ]
+  },
+  "/v1/self-service/branding/macos": {
+   "get": [
+    "Read Self Service Branding Configuration",
+    "Read Self Service"
+   ],
+   "post": [
+    "Create Self Service Branding Configuration"
+   ]
+  },
+  "/v1/self-service/branding/macos/{id}": {
+   "delete": [
+    "Delete Self Service Branding Configuration"
+   ],
+   "get": [
+    "Read Self Service Branding Configuration"
+   ],
+   "put": [
+    "Update Self Service Branding Configuration"
+   ]
+  },
+  "/v1/self-service/settings": {
+   "get": [
+    "Read Self Service"
+   ],
+   "put": [
+    "Update Self Service"
+   ]
+  },
+  "/v1/self-service/settings/history": {
+   "get": [
+    "Read Self Service"
+   ],
+   "post": [
+    "Update Self Service"
+   ]
+  },
+  "/v1/service-discovery-enrollment/well-known-settings": {
+   "get": [
+    "Read User-Initiated Enrollment"
+   ],
+   "put": [
+    "Update User-Initiated Enrollment"
+   ]
+  },
+  "/v1/sites": {
+   "get": [
+    "Read Sites"
+   ]
+  },
+  "/v1/sites/{id}/objects": {
+   "get": [
+    "Read Sites"
+   ]
+  },
+  "/v1/slasa": {
+   "post": [
+    "Update License Information",
+    "View JSS Information"
+   ]
+  },
+  "/v1/smart-computer-groups/{id}/recalculate": {
+   "post": [
+    "Update Smart Computer Groups"
+   ]
+  },
+  "/v1/smart-mobile-device-groups/{id}/recalculate": {
+   "post": [
+    "Update Smart Mobile Device Groups"
+   ]
+  },
+  "/v1/smart-user-groups/{id}/recalculate": {
+   "post": [
+    "Update Smart User Groups"
+   ]
+  },
+  "/v1/smtp-server/history": {
+   "get": [
+    "Read SMTP Server"
+   ],
+   "post": [
+    "Update SMTP Server"
+   ]
+  },
+  "/v1/smtp-server/test": {
+   "post": [
+    "Read SMTP Server"
+   ]
+  },
+  "/v1/sso/failover": {
+   "get": [
+    "Read SSO Settings"
+   ]
+  },
+  "/v1/sso/failover/generate": {
+   "post": [
+    "Update SSO Settings"
+   ]
+  },
+  "/v1/static-user-groups": {
+   "get": [
+    "Read Static User Groups"
+   ]
+  },
+  "/v1/static-user-groups/{id}": {
+   "get": [
+    "Read Static User Groups"
+   ]
+  },
+  "/v1/supervision-identities": {
+   "get": [
+    "Read Apple Configurator Enrollment"
+   ],
+   "post": [
+    "Update Apple Configurator Enrollment"
+   ]
+  },
+  "/v1/supervision-identities/upload": {
+   "post": [
+    "Update Apple Configurator Enrollment"
+   ]
+  },
+  "/v1/supervision-identities/{id}": {
+   "delete": [
+    "Update Apple Configurator Enrollment"
+   ],
+   "get": [
+    "Read Apple Configurator Enrollment"
+   ],
+   "put": [
+    "Update Apple Configurator Enrollment"
+   ]
+  },
+  "/v1/supervision-identities/{id}/download": {
+   "get": [
+    "Read Apple Configurator Enrollment"
+   ]
+  },
+  "/v1/teacher-app": {
+   "get": [
+    "Read Teacher App Settings"
+   ],
+   "put": [
+    "Update Teacher App Settings"
+   ]
+  },
+  "/v1/teacher-app/history": {
+   "get": [
+    "Read Teacher App Settings"
+   ],
+   "post": [
+    "Update Teacher App Settings"
+   ]
+  },
+  "/v1/user-sessions/active": {
+   "get": [
+    "Read User"
+   ]
+  },
+  "/v1/user-sessions/count": {
+   "get": [
+    "Read User"
+   ]
+  },
+  "/v1/user/change-password": {
+   "post": [
+    "Change Password"
+   ]
+  },
+  "/v1/users": {
+   "get": [
+    "Read User"
+   ],
+   "post": [
+    "Create User"
+   ]
+  },
+  "/v1/users/{id}": {
+   "delete": [
+    "Delete User"
+   ],
+   "get": [
+    "Read User"
+   ],
+   "put": [
+    "Update User"
+   ]
+  },
+  "/v1/users/{id}/recalculate-smart-groups": {
+   "post": [
+    "Update Smart User Groups"
+   ]
+  },
+  "/v1/volume-purchasing-locations": {
+   "get": [
+    "Read Volume Purchasing Locations"
+   ],
+   "post": [
+    "Create Volume Purchasing Locations"
+   ]
+  },
+  "/v1/volume-purchasing-locations/{id}": {
+   "delete": [
+    "Delete Volume Purchasing Locations"
+   ],
+   "get": [
+    "Read Volume Purchasing Locations"
+   ],
+   "patch": [
+    "Update Volume Purchasing Locations"
+   ]
+  },
+  "/v1/volume-purchasing-locations/{id}/content": {
+   "get": [
+    "Read Volume Purchasing Locations"
+   ]
+  },
+  "/v1/volume-purchasing-locations/{id}/history": {
+   "get": [
+    "Read Volume Purchasing Locations"
+   ],
+   "post": [
+    "Update Volume Purchasing Locations"
+   ]
+  },
+  "/v1/volume-purchasing-locations/{id}/reclaim": {
+   "post": [
+    "Update Volume Purchasing Locations"
+   ]
+  },
+  "/v1/volume-purchasing-locations/{id}/revoke-licenses": {
+   "post": [
+    "Update Volume Purchasing Locations"
+   ]
+  },
+  "/v1/volume-purchasing-subscriptions": {
+   "get": [
+    "Read Volume Purchasing Locations"
+   ],
+   "post": [
+    "Create Volume Purchasing Locations"
+   ]
+  },
+  "/v1/volume-purchasing-subscriptions/{id}": {
+   "delete": [
+    "Delete Volume Purchasing Locations"
+   ],
+   "get": [
+    "Read Volume Purchasing Locations"
+   ],
+   "put": [
+    "Update Volume Purchasing Locations"
+   ]
+  },
+  "/v1/volume-purchasing-subscriptions/{id}/history": {
+   "get": [
+    "Read Volume Purchasing Locations"
+   ],
+   "post": [
+    "Update Volume Purchasing Locations"
+   ]
+  },
+  "/v2/cloud-ldaps": {
+   "post": [
+    "Create LDAP Servers"
+   ]
+  },
+  "/v2/cloud-ldaps/defaults/{provider}/mappings": {
+   "get": [
+    "Read LDAP Servers"
+   ]
+  },
+  "/v2/cloud-ldaps/defaults/{provider}/server-configuration": {
+   "get": [
+    "Read LDAP Servers"
+   ]
+  },
+  "/v2/cloud-ldaps/{id}": {
+   "delete": [
+    "Delete LDAP Servers"
+   ],
+   "get": [
+    "Read LDAP Servers"
+   ],
+   "put": [
+    "Update LDAP Servers"
+   ]
+  },
+  "/v2/cloud-ldaps/{id}/connection/bind": {
+   "get": [
+    "Read LDAP Servers"
+   ]
+  },
+  "/v2/cloud-ldaps/{id}/connection/search": {
+   "get": [
+    "Read LDAP Servers"
+   ]
+  },
+  "/v2/cloud-ldaps/{id}/connection/status": {
+   "get": [
+    "Read LDAP Servers"
+   ]
+  },
+  "/v2/cloud-ldaps/{id}/mappings": {
+   "get": [
+    "Read LDAP Servers"
+   ],
+   "put": [
+    "Update LDAP Servers"
+   ]
+  },
+  "/v2/computer-groups/smart-group-membership/{id}": {
+   "get": [
+    "Read Smart Computer Groups"
+   ]
+  },
+  "/v2/computer-groups/smart-groups": {
+   "get": [
+    "Read Smart Computer Groups"
+   ],
+   "post": [
+    "Create Smart Computer Groups"
+   ]
+  },
+  "/v2/computer-groups/smart-groups/{id}": {
+   "delete": [
+    "Delete Smart Computer Groups"
+   ],
+   "get": [
+    "Read Smart Computer Groups"
+   ],
+   "put": [
+    "Update Smart Computer Groups"
+   ]
+  },
+  "/v2/computer-groups/static-groups": {
+   "get": [
+    "Read Static Computer Groups"
+   ],
+   "post": [
+    "Create Static Computer Groups"
+   ]
+  },
+  "/v2/computer-groups/static-groups/{id}": {
+   "delete": [
+    "Delete Static Computer Groups"
+   ],
+   "get": [
+    "Read Static Computer Groups"
+   ],
+   "put": [
+    "Update Static Computer Groups"
+   ]
+  },
+  "/v2/computer-inventory-collection-settings": {
+   "get": [
+    "Read Computer Inventory Collection Settings"
+   ],
+   "patch": [
+    "Update Computer Inventory Collection Settings"
+   ]
+  },
+  "/v2/computer-inventory-collection-settings/custom-path": {
+   "post": [
+    "Create Custom Paths"
+   ]
+  },
+  "/v2/computer-inventory-collection-settings/custom-path/{id}": {
+   "delete": [
+    "Delete Custom Paths"
+   ]
+  },
+  "/v2/computer-prestages/scope": {
+   "get": [
+    "Read Computer PreStage Enrollments"
+   ]
+  },
+  "/v2/computer-prestages/{id}/scope": {
+   "get": [
+    "Read Computer PreStage Enrollments"
+   ],
+   "post": [
+    "Update Computer PreStage Enrollments"
+   ],
+   "put": [
+    "Update Computer PreStage Enrollments"
+   ]
+  },
+  "/v2/computer-prestages/{id}/scope/delete-multiple": {
+   "post": [
+    "Update Computer PreStage Enrollments"
+   ]
+  },
+  "/v2/computers-inventory": {
+   "get": [
+    "Read Computers"
+   ],
+   "post": [
+    "Create Computers"
+   ]
+  },
+  "/v2/computers-inventory-detail/{id}": {
+   "get": [
+    "Read Computers"
+   ],
+   "patch": [
+    "Update Computers"
+   ]
+  },
+  "/v2/computers-inventory/filevault": {
+   "get": [
+    "View Disk Encryption Recovery Key"
+   ]
+  },
+  "/v2/computers-inventory/{id}": {
+   "delete": [
+    "Delete Computers"
+   ],
+   "get": [
+    "Read Computers"
+   ]
+  },
+  "/v2/computers-inventory/{id}/attachments": {
+   "post": [
+    "Update Computers"
+   ]
+  },
+  "/v2/computers-inventory/{id}/attachments/{attachmentId}": {
+   "delete": [
+    "Update Computers"
+   ],
+   "get": [
+    "Read Computers"
+   ]
+  },
+  "/v2/computers-inventory/{id}/filevault": {
+   "get": [
+    "View Disk Encryption Recovery Key"
+   ]
+  },
+  "/v2/computers-inventory/{id}/view-device-lock-pin": {
+   "get": [
+    "View Computer Device Lock Pin"
+   ]
+  },
+  "/v2/computers-inventory/{id}/view-recovery-lock-password": {
+   "get": [
+    "View Recovery Lock"
+   ]
+  },
+  "/v2/enrollment-customizations": {
+   "get": [
+    "Read Enrollment Customizations"
+   ],
+   "post": [
+    "Create Enrollment Customizations"
+   ]
+  },
+  "/v2/enrollment-customizations/images": {
+   "post": [
+    "Update Enrollment Customizations"
+   ]
+  },
+  "/v2/enrollment-customizations/{id}": {
+   "delete": [
+    "Delete Enrollment Customizations",
+    "Read Enrollment Customizations"
+   ],
+   "get": [
+    "Read Enrollment Customizations"
+   ],
+   "put": [
+    "Update Enrollment Customizations"
+   ]
+  },
+  "/v2/enrollment-customizations/{id}/history": {
+   "get": [
+    "Read Enrollment Customizations"
+   ],
+   "post": [
+    "Update Enrollment Customizations"
+   ]
+  },
+  "/v2/enrollment-customizations/{id}/prestages": {
+   "get": [
+    "Read Enrollment Customizations"
+   ]
+  },
+  "/v2/enrollment/history": {
+   "get": [
+    "Read User-Initiated Enrollment"
+   ],
+   "post": [
+    "Update User-Initiated Enrollment"
+   ]
+  },
+  "/v2/enrollment/history/export": {
+   "post": [
+    "Read User-Initiated Enrollment"
+   ]
+  },
+  "/v2/inventory-preload/csv": {
+   "get": [
+    "Read Inventory Preload Records"
+   ],
+   "post": [
+    "Create Inventory Preload Records",
+    "Update Inventory Preload Records",
+    "Create User",
+    "Update User"
+   ]
+  },
+  "/v2/inventory-preload/csv-template": {
+   "get": [
+    "Read Inventory Preload Records"
+   ]
+  },
+  "/v2/inventory-preload/csv-validate": {
+   "post": [
+    "Create Inventory Preload Records"
+   ]
+  },
+  "/v2/inventory-preload/ea-columns": {
+   "get": [
+    "Read Inventory Preload Records"
+   ]
+  },
+  "/v2/inventory-preload/export": {
+   "post": [
+    "Read Inventory Preload Records"
+   ]
+  },
+  "/v2/inventory-preload/history": {
+   "get": [
+    "Read Inventory Preload Records"
+   ],
+   "post": [
+    "Update Inventory Preload Records"
+   ]
+  },
+  "/v2/inventory-preload/records": {
+   "get": [
+    "Read Inventory Preload Records"
+   ],
+   "post": [
+    "Create Inventory Preload Records"
+   ]
+  },
+  "/v2/inventory-preload/records/delete-all": {
+   "post": [
+    "Delete Inventory Preload Records"
+   ]
+  },
+  "/v2/inventory-preload/records/{id}": {
+   "delete": [
+    "Delete Inventory Preload Records"
+   ],
+   "get": [
+    "Read Inventory Preload Records"
+   ],
+   "put": [
+    "Update Inventory Preload Records"
+   ]
+  },
+  "/v2/jamf-package": {
+   "get": [
+    "Jamf Packages Action"
+   ]
+  },
+  "/v2/jamf-remote-assist/session": {
+   "get": [
+    "Read Remote Assist"
+   ]
+  },
+  "/v2/jamf-remote-assist/session/export": {
+   "post": [
+    "Read Remote Assist"
+   ]
+  },
+  "/v2/jamf-remote-assist/session/{id}": {
+   "get": [
+    "Read Remote Assist"
+   ]
+  },
+  "/v2/local-admin-password/pending-rotations": {
+   "get": [
+    "View Local Admin Password"
+   ]
+  },
+  "/v2/local-admin-password/settings": {
+   "get": [
+    "Read User-Initiated Enrollment",
+    "Update Local Admin Password Settings"
+   ],
+   "put": [
+    "Update Local Admin Password Settings"
+   ]
+  },
+  "/v2/local-admin-password/{clientManagementId}/account/{username}/audit": {
+   "get": [
+    "View Local Admin Password Audit History"
+   ]
+  },
+  "/v2/local-admin-password/{clientManagementId}/account/{username}/history": {
+   "get": [
+    "View Local Admin Password Audit History"
+   ]
+  },
+  "/v2/local-admin-password/{clientManagementId}/account/{username}/password": {
+   "get": [
+    "View Local Admin Password"
+   ]
+  },
+  "/v2/local-admin-password/{clientManagementId}/account/{username}/{guid}/audit": {
+   "get": [
+    "View Local Admin Password Audit History"
+   ]
+  },
+  "/v2/local-admin-password/{clientManagementId}/account/{username}/{guid}/history": {
+   "get": [
+    "View Local Admin Password Audit History"
+   ]
+  },
+  "/v2/local-admin-password/{clientManagementId}/account/{username}/{guid}/password": {
+   "get": [
+    "View Local Admin Password"
+   ]
+  },
+  "/v2/local-admin-password/{clientManagementId}/accounts": {
+   "get": [
+    "View Local Admin Password"
+   ]
+  },
+  "/v2/local-admin-password/{clientManagementId}/history": {
+   "get": [
+    "View Local Admin Password Audit History"
+   ]
+  },
+  "/v2/local-admin-password/{clientManagementId}/set-password": {
+   "put": [
+    "Send Local Admin Password Command"
+   ]
+  },
+  "/v2/mdm/blank-push": {
+   "post": [
+    "View MDM command information in Jamf Pro API"
+   ]
+  },
+  "/v2/mdm/commands": {
+   "get": [
+    "View MDM command information in Jamf Pro API"
+   ],
+   "post": [
+    "View MDM command information in Jamf Pro API"
+   ]
+  },
+  "/v2/mobile-device-groups": {
+   "get": [
+    "Read Smart Mobile Device Groups",
+    "Read Static Mobile Device Groups"
+   ]
+  },
+  "/v2/mobile-device-groups/smart-group-membership/{id}": {
+   "get": [
+    "Read Smart Mobile Device Groups",
+    "Read Mobile Devices"
+   ]
+  },
+  "/v2/mobile-device-groups/smart-groups": {
+   "get": [
+    "Read Smart Mobile Device Groups"
+   ],
+   "post": [
+    "Create Smart Mobile Device Groups"
+   ]
+  },
+  "/v2/mobile-device-groups/smart-groups/{id}": {
+   "delete": [
+    "Delete Smart Mobile Device Groups"
+   ],
+   "get": [
+    "Read Smart Mobile Device Groups"
+   ],
+   "put": [
+    "Update Smart Mobile Device Groups"
+   ]
+  },
+  "/v2/mobile-device-groups/static-group-membership/{id}": {
+   "get": [
+    "Read Static Mobile Device Groups",
+    "Read Mobile Devices"
+   ]
+  },
+  "/v2/mobile-device-groups/static-groups": {
+   "get": [
+    "Read Static Mobile Device Groups"
+   ],
+   "post": [
+    "Create Static Mobile Device Groups"
+   ]
+  },
+  "/v2/mobile-device-groups/static-groups/{id}": {
+   "delete": [
+    "Delete Static Mobile Device Groups"
+   ],
+   "get": [
+    "Read Static Mobile Device Groups"
+   ],
+   "patch": [
+    "Update Static Mobile Device Groups"
+   ]
+  },
+  "/v2/mobile-device-groups/{id}/erase": {
+   "post": [
+    "Send MDM command information in Jamf Pro API"
+   ]
+  },
+  "/v2/mobile-device-prestages": {
+   "get": [
+    "Read Mobile Device PreStage Enrollments"
+   ],
+   "post": [
+    "Create Mobile Device PreStage Enrollments"
+   ]
+  },
+  "/v2/mobile-device-prestages/scope": {
+   "get": [
+    "Read Mobile Device PreStage Enrollments"
+   ]
+  },
+  "/v2/mobile-device-prestages/syncs": {
+   "get": [
+    "Read Mobile Device PreStage Enrollments"
+   ]
+  },
+  "/v2/mobile-device-prestages/{id}": {
+   "delete": [
+    "Delete Mobile Device PreStage Enrollments"
+   ],
+   "get": [
+    "Read Mobile Device PreStage Enrollments"
+   ],
+   "put": [
+    "Update Mobile Device PreStage Enrollments"
+   ]
+  },
+  "/v2/mobile-device-prestages/{id}/attachments": {
+   "get": [
+    "Read Mobile Device PreStage Enrollments"
+   ],
+   "post": [
+    "Create Mobile Device PreStage Enrollments"
+   ]
+  },
+  "/v2/mobile-device-prestages/{id}/attachments/delete-multiple": {
+   "post": [
+    "Delete Mobile Device PreStage Enrollments"
+   ]
+  },
+  "/v2/mobile-device-prestages/{id}/history": {
+   "get": [
+    "Read Mobile Device PreStage Enrollments"
+   ],
+   "post": [
+    "Update Mobile Device PreStage Enrollments"
+   ]
+  },
+  "/v2/mobile-device-prestages/{id}/scope": {
+   "get": [
+    "Read Mobile Device PreStage Enrollments"
+   ],
+   "post": [
+    "Update Mobile Device PreStage Enrollments"
+   ],
+   "put": [
+    "Update Mobile Device PreStage Enrollments"
+   ]
+  },
+  "/v2/mobile-device-prestages/{id}/scope/delete-multiple": {
+   "post": [
+    "Update Mobile Device PreStage Enrollments"
+   ]
+  },
+  "/v2/mobile-device-prestages/{id}/syncs": {
+   "get": [
+    "Read Mobile Device PreStage Enrollments"
+   ]
+  },
+  "/v2/mobile-device-prestages/{id}/syncs/latest": {
+   "get": [
+    "Read Mobile Device PreStage Enrollments"
+   ]
+  },
+  "/v2/mobile-devices": {
+   "get": [
+    "Read Mobile Devices"
+   ]
+  },
+  "/v2/mobile-devices/detail": {
+   "get": [
+    "Read Mobile Devices"
+   ]
+  },
+  "/v2/mobile-devices/{id}": {
+   "get": [
+    "Read Mobile Devices"
+   ],
+   "patch": [
+    "Update Mobile Devices"
+   ]
+  },
+  "/v2/mobile-devices/{id}/detail": {
+   "get": [
+    "Read Mobile Devices"
+   ]
+  },
+  "/v2/mobile-devices/{id}/erase": {
+   "post": [
+    "Send Mobile Device Remote Wipe Command"
+   ]
+  },
+  "/v2/mobile-devices/{id}/paired-devices": {
+   "get": [
+    "Read Mobile Devices"
+   ]
+  },
+  "/v2/mobile-devices/{id}/unmanage": {
+   "post": [
+    "Unmanage Mobile Devices"
+   ]
+  },
+  "/v2/patch-management-accept-disclaimer": {
+   "post": [
+    "Update Patch Management Software Titles"
+   ]
+  },
+  "/v2/patch-policies": {
+   "get": [
+    "Read Patch Policies"
+   ]
+  },
+  "/v2/patch-policies/policy-details": {
+   "get": [
+    "Read Patch Policies"
+   ]
+  },
+  "/v2/patch-policies/{id}/dashboard": {
+   "delete": [
+    "Read Patch Policies"
+   ],
+   "get": [
+    "Read Patch Policies"
+   ],
+   "post": [
+    "Read Patch Policies"
+   ]
+  },
+  "/v2/patch-policies/{id}/logs": {
+   "get": [
+    "Read Patch Policies"
+   ]
+  },
+  "/v2/patch-policies/{id}/logs/eligible-retry-count": {
+   "get": [
+    "Read Patch Policies"
+   ]
+  },
+  "/v2/patch-policies/{id}/logs/retry": {
+   "post": [
+    "Update Patch Policies"
+   ]
+  },
+  "/v2/patch-policies/{id}/logs/retry-all": {
+   "post": [
+    "Update Patch Policies"
+   ]
+  },
+  "/v2/patch-policies/{id}/logs/{deviceId}": {
+   "get": [
+    "Read Patch Policies"
+   ]
+  },
+  "/v2/patch-policies/{id}/logs/{deviceId}/details": {
+   "get": [
+    "Read Patch Policies"
+   ]
+  },
+  "/v2/patch-software-title-configurations": {
+   "get": [
+    "Read Patch Management Software Titles"
+   ],
+   "post": [
+    "Create Patch Management Software Titles"
+   ]
+  },
+  "/v2/patch-software-title-configurations/{id}": {
+   "delete": [
+    "Delete Patch Management Software Titles"
+   ],
+   "get": [
+    "Read Patch Management Software Titles"
+   ],
+   "patch": [
+    "Update Patch Management Software Titles"
+   ]
+  },
+  "/v2/patch-software-title-configurations/{id}/dashboard": {
+   "delete": [
+    "Read Patch Management Software Titles"
+   ],
+   "get": [
+    "Read Patch Management Software Titles"
+   ],
+   "post": [
+    "Read Patch Management Software Titles"
+   ]
+  },
+  "/v2/patch-software-title-configurations/{id}/definitions": {
+   "get": [
+    "Read Patch Management Software Titles"
+   ]
+  },
+  "/v2/patch-software-title-configurations/{id}/dependencies": {
+   "get": [
+    "Read Patch Management Software Titles"
+   ]
+  },
+  "/v2/patch-software-title-configurations/{id}/export-report": {
+   "get": [
+    "Read Patch Management Software Titles"
+   ]
+  },
+  "/v2/patch-software-title-configurations/{id}/extension-attributes": {
+   "get": [
+    "Read Patch Management Software Titles"
+   ]
+  },
+  "/v2/patch-software-title-configurations/{id}/history": {
+   "get": [
+    "Read Patch Management Software Titles"
+   ],
+   "post": [
+    "Update Patch Management Software Titles"
+   ]
+  },
+  "/v2/patch-software-title-configurations/{id}/patch-report": {
+   "get": [
+    "Read Patch Management Software Titles"
+   ]
+  },
+  "/v2/patch-software-title-configurations/{id}/patch-summary": {
+   "get": [
+    "Read Patch Management Software Titles"
+   ]
+  },
+  "/v2/patch-software-title-configurations/{id}/patch-summary/versions": {
+   "get": [
+    "Read Patch Management Software Titles"
+   ]
+  },
+  "/v2/smtp-server": {
+   "get": [
+    "Read SMTP Server"
+   ],
+   "put": [
+    "Update SMTP Server"
+   ]
+  },
+  "/v2/smtp-server/allowed-auth-types": {
+   "get": [
+    "Read SMTP Server"
+   ]
+  },
+  "/v2/sso/cert": {
+   "delete": [
+    "Update SSO Settings"
+   ],
+   "get": [
+    "Read SSO Settings"
+   ],
+   "post": [
+    "Update SSO Settings"
+   ],
+   "put": [
+    "Update SSO Settings"
+   ]
+  },
+  "/v2/sso/cert/download": {
+   "get": [
+    "Read SSO Settings"
+   ]
+  },
+  "/v2/sso/cert/parse": {
+   "post": [
+    "Update SSO Settings"
+   ]
+  },
+  "/v3/check-in": {
+   "get": [
+    "Read Computer Check-In"
+   ],
+   "put": [
+    "Update Computer Check-In"
+   ]
+  },
+  "/v3/check-in/history": {
+   "get": [
+    "Read Computer Check-In"
+   ],
+   "post": [
+    "Update Computer Check-In"
+   ]
+  },
+  "/v3/computer-groups/smart-group-membership/{id}": {
+   "get": [
+    "Read Smart Computer Groups"
+   ]
+  },
+  "/v3/computer-groups/smart-groups": {
+   "get": [
+    "Read Smart Computer Groups"
+   ],
+   "post": [
+    "Create Smart Computer Groups"
+   ]
+  },
+  "/v3/computer-groups/smart-groups/{id}": {
+   "delete": [
+    "Delete Smart Computer Groups"
+   ],
+   "get": [
+    "Read Smart Computer Groups"
+   ],
+   "put": [
+    "Update Smart Computer Groups"
+   ]
+  },
+  "/v3/computer-groups/static-groups": {
+   "get": [
+    "Read Static Computer Groups"
+   ],
+   "post": [
+    "Create Static Computer Groups"
+   ]
+  },
+  "/v3/computer-groups/static-groups/{id}": {
+   "delete": [
+    "Delete Static Computer Groups"
+   ],
+   "get": [
+    "Read Static Computer Groups"
+   ],
+   "put": [
+    "Update Static Computer Groups"
+   ]
+  },
+  "/v3/computer-prestages": {
+   "get": [
+    "Read Computer PreStage Enrollments"
+   ],
+   "post": [
+    "Create Computer PreStage Enrollments"
+   ]
+  },
+  "/v3/computer-prestages/{id}": {
+   "delete": [
+    "Delete Computer PreStage Enrollments"
+   ],
+   "get": [
+    "Read Computer PreStage Enrollments"
+   ],
+   "put": [
+    "Update Computer PreStage Enrollments"
+   ]
+  },
+  "/v3/computers-inventory": {
+   "get": [
+    "Read Computers"
+   ],
+   "post": [
+    "Create Computers"
+   ]
+  },
+  "/v3/computers-inventory-detail/{id}": {
+   "get": [
+    "Read Computers"
+   ],
+   "patch": [
+    "Update Computers"
+   ]
+  },
+  "/v3/computers-inventory/filevault": {
+   "get": [
+    "View Disk Encryption Recovery Key"
+   ]
+  },
+  "/v3/computers-inventory/{id}": {
+   "delete": [
+    "Delete Computers"
+   ],
+   "get": [
+    "Read Computers"
+   ]
+  },
+  "/v3/computers-inventory/{id}/attachments": {
+   "post": [
+    "Update Computers"
+   ]
+  },
+  "/v3/computers-inventory/{id}/attachments/{attachmentId}": {
+   "delete": [
+    "Update Computers"
+   ],
+   "get": [
+    "Read Computers"
+   ]
+  },
+  "/v3/computers-inventory/{id}/filevault": {
+   "get": [
+    "View Disk Encryption Recovery Key"
+   ]
+  },
+  "/v3/computers-inventory/{id}/view-device-lock-pin": {
+   "get": [
+    "View Computer Device Lock Pin"
+   ]
+  },
+  "/v3/computers-inventory/{id}/view-recovery-lock-password": {
+   "get": [
+    "View Recovery Lock"
+   ]
+  },
+  "/v3/enrollment/access-groups": {
+   "get": [
+    "Read User-Initiated Enrollment"
+   ],
+   "post": [
+    "Update User-Initiated Enrollment"
+   ]
+  },
+  "/v3/enrollment/access-groups/{id}": {
+   "delete": [
+    "Update User-Initiated Enrollment"
+   ],
+   "get": [
+    "Read User-Initiated Enrollment"
+   ],
+   "put": [
+    "Update User-Initiated Enrollment"
+   ]
+  },
+  "/v3/enrollment/filtered-language-codes": {
+   "get": [
+    "Read User-Initiated Enrollment"
+   ]
+  },
+  "/v3/enrollment/language-codes": {
+   "get": [
+    "Read User-Initiated Enrollment"
+   ]
+  },
+  "/v3/enrollment/languages": {
+   "get": [
+    "Read User-Initiated Enrollment"
+   ]
+  },
+  "/v3/enrollment/languages/delete-multiple": {
+   "post": [
+    "Update User-Initiated Enrollment"
+   ]
+  },
+  "/v3/enrollment/languages/{languageId}": {
+   "delete": [
+    "Update User-Initiated Enrollment"
+   ],
+   "get": [
+    "Read User-Initiated Enrollment"
+   ],
+   "put": [
+    "Update User-Initiated Enrollment"
+   ]
+  },
+  "/v3/mobile-device-prestages": {
+   "get": [
+    "Read Mobile Device PreStage Enrollments"
+   ],
+   "post": [
+    "Create Mobile Device PreStage Enrollments"
+   ]
+  },
+  "/v3/mobile-device-prestages/{id}": {
+   "delete": [
+    "Delete Mobile Device PreStage Enrollments"
+   ],
+   "get": [
+    "Read Mobile Device PreStage Enrollments"
+   ],
+   "put": [
+    "Update Mobile Device PreStage Enrollments"
+   ]
+  },
+  "/v3/mobile-device-prestages/{id}/attachments": {
+   "get": [
+    "Read Mobile Device PreStage Enrollments"
+   ],
+   "post": [
+    "Create Mobile Device PreStage Enrollments"
+   ]
+  },
+  "/v3/mobile-device-prestages/{id}/attachments/delete-multiple": {
+   "post": [
+    "Delete Mobile Device PreStage Enrollments"
+   ]
+  },
+  "/v3/mobile-device-prestages/{id}/history": {
+   "get": [
+    "Read Mobile Device PreStage Enrollments"
+   ],
+   "post": [
+    "Update Mobile Device PreStage Enrollments"
+   ]
+  },
+  "/v3/patch-software-title-configurations": {
+   "get": [
+    "Read Patch Management Software Titles"
+   ],
+   "post": [
+    "Create Patch Management Software Titles"
+   ]
+  },
+  "/v3/patch-software-title-configurations/{id}": {
+   "delete": [
+    "Delete Patch Management Software Titles"
+   ],
+   "get": [
+    "Read Patch Management Software Titles"
+   ],
+   "patch": [
+    "Update Patch Management Software Titles"
+   ]
+  },
+  "/v3/patch-software-title-configurations/{id}/dashboard": {
+   "delete": [
+    "Read Patch Management Software Titles"
+   ],
+   "get": [
+    "Read Patch Management Software Titles"
+   ],
+   "post": [
+    "Read Patch Management Software Titles"
+   ]
+  },
+  "/v3/patch-software-title-configurations/{id}/definitions": {
+   "get": [
+    "Read Patch Management Software Titles"
+   ]
+  },
+  "/v3/patch-software-title-configurations/{id}/dependencies": {
+   "get": [
+    "Read Patch Management Software Titles"
+   ]
+  },
+  "/v3/patch-software-title-configurations/{id}/export-report": {
+   "get": [
+    "Read Patch Management Software Titles"
+   ]
+  },
+  "/v3/patch-software-title-configurations/{id}/extension-attributes": {
+   "get": [
+    "Read Patch Management Software Titles"
+   ]
+  },
+  "/v3/patch-software-title-configurations/{id}/history": {
+   "get": [
+    "Read Patch Management Software Titles"
+   ],
+   "post": [
+    "Update Patch Management Software Titles"
+   ]
+  },
+  "/v3/patch-software-title-configurations/{id}/patch-report": {
+   "get": [
+    "Read Patch Management Software Titles"
+   ]
+  },
+  "/v3/patch-software-title-configurations/{id}/patch-summary": {
+   "get": [
+    "Read Patch Management Software Titles"
+   ]
+  },
+  "/v3/patch-software-title-configurations/{id}/patch-summary/versions": {
+   "get": [
+    "Read Patch Management Software Titles"
+   ]
+  },
+  "/v3/sso": {
+   "get": [
+    "Read SSO Settings"
+   ],
+   "put": [
+    "Update SSO Settings"
+   ]
+  },
+  "/v3/sso/dependencies": {
+   "get": [
+    "Read SSO Settings"
+   ]
+  },
+  "/v3/sso/disable": {
+   "post": [
+    "Update SSO Settings"
+   ]
+  },
+  "/v3/sso/history": {
+   "get": [
+    "Read SSO Settings"
+   ],
+   "post": [
+    "Update SSO Settings"
+   ]
+  },
+  "/v3/sso/metadata/download": {
+   "get": [
+    "Read SSO Settings"
+   ]
+  },
+  "/v3/sso/oidc-broker-config": {
+   "get": [
+    "Read SSO Settings"
+   ],
+   "put": [
+    "Update SSO Settings"
+   ]
+  },
+  "/v4/computers-inventory": {
+   "get": [
+    "Read Computers"
+   ],
+   "post": [
+    "Create Computers"
+   ]
+  },
+  "/v4/computers-inventory-detail/{id}": {
+   "get": [
+    "Read Computers"
+   ],
+   "patch": [
+    "Update Computers"
+   ]
+  },
+  "/v4/computers-inventory/filevault": {
+   "get": [
+    "View Disk Encryption Recovery Key"
+   ]
+  },
+  "/v4/computers-inventory/{id}": {
+   "delete": [
+    "Delete Computers"
+   ],
+   "get": [
+    "Read Computers"
+   ]
+  },
+  "/v4/computers-inventory/{id}/attachments": {
+   "post": [
+    "Update Computers"
+   ]
+  },
+  "/v4/computers-inventory/{id}/attachments/{attachmentId}": {
+   "delete": [
+    "Update Computers"
+   ],
+   "get": [
+    "Read Computers"
+   ]
+  },
+  "/v4/computers-inventory/{id}/erase": {
+   "post": [
+    "Send Computer Remote Wipe Command"
+   ]
+  },
+  "/v4/computers-inventory/{id}/filevault": {
+   "get": [
+    "View Disk Encryption Recovery Key"
+   ]
+  },
+  "/v4/computers-inventory/{id}/remove-mdm-profile": {
+   "post": [
+    "Send Computer Unmanage Command"
+   ]
+  },
+  "/v4/computers-inventory/{id}/view-device-lock-pin": {
+   "get": [
+    "View Computer Device Lock Pin"
+   ]
+  },
+  "/v4/computers-inventory/{id}/view-recovery-lock-password": {
+   "get": [
+    "View Recovery Lock"
+   ]
+  },
+  "/v4/enrollment": {
+   "get": [
+    "Read User-Initiated Enrollment"
+   ],
+   "put": [
+    "Update User-Initiated Enrollment"
+   ]
+  },
+  "/v4/enrollment/access-management": {
+   "get": [
+    "Access Management Setting Read"
+   ],
+   "post": [
+    "Access Management Setting Update"
+   ]
+  }
+ },
+ "source": "Jamf Pro API description (/api/schema/) of a Jamf Pro 11.33.1 cloud instance, read 2026-10-26 without signing in. The instance ran Jamf Pro 11.33.1 (read that day with Serial Number Reader); the description itself says only \"production\". Kept: each operation's x-required-privileges, nothing else."
+}
