@@ -568,6 +568,15 @@ struct ClassicTests {
         }
     }
 
+    @Test("A secret in an XML error page stays hidden in its message")
+    func errorPageSecret() {
+        let answer = HTTPResponse(status: 400, data: Data("<error><password>hunter2</password> token=abc123</error>".utf8))
+        let message = JamfPlatformError(HTTPError.status(answer, method: "PUT", path: "/proclassic/ldapservers/id/1", duringSignIn: false)).message()
+        #expect(message.hasPrefix("HTTP 400"))
+        #expect(!message.contains("hunter2"))
+        #expect(!message.contains("abc123"))
+    }
+
     @Test("Lists, groups and members, asked for as JSON")
     func groups() async throws {
         let server = MockServer { request in

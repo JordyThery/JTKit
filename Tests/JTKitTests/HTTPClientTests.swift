@@ -196,6 +196,24 @@ struct HTTPClientTests {
         #expect(log.entries.last?.note == "Cancelled while waiting.")
     }
 
+    @Test("A request the app marks as withholding its contents is recorded like a sensitive call")
+    func withheldContents() async throws {
+        let server = MockServer { _ in .json(409, "<p>Error: Serial number SERIAL-1 is invalid</p>") }
+        let log = ActivityLog()
+        let client = HTTPClient(baseURL: base, tokens: nil, recorder: RequestRecorder(session: server.session, log: log))
+        _ = try? await client.send(HTTPRequest(method: "POST", path: "JSSResource/licensedsoftware/id/0",
+                                               body: Data("<serial_number_1>SERIAL-1</serial_number_1>".utf8),
+                                               recordsBodies: true, withholdsContents: true))
+
+        let entry = try #require(log.entries.first)
+        #expect(entry.status == 409)
+        let details = try #require(entry.request)
+        #expect(details.contentsWithheld)
+        #expect(details.requestBody == nil && details.responseBody == nil)
+        #expect(details.requestHeaders.isEmpty && details.responseHeaders.isEmpty)
+        #expect(!"\(entry)".contains("SERIAL-1"))
+    }
+
     @Test("Requests not on the app's list never reach the network, and are logged")
     func refused() async throws {
         let server = MockServer { _ in .json(200, "{}") }

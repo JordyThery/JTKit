@@ -170,9 +170,12 @@ public nonisolated struct JamfPlatformError: Error, LocalizedError, Sendable {
             self.init(Kind.transport(method: method, path: path, code: code, message: message))
         case let .status(response, method, path, duringSignIn):
             let body = JamfPlatform.ErrorBody(data: response.data)
-            // a Classic API error page (HTML or XML) reads as its message
+            // a Classic API error page (HTML or XML) reads as its message;
+            // secrets are hidden first, while their tags (`<password>`) still
+            // say what they are
+            let redactedPage = Redaction.body(response.data, contentType: response.header("Content-Type")).map { Data($0.utf8) }
             let text = body == nil
-                ? JamfClassic.errorMessage(in: response.data).map(Redaction.text) ?? HTTPError.detail(of: response)
+                ? redactedPage.flatMap(JamfClassic.errorMessage(in:)).map(Redaction.text) ?? HTTPError.detail(of: response)
                 : nil
             self.init(duringSignIn
                 ? Kind.signIn(status: response.status, body: body, text: text)

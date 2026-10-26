@@ -482,6 +482,27 @@ struct JamfPlatformPermissionTests {
         #expect(JamfPlatform.PermissionCheck.blueprintsRead.hint(on: .jamfPro).contains("privilege for “Read Blueprints”"))
     }
 
+    @Test("Several missing permissions: one sentence, each name once, in the right place")
+    func severalHints() {
+        let scripts = JamfPlatform.PermissionCheck("Scripts", path: "/pro/v1/scripts", permission: "scripts:read", jamfProPrivilege: "Read Scripts")
+        let policies = JamfPlatform.PermissionCheck("Policies", path: "/proclassic/policies", permission: "policies:read", jamfProPrivilege: "Read Policies")
+        let groups = JamfPlatform.PermissionCheck("Groups", path: "/pro/v1/groups", permission: "device-groups:read", jamfProPrivilege: "Read Scripts")
+        typealias Check = JamfPlatform.PermissionCheck
+        #expect(Check.hint(for: [], on: .jamfPro) == nil)
+        #expect(Check.hint(for: [scripts], on: .platformAPI)
+                == "Add the “scripts:read” permission to the API integration in Jamf Account.")
+        #expect(Check.hint(for: [scripts, policies, groups], on: .platformAPI)
+                == "Add the “scripts:read”, “policies:read” and “device-groups:read” permissions to the API integration in Jamf Account.")
+        #expect(Check.hint(for: [scripts, policies, groups], on: .jamfPro)
+                == "Add the “Read Scripts” and “Read Policies” privileges to the API role in Jamf Pro under Settings › API Roles and Clients.")
+        #expect(Check.hint(for: [policies], on: .jamfPro, signIn: .usernamePassword)
+                == "Add the “Read Policies” privilege to the user account in Jamf Pro under Settings › User Accounts and Groups.")
+        #expect(Check.hint(for: [.blueprintsRead], on: .jamfPro)
+                == "Add the privilege for “Read Blueprints” to the API role in Jamf Pro under Settings › API Roles and Clients.")
+        #expect(Check.hint(for: [scripts, .blueprintsRead], on: .jamfPro)
+                == "Add the privileges for “Scripts” and “Read Blueprints” to the API role in Jamf Pro under Settings › API Roles and Clients.")
+    }
+
     @Test("Test Connection's message names what is missing, and why a check couldn't run")
     func problem() throws {
         #expect(JamfPlatform.PermissionProblem([(.blueprintsRead, .allowed), (.deviceGroupsRead, .allowed)]) == nil)

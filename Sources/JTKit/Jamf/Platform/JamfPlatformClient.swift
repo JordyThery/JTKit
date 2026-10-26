@@ -188,7 +188,12 @@ extension JamfPlatform {
 
         /// A GET, read as lossless JSON.
         public func json(_ path: String, query: [URLQueryItem] = [], privilege: JamfPro.Privilege? = nil) async throws -> LosslessJSON {
-            let response = try await send(HTTPRequest(path: path, query: query), privilege: privilege)
+            try await json(path, query: query, privileges: privilege.map { [$0] } ?? [])
+        }
+
+        /// A GET that needs several privileges, read as lossless JSON.
+        public func json(_ path: String, query: [URLQueryItem] = [], privileges: [JamfPro.Privilege]) async throws -> LosslessJSON {
+            let response = try await send(HTTPRequest(path: path, query: query), privileges: privileges)
             do {
                 return try LosslessJSON(data: response.data)
             } catch {

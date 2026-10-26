@@ -281,9 +281,93 @@ struct PrivilegeTableTests {
         "Send Computer Remote Command": "unused by every app; Classic API",
         "Create Policies": "Classic API (policies); used by Jamf Deployer's preflight",
         "Read Patch Internal Source": "Classic API (patch sources)",
-        "View License Serial": "Classic API (activation code)",
+        "Read Patch External Source": "Classic API (patch sources)",
+        "View License Serial": "deprecated: Jamf Pro names it View License Serial Numbers",
+        "View License Serial Numbers": "Classic API (licensed software's serial numbers)",
         "Update Local Admin Password": "unused by every app; the description has Update Local Admin Password Settings",
         "Send Blank Push": "deprecated: not a Jamf Pro privilege",
+    ]
+
+    /// Table entries for objects only the Classic API serves (JamfMigrator
+    /// copies them over `JSSResource`), which this description doesn't cover.
+    /// Their names follow Jamf Pro's privilege list (checked in JamfMigrator's
+    /// docs/PERMISSIONS.md against a Jamf Pro 11.32 instance).
+    static let classicOnly: Set<String> = [
+        "Create Sites",
+        "Update Sites",
+        "Delete Sites",
+        "Read Network Segments",
+        "Create Network Segments",
+        "Update Network Segments",
+        "Delete Network Segments",
+        "Read User Extension Attributes",
+        "Create User Extension Attributes",
+        "Update User Extension Attributes",
+        "Delete User Extension Attributes",
+        "Read Smart User Groups",
+        "Create Smart User Groups",
+        "Delete Smart User Groups",
+        "Create Static User Groups",
+        "Update Static User Groups",
+        "Delete Static User Groups",
+        "Read Directory Bindings",
+        "Create Directory Bindings",
+        "Update Directory Bindings",
+        "Delete Directory Bindings",
+        "Read Software Update Servers",
+        "Create Software Update Servers",
+        "Update Software Update Servers",
+        "Delete Software Update Servers",
+        "Read Advanced Computer Searches",
+        "Create Advanced Computer Searches",
+        "Update Advanced Computer Searches",
+        "Delete Advanced Computer Searches",
+        "Read Advanced User Searches",
+        "Create Advanced User Searches",
+        "Update Advanced User Searches",
+        "Delete Advanced User Searches",
+        "Read macOS Configuration Profiles",
+        "Create macOS Configuration Profiles",
+        "Update macOS Configuration Profiles",
+        "Delete macOS Configuration Profiles",
+        "Read iOS Configuration Profiles",
+        "Create iOS Configuration Profiles",
+        "Update iOS Configuration Profiles",
+        "Delete iOS Configuration Profiles",
+        "Read Mac Applications",
+        "Create Mac Applications",
+        "Update Mac Applications",
+        "Delete Mac Applications",
+        "Read Mobile Device Applications",
+        "Create Mobile Device Applications",
+        "Update Mobile Device Applications",
+        "Delete Mobile Device Applications",
+        "Create eBooks",
+        "Update eBooks",
+        "Delete eBooks",
+        "Read Classes",
+        "Create Classes",
+        "Update Classes",
+        "Delete Classes",
+        "Read Restricted Software",
+        "Create Restricted Software",
+        "Update Restricted Software",
+        "Delete Restricted Software",
+        "Read Licensed Software",
+        "Create Licensed Software",
+        "Update Licensed Software",
+        "Delete Licensed Software",
+        "Read Printers",
+        "Create Printers",
+        "Update Printers",
+        "Delete Printers",
+        "Delete Policies",
+        "Create Patch Policies",
+        "Delete Patch Policies",
+        "Read Webhooks",
+        "Create Webhooks",
+        "Update Webhooks",
+        "Delete Webhooks",
     ]
 
     /// Every `Privilege` constant in JTKit's table.
@@ -303,10 +387,10 @@ struct PrivilegeTableTests {
     @Test("Every privilege in the table is one Jamf Pro lists, or explained")
     func table() {
         for name in Self.table {
-            #expect(Self.everyListed.contains(name) || Self.notInDescription[name] != nil,
+            #expect(Self.everyListed.contains(name) || Self.notInDescription[name] != nil || Self.classicOnly.contains(name),
                     "“\(name)” isn’t in Jamf Pro 11.33.1’s API description: renamed?")
         }
-        for name in Self.notInDescription.keys {
+        for name in Array(Self.notInDescription.keys) + Self.classicOnly {
             #expect(!Self.everyListed.contains(name), "“\(name)” is in the description now: remove it from the exceptions")
         }
     }

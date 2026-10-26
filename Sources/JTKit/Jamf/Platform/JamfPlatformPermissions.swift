@@ -52,6 +52,44 @@ extension JamfPlatform {
             guard server == .jamfPro else { return hint }
             return jamfProHint ?? "Add the privilege for “\(name)” to the API role in Jamf Pro under Settings › API Roles and Clients."
         }
+
+        /// What to grant for several missing checks, in one sentence: the
+        /// permissions in Jamf Account, or on a Jamf Pro server the
+        /// privileges, on the API role for an API client and on the user
+        /// account for a username and password. Each name once; nil for none.
+        public static func hint(for checks: [PermissionCheck], on server: JamfPlatform.Server,
+                                signIn: SignInMethod = .apiClient) -> String? {
+            guard !checks.isEmpty else { return nil }
+            if server != .jamfPro {
+                let names = unique(checks.map(\.permission))
+                return "Add the \(quoted(names)) \(names.count == 1 ? "permission" : "permissions") to the API integration in Jamf Account."
+            }
+            let place = signIn == .usernamePassword
+                ? "the user account in Jamf Pro under Settings › User Accounts and Groups"
+                : "the API role in Jamf Pro under Settings › API Roles and Clients"
+            let privileges = checks.compactMap(\.jamfProPrivilege)
+            guard privileges.count == checks.count else {
+                // a check without its privilege: name what each is for
+                let names = unique(checks.map(\.name))
+                return "Add the \(names.count == 1 ? "privilege" : "privileges") for \(quoted(names)) to \(place)."
+            }
+            let names = unique(privileges)
+            return "Add the \(quoted(names)) \(names.count == 1 ? "privilege" : "privileges") to \(place)."
+        }
+
+        private static func unique(_ names: [String]) -> [String] {
+            var seen = [String]()
+            for name in names where !seen.contains(name) { seen.append(name) }
+            return seen
+        }
+
+        /// “A”, “B” and “C”.
+        private static func quoted(_ names: [String]) -> String {
+            let parts = names.map { "“\($0)”" }
+            return parts.count <= 1
+                ? parts.joined()
+                : parts.dropLast().joined(separator: ", ") + " and " + parts[parts.count - 1]
+        }
     }
 
     /// What one check found.
