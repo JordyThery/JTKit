@@ -46,6 +46,9 @@ extension JamfPlatform.Client {
         let receiving = plan.receiving
 
         switch command {
+        case .deleteRecord:
+            // not a Jamf Pro command: every device was skipped above
+            break
         case .renewProfile:
             try await renewProfile(receiving, &run)
         case .blankPush:

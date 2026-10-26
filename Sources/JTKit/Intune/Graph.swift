@@ -14,9 +14,10 @@ public nonisolated enum Graph {
         case beta
     }
 
-    /// The recorder for Graph requests: category "Graph", service "Intune".
+    /// The recorder for Graph requests: category and service "Intune", so
+    /// the activity log's Source column says "Intune" (ROADMAP step 8).
     public static func recorder(session: URLSession = .shared, log: ActivityLog?, connection: String? = nil) -> RequestRecorder {
-        RequestRecorder(session: session, log: log, category: "Graph", service: "Intune", connection: connection)
+        RequestRecorder(session: session, log: log, category: "Intune", service: "Intune", connection: connection)
     }
 
     /// Sends requests to Microsoft Graph on JTKit's `HTTPClient`, so the
@@ -90,7 +91,7 @@ public nonisolated enum Graph {
         public func send(_ method: String, _ path: String, version: Version, body: Data? = nil,
                          safeToRepeat: Bool = false) async throws -> Data {
             try await send(method, path, version: version, body: body, safeToRepeat: safeToRepeat,
-                           notFoundAfterRepeatIsDone: false).data
+                           notFoundAfterRepeatIsDone: false, recordsBodies: false).data
         }
 
         public func get<T: Decodable>(_ type: T.Type, _ path: String, version: Version) async throws -> T {
@@ -124,17 +125,23 @@ public nonisolated enum Graph {
         /// Safe to repeat: a 404 after a repeat counts as already gone.
         public func delete(_ path: String, version: Version) async throws {
             _ = try await send("DELETE", path, version: version, body: nil, safeToRepeat: true,
-                               notFoundAfterRepeatIsDone: true)
+                               notFoundAfterRepeatIsDone: true, recordsBodies: false)
         }
 
         /// Every item of a list, decoded, following the next pages.
+        ///
+        /// - Parameter recordsBodies: record the answers in the activity log,
+        ///   also of a success; only for lists that hold no secrets (a
+        ///   device lookup).
         public func list<T: Decodable>(_ type: T.Type, _ path: String, version: Version,
-                                       maxPages: Int = Graph.maxPages) async throws -> [T] {
-            try await listRaw(path, version: version, maxPages: maxPages).map { try Self.decode(type, from: $0) }
+                                       maxPages: Int = Graph.maxPages, recordsBodies: Bool = false) async throws -> [T] {
+            try await listRaw(path, version: version, maxPages: maxPages, recordsBodies: recordsBodies)
+                .map { try Self.decode(type, from: $0) }
         }
 
         /// Every item of a list as its own JSON, following the next pages.
-        public func listRaw(_ path: String, version: Version, maxPages: Int = Graph.maxPages) async throws -> [Data] {
+        public func listRaw(_ path: String, version: Version, maxPages: Int = Graph.maxPages,
+                            recordsBodies: Bool = false) async throws -> [Data] {
             var items = [Data]()
             var next: String? = path
             var pages = 0
@@ -143,7 +150,8 @@ public nonisolated enum Graph {
                 guard pages < maxPages else {
                     throw GraphError(.pageLimitReached(path: Self.shownPath(path), pages: pages), appHints: hints, access: access)
                 }
-                let data = try await send("GET", current, version: version)
+                let data = try await send("GET", current, version: version, body: nil, safeToRepeat: false,
+                                          notFoundAfterRepeatIsDone: false, recordsBodies: recordsBodies).data
                 pages += 1
                 guard let page = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
                       let value = page["value"] as? [Any] else {
@@ -211,7 +219,7 @@ public nonisolated enum Graph {
         // MARK: - Private
 
         private func send(_ method: String, _ path: String, version: Version, body: Data?, safeToRepeat: Bool,
-                          notFoundAfterRepeatIsDone: Bool) async throws -> HTTPResponse {
+                          notFoundAfterRepeatIsDone: Bool, recordsBodies: Bool) async throws -> HTTPResponse {
             let parts: (path: String, query: String?)
             do {
                 parts = try Self.parts(of: path, version: version)
@@ -225,7 +233,7 @@ public nonisolated enum Graph {
             let permission = Graph.Permission.required(method: method, path: pathInVersion.removingPercentEncoding ?? pathInVersion)
             let request = HTTPRequest(method: method, path: parts.path, body: body,
                                       headers: ["client-request-id": requestID()],
-                                      safeToRepeat: safeToRepeat, encodedQuery: parts.query,
+                                      safeToRepeat: safeToRepeat, recordsBodies: recordsBodies, encodedQuery: parts.query,
                                       notFoundAfterRepeatIsDone: notFoundAfterRepeatIsDone)
             do {
                 return try await http.send(request)

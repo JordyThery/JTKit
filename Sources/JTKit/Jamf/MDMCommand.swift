@@ -1,13 +1,14 @@
 import Foundation
 
-/// The MDM commands the apps send to Jamf Pro and Jamf School devices, with
-/// the rules every app follows: what each one is called and does, whether it
-/// can be undone, how it is confirmed, whether it needs a PIN, whether it
-/// works over the Platform API, and its Jamf Pro privilege.
+/// The MDM commands the apps send to Jamf Pro, Jamf School and Intune
+/// devices, with the rules every app follows: what each one is called and
+/// does, whether it can be undone, how it is confirmed, whether it needs a
+/// PIN, whether it works over the Platform API, its Jamf Pro privilege, and
+/// on Intune its Graph action and permission.
 ///
 /// Which commands an app offers, and the confirmation screens, stay in the
 /// app; the texts and rules are here, so every app that sends commands asks
-/// the same way (ROADMAP step 7).
+/// the same way (ROADMAP steps 7 and 8).
 public nonisolated enum MDMCommand: String, CaseIterable, Sendable, Hashable {
     case lockComputer
     case wipeComputer
@@ -21,10 +22,15 @@ public nonisolated enum MDMCommand: String, CaseIterable, Sendable, Hashable {
     case shutDownMobile
     case wipeMobile
     case unmanage
+    /// Deletes the device's record, leaving the device itself alone. In the
+    /// list for Intune only (Graph's `DELETE managedDevices/{id}`); the apps
+    /// remove Jamf Pro and Jamf School records their own way.
+    case deleteRecord
 
     public enum Product: Sendable, Hashable {
         case jamfPro
         case jamfSchool
+        case intune
     }
 
     public enum DeviceKind: String, Sendable, Hashable {
@@ -46,12 +52,26 @@ public nonisolated enum MDMCommand: String, CaseIterable, Sendable, Hashable {
         case .restartMobile: "Restart Device"
         case .shutDownMobile: "Shut Down Device"
         case .wipeMobile: "Wipe Device"
+        case .deleteRecord: "Delete Record"
+        }
+    }
+
+    /// The title on a product: Intune calls two of them by its own names
+    /// (decided by Jordy, ROADMAP step 8), because the Jamf names mislead
+    /// there: Intune's sync is no inventory request, and a retired device's
+    /// record goes too.
+    public func title(on product: Product) -> String {
+        switch (product, self) {
+        case (.intune, .updateInventory): "Sync Device"
+        case (.intune, .unmanage): "Retire Device"
+        default: title
         }
     }
 
     /// What the command does to the device, as the confirmation says it.
     public func consequence(on product: Product) -> String {
-        switch self {
+        if product == .intune, let text = intuneConsequence { return text }
+        return switch self {
         case .lockComputer: "The Mac will lock immediately and require the PIN to be used again."
         case .wipeComputer: "All data on the Mac will be erased. This cannot be undone."
         case .blankPush: "The device will be asked to check in with MDM and process any pending commands."
@@ -63,35 +83,54 @@ public nonisolated enum MDMCommand: String, CaseIterable, Sendable, Hashable {
             switch product {
             case .jamfPro: "The MDM profile is removed, so Jamf Pro can no longer manage the device. Its inventory record stays until you delete it."
             case .jamfSchool: "The MDM profile is removed, so Jamf School can no longer manage the device. Its record stays until you move it to the trash."
+            case .intune: intuneConsequence ?? ""
             }
         case .clearPasscode: "The device passcode will be removed."
         case .restartMobile: "The device will restart immediately."
         case .shutDownMobile: "The device will shut down immediately and stay off until someone powers it back on."
         case .wipeMobile: "All data on the device will be erased. This cannot be undone."
+        case .deleteRecord: "The device’s record will be deleted. The device itself isn’t changed."
+        }
+    }
+
+    /// Intune's own texts; nil for a command Intune doesn't have.
+    private var intuneConsequence: String? {
+        switch self {
+        case .updateInventory: "Intune asks the device to check in now, so it picks up pending policies and actions and reports its state."
+        case .restartMobile: "The device will restart immediately."
+        case .shutDownMobile: "The device will shut down immediately and stay off until someone powers it back on."
+        case .lockMobile: "The device will lock immediately; the owner's passcode unlocks it."
+        case .clearPasscode: "Intune removes the device passcode. If a policy requires one, the user is asked to set a new one."
+        case .wipeMobile: "All data on the device will be erased and it returns to factory settings. This cannot be undone."
+        case .wipeComputer: "All data on the Mac will be erased and it returns to factory settings. This cannot be undone."
+        case .unmanage: "The device is retired: company data and the management profile are removed, so Intune can no longer manage it. Unlike the Jamf products, the record goes too once the device acknowledges."
+        case .deleteRecord: "The record will be deleted from Intune. The device itself stays enrolled and will reappear at its next check-in; Retire Device is what unmanages it."
+        case .lockComputer, .blankPush, .renewProfile, .redeployFramework: nil
         }
     }
 
     /// Shown with a destructive (red) button.
     public var isDestructive: Bool {
         switch self {
-        case .wipeComputer, .wipeMobile, .lockComputer, .lockMobile, .unmanage: true
+        case .wipeComputer, .wipeMobile, .lockComputer, .lockMobile, .unmanage, .deleteRecord: true
         default: false
         }
     }
 
-    /// False for the commands nothing can undo: a wipe, and removing the MDM
-    /// profile (the device has to be enrolled again). Their confirmation
+    /// False for the commands nothing can undo: a wipe, removing the MDM
+    /// profile or retiring (the device has to be enrolled again), and
+    /// deleting a record. Their confirmation
     /// always names the connection, and asks for the number of devices when
     /// there are two or more (`Confirmation`).
     public var canBeUndone: Bool {
         switch self {
-        case .wipeComputer, .wipeMobile, .unmanage: false
+        case .wipeComputer, .wipeMobile, .unmanage, .deleteRecord: false
         default: true
         }
     }
 
     /// Lock and Wipe Computer on Jamf Pro ask for a 6-digit PIN, typed twice.
-    /// Jamf School's wipe takes no PIN.
+    /// Jamf School's and Intune's wipes take no PIN.
     public func needsPIN(on product: Product) -> Bool {
         product == .jamfPro && (self == .lockComputer || self == .wipeComputer)
     }
@@ -108,8 +147,20 @@ public nonisolated enum MDMCommand: String, CaseIterable, Sendable, Hashable {
     /// Whether the command reaches this kind of device on the product. Jamf
     /// School has one device resource for Macs and mobile devices, so restart,
     /// inventory and unenroll reach both.
+    ///
+    /// Intune keeps one collection for every platform. Lock and Clear
+    /// Passcode are for mobile devices only there: Graph accepts both
+    /// against a Mac, and neither does what the name says on one.
     public func applies(to kind: DeviceKind, on product: Product) -> Bool {
-        switch (product, self) {
+        if product == .intune {
+            return switch self {
+            case .updateInventory, .restartMobile, .shutDownMobile, .unmanage, .deleteRecord: true
+            case .lockMobile, .clearPasscode, .wipeMobile: kind == .mobileDevice
+            case .wipeComputer: kind == .computer
+            case .lockComputer, .blankPush, .renewProfile, .redeployFramework: false
+            }
+        }
+        return switch (product, self) {
         case (_, .lockComputer), (_, .wipeComputer), (_, .redeployFramework):
             kind == .computer
         case (.jamfPro, .updateInventory), (.jamfPro, .restartMobile),
@@ -118,6 +169,9 @@ public nonisolated enum MDMCommand: String, CaseIterable, Sendable, Hashable {
         case (.jamfSchool, .updateInventory), (.jamfSchool, .restartMobile),
              (_, .blankPush), (_, .renewProfile), (_, .unmanage):
             true
+        // Intune is answered above; Delete Record isn't a Jamf command
+        case (.intune, _), (_, .deleteRecord):
+            false
         }
     }
 
@@ -140,6 +194,40 @@ public nonisolated enum MDMCommand: String, CaseIterable, Sendable, Hashable {
         case .shutDownMobile: .sendMobileDeviceShutDownCommand
         case .wipeMobile: .sendMobileDeviceRemoteWipeCommand
         case .unmanage: kind == .computer ? .sendComputerUnmanageCommand : .unmanageMobileDevices
+        case .deleteRecord: kind == .computer ? .deleteComputers : .deleteMobileDevices
+        }
+    }
+
+    /// On Intune: the Graph request the command is, for one managed device;
+    /// nil for a command Intune doesn't have.
+    public func intuneRequest(deviceID: String) -> (method: String, path: String, body: Data?)? {
+        let device = "deviceManagement/managedDevices/\(deviceID)"
+        return switch self {
+        case .updateInventory: ("POST", "\(device)/syncDevice", nil)
+        case .restartMobile: ("POST", "\(device)/rebootNow", nil)
+        case .shutDownMobile: ("POST", "\(device)/shutDown", nil)
+        case .lockMobile: ("POST", "\(device)/remoteLock", nil)
+        case .clearPasscode: ("POST", "\(device)/resetPasscode", nil)
+        // removes company data and the management profile; the record goes
+        // once the device acknowledges
+        case .unmanage: ("POST", "\(device)/retire", nil)
+        // an explicit empty body: each of the action's options changes what
+        // survives, and leaving them out asks for a plain erase
+        case .wipeComputer, .wipeMobile: ("POST", "\(device)/wipe", Data("{}".utf8))
+        case .deleteRecord: ("DELETE", device, nil)
+        case .lockComputer, .blankPush, .renewProfile, .redeployFramework: nil
+        }
+    }
+
+    /// The Graph permission the command needs on Intune, named when Graph
+    /// refuses it. Every device action needs PrivilegedOperations.All, also
+    /// the harmless ones (Microsoft groups by what reaches the device);
+    /// deleting a record needs ReadWrite.All.
+    public var intunePermission: Graph.Permission? {
+        switch self {
+        case .deleteRecord: .managedDevicesReadWrite
+        case .lockComputer, .blankPush, .renewProfile, .redeployFramework: nil
+        default: .managedDevicesPrivileged
         }
     }
 }
@@ -276,7 +364,7 @@ extension MDMCommand {
             return (target.managementID ?? "").isEmpty ? .noManagementID : nil
         case .restartMobile, .shutDownMobile:
             return !overPlatformAPI && (target.managementID ?? "").isEmpty ? .noManagementID : nil
-        case .wipeComputer, .wipeMobile, .unmanage, .redeployFramework, .updateInventory:
+        case .wipeComputer, .wipeMobile, .unmanage, .redeployFramework, .updateInventory, .deleteRecord:
             return nil
         }
     }
@@ -339,7 +427,7 @@ extension MDMCommand {
         public init(_ command: MDMCommand, plan: Plan, on product: Product, connectionName: String?,
                     extra: [SkipReason: Int] = [:]) {
             let receiving = plan.receiving
-            self.init(action: command.title, subject: receiving.count == 1 ? receiving[0].serial : nil,
+            self.init(action: command.title(on: product), subject: receiving.count == 1 ? receiving[0].serial : nil,
                       count: receiving.count, message: command.consequence(on: product),
                       irreversible: !command.canBeUndone, connectionName: connectionName,
                       needsPIN: command.needsPIN(on: product), explanation: plan.explanation(extra: extra),
