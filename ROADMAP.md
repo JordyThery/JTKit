@@ -397,9 +397,61 @@ Also brings the Platform device, DDM and device-action calls deferred from step 
 
 ### Step 8: Intune / Microsoft Graph (0.9.0)
 - **Source:** Intune Deployer `GraphClient` (tested) for Graph calls; Checkpoint `IntuneClient` for app-only login (no extra library).
-- **Microsoft's sign-in library (MSAL)** goes in a separate optional product (for example `JTKitMSAL`) so apps without interactive Microsoft sign-in don't include it. Ask Jordy before adding it.
-- **First app:** Intune Deployer. **Then:** Checkpoint.
-- **Check by hand:** sign in, list devices, one baseline action on a test tenant.
+- **Microsoft's sign-in library (MSAL)** goes in a separate optional product, `JTKitMSAL`, so apps without interactive Microsoft sign-in don't include it (approved by Jordy on 2026-10-26, see "Design").
+- **First app:** Intune Deployer (JTKit 0.9.0). **Then:** Checkpoint (0.9.1). No other app talks to Microsoft (the "microsoft" in the others are app bundle IDs in rule editors).
+- **Tests first:** in both apps, tests of today's behaviour before anything moves: Intune Deployer's preflight and sign-in (none yet), Checkpoint's Intune paging, retries, confirmations and conversion into `ManagedDeviceInfo` (none yet).
+- **Check by hand:** sign in, list devices, one baseline action on a test tenant; one harmless Sync from Checkpoint; Wipe, Retire and Delete Record name the connection and, from two devices, ask for the number; an error shows its Request ID.
+- **Later:** check on a test tenant whether `managedDevices?$filter=serialNumber eq '…'` works. If it does, Checkpoint can look up serials without reading the whole tenant (added by Jordy on 2026-10-26).
+
+#### What the apps do today (surveyed 2026-10-26)
+
+| | Intune Deployer | Checkpoint |
+|---|---|---|
+| Sign-in | MSAL interactive (`Auth/AuthManager.swift`), MSAL 2.16.0 pinned exactly; no stored secret. Silent token first, then interactive with one shared prompt; the fallback prompt passes no account. Scopes asked step by step (read for Plan, write at Apply, `Group.ReadWrite.All` only with group creation). Redirect `msauth.be.jordythery.intune-deployer://auth`; MSAL's own Keychain cache | App-only client secret (`API/IntuneClient.swift`): `POST login.microsoftonline.com/{tenant}/oauth2/v2.0/token`, scope `https://graph.microsoft.com/.default`; 60 s margin, shared sign-in; secret read once when the client is made. Keychain `DeviceStatus.secrets`, account `jamf.<UUID>` |
+| Graph calls | Policies only, mostly beta: Settings Catalog, configurations, compliance, shell scripts, custom attributes, assignment filters, apps; create (POST), update (PATCH, PUT for Settings Catalog), delete, `/assign`, `scheduleActionsForRules`, groups (by name, optional create); preflight (`me`, `organization`, APNs certificate, ADE settings); app upload (content versions, files, commit, publishing; blocks to Azure Storage) | Devices only, v1.0: whole tenant `managedDevices?$select=13 fields&$top=1000` matched by serial on the Mac (no `$filter` on serial); Test Connection `$top=1`; `syncDevice`, `rebootNow`, `shutDown`, `remoteLock`, `resetPasscode`, `retire`, `wipe` (`{}`), delete record |
+| Models | Small `Decodable` types (`TenantObject`, `GraphPage<T>`); everything diffed or written stays raw `Data` / Foundation dictionaries | `IntuneDevice` (13 fields, derived values) into `ManagedDeviceInfo` |
+| Retries | 5 attempts; 429, 503, 504 and network drops for **every method, creates included**; `Retry-After` seconds only, at most 300 s; 401 not retried | 429 only, for every method, 4 attempts; `Retry-After` seconds only, 5 s default, at most 30 s; 401 not retried |
+| Throttling | At most 4 requests at a time; a request keeps its place while it waits | Sequential |
+| `@odata.nextLink` | Followed as given, no page limit | Followed as given with **no host check** (the token goes wherever the link points); a limit meant as 100 lets 101 pages through, then **stops silently** |
+| Errors | `code — message` | `code – message` plus own hints; a failed device-list read is swallowed (`LookupModel.swift:2559`, `try?`), so every device shows as "not found" |
+
+Neither reads Graph's request ID (`innerError.request-id`) or sends a `client-request-id`.
+- **Duplicated:** the Bearer request with `Accept: application/json`, the 429 loop and its log warning, seconds-only `Retry-After`, the next-page loop, Graph's error text, v1.0/beta addresses. Checkpoint also has its own token cache and form encoding (JTKit's Jamf sign-in has both). Only in Intune Deployer: MSAL and the policy calls; only in Checkpoint: app-only sign-in, devices and commands.
+- **Confirming today:** Checkpoint already applies JTKit's rules to Intune: Wipe, Retire (Remove MDM Profile) and Delete Record name the connection and ask for the typed number from two devices; Sync, Restart, Shut Down, Lock and Clear Passcode are normal dialogs; one connection at a time. But the confirmation is built as for Jamf Pro (`LookupModel.swift:2039`), so every Intune command except Retire shows Jamf Pro's consequence text. Intune Deployer sends no device commands; Remove Baseline asks to type the connection's name but never says how many objects go, and Apply with ticked deletions is a dialog naming the connection and the counts, with nothing typed.
+- **Permissions:** Checkpoint: `DeviceManagementManagedDevices.Read.All`, `.ReadWrite.All` (delete record; missing from its Settings note) and `.PrivilegedOperations.All` (commands). Intune Deployer: the delegated `DeviceManagementConfiguration`, `DeviceManagementScripts`, `DeviceManagementApps`, `DeviceManagementServiceConfig`, `Group` and `User.Read` scopes.
+
+#### Design (decided by Jordy on 2026-10-26)
+
+**What JTKit adds** (`Intune/`, in the `JTKit` product, no third-party code)
+
+| Part | What it does | Source |
+|---|---|---|
+| Entra app sign-in | `EntraTokenProvider` (`BearerTokenSource`) from a `Connection` and its secret: token address, `.default` scope, strict form encoding, renewal 60 s before expiry, one shared sign-in, secret read at each sign-in, forget token. Sign-in errors read from `error_description` with Microsoft's error code and trace ID; hints for a wrong or expired secret, an app not found in the tenant and an unknown tenant. Microsoft's public cloud only. | Checkpoint `IntuneClient`; structure of `JamfTokenProvider` |
+| Graph client | On JTKit's `HTTPClient`, so the one retry rule set applies (below). v1.0 and beta addresses; a `client-request-id` with every request. `HTTPClient` gains an option for at most N requests at a time (Graph: 4, a request keeps its place while it waits). | Intune Deployer `GraphClient`, limits from Checkpoint |
+| Paging | Follows `@odata.nextLink` only to `https://graph.microsoft.com`; an answer without `value` is an error; reaching the page limit (1,000 pages) is an error, never a quiet cut-off. | Intune Deployer `list`/`listRaw`, JTKit's page-limit rule |
+| Graph error | Reads `error.code`, `message` and `innerError` (request ID, date). Same format as Jamf errors: status line, `code: message`, Request ID (unmasked in the bug-report export), standard hints, the app's hints on top. A 403 names the missing Graph permission and whether it is an application permission (admin consent) or a delegated one. | Both apps' error readers, `JamfPlatformError`'s format |
+| Permissions table | Every Graph permission the apps use, per call; used by the hints. | Checkpoint `docs/intune.md`, Intune Deployer's scopes |
+| Intune devices | Device list with a field selection, typed tolerant `IntuneManagedDevice` (13 fields, derived values), Test Connection read. | Checkpoint `IntuneDevice`, `fleet()` |
+| Intune commands | `MDMCommand` gains Intune as a product: Intune's own consequence texts, which commands apply to which devices, the Graph action, the Graph permission. Never repeated after a server error; only a 429 is retried. | Checkpoint `routeIntune`, `message(for:)` |
+| Never recorded | Intune Deployer's upload `commit` (its body holds the app's encryption key) and future secret reads (FileVault and BitLocker keys, LAPS) join JTKit's built-in sensitive calls. | New |
+
+**`JTKitMSAL`** (separate product in the JTKit package, the only one depending on MSAL): one sign-in object per client ID, authority from the connection's tenant ID, redirect from the app's bundle ID, silent token first, one shared prompt, finding the saved account again at launch, sign-out, scopes asked step by step, forget token (a forced refresh). It hands out the same `BearerTokenSource` as the app sign-in, so the Graph client works the same either way. Fix: the prompt after an expired sign-in uses the saved account. Source: Intune Deployer `AuthManager`. Only apps that link `JTKitMSAL` build and ship MSAL; the others show MSAL in their package list and `Package.resolved` (Xcode may download it) but ship nothing of it. Intune Deployer drops its own MSAL package reference.
+
+**Decisions**
+- **MSAL:** added as a JTKit dependency only in `JTKitMSAL`, pinned to an exact version. At the go, check whether a newer MSAL than 2.16.0 exists and tell Jordy before switching.
+- **Licence notices:** an app linking `JTKitMSAL` credits MSAL (MIT, Microsoft Corporation) with the full text; `JTKitMSAL` supplies `Acknowledgement.msal` for the pinned version, so the notice can't fall behind it. Intune Deployer's `THIRD-PARTY-NOTICES.md` and its version test follow JTKit's version. Apps without `JTKitMSAL` need no MSAL notice.
+- **Retries:** Graph uses the one rule set of step 5 (4 attempts, waits at most 120 s, `Retry-After` also as a date, 401 → new token and one more try). Intune Deployer loses its fifth attempt and its 300 s waits.
+- **Safe to repeat (Intune Deployer):** updates (PATCH, PUT), `/assign` and `scheduleActionsForRules` (they replace what's there), and deletes, where a 404 on the repeat counts as "already gone". Creates are never repeated after a server error or network drop: running Plan again finds a created object by its identity tag, so nothing is duplicated.
+- **Intune commands:** irreversible are Wipe, Retire and Delete Record: the dialog names the connection, and from two devices the number is typed. Sync, Restart, Shut Down, Lock and Clear Passcode are normal dialogs. Intune gets its own dialog texts, no longer Jamf Pro's.
+- **Intune Deployer's deletions:** Apply with two or more ticked deletions asks to type the number of deletions; Remove Baseline keeps the typed connection name and first shows how many objects it will delete.
+- **Checkpoint's lookup:** a failed Intune device-list read shows as an error on the device rows, not as "not found".
+- **Page limit:** 1,000 pages in both apps, an error when reached.
+- **Activity log:** service "Intune" in both apps (Intune Deployer wrote "Microsoft Graph").
+- **Clouds:** Microsoft's public cloud only.
+
+**Per app (what stays in the app)**
+- **Intune Deployer:** the plan and apply engine, diffing, identity tags, payloads, app encryption and upload (Azure Storage), export, preflight, GitHub sources, the Keychain group in its entitlements, its screens. Moving from 0.6.4 it also picks up the 0.7 and 0.8 changes (e.g. the "AppName/version" User-Agent).
+- **Checkpoint:** which commands it offers, the confirmation sheets, the one-connection-at-a-time rule, `ManagedDeviceInfo`, Keychain account `jamf.<UUID>`; its Settings note gains `DeviceManagementManagedDevices.ReadWrite.All`.
 
 ### Step 9: Apple Business / School Manager (0.10.0)
 - **Source:** Checkpoint `ABMClient`, the only copy.
