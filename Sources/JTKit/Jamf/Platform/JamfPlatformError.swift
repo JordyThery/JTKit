@@ -130,10 +130,14 @@ public nonisolated struct JamfPlatformError: Error, LocalizedError, Sendable {
     /// The app's own hints, shown before the standard ones; the client adds
     /// them from its `hints`.
     public var appHints: [String]
+    /// Where the request went, which decides where a missing permission is
+    /// fixed (Jamf Account, or Jamf Pro's API roles); the client sets it.
+    public var server: JamfPlatform.Server
 
-    public init(_ kind: Kind, appHints: [String] = []) {
+    public init(_ kind: Kind, appHints: [String] = [], server: JamfPlatform.Server = .platformAPI) {
         self.kind = kind
         self.appHints = appHints
+        self.server = server
     }
 
     /// JTKit's HTTP error in the Platform API's terms, with the error body read.
@@ -192,6 +196,8 @@ public nonisolated struct JamfPlatformError: Error, LocalizedError, Sendable {
             hints.append("Check the client ID, client secret and region. Jamf Account integrations expire after six months.")
         case .status(401, _, _, _, _):
             hints.append("Jamf didn’t accept the sign-in. Check the client ID, client secret and region.")
+        case .status(403, _, _, _, _) where server == .jamfPro:
+            hints.append("The API role is missing a privilege for this request. Add it in Jamf Pro under Settings › API Roles and Clients.")
         case .status(403, _, _, _, _):
             hints.append("The API integration is missing a permission for this request, or isn’t scoped to this environment. Check its permissions in Jamf Account.")
         case .status(429, _, _, _, _):

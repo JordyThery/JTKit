@@ -8,6 +8,10 @@ extension JamfPlatform {
     ///
     /// Errors come back as `JamfPlatformError`. Follows a redirect only to
     /// HTTPS on the same host and port, as the sign-in does.
+    ///
+    /// Also talks to a Jamf Pro server directly (`server: .jamfPro`), for
+    /// tenants without Platform API access; the same gateway-form paths are
+    /// then mapped onto Jamf Pro's.
     public struct Client: Sendable {
         /// Which header says what the requests are about.
         public enum Scope: Sendable, Hashable {
@@ -16,7 +20,7 @@ extension JamfPlatform {
             /// `X-Tenant-Id`, for Jamf Deployer's older integrations.
             case legacyTenant(String)
             /// No scope header: the integration's own organization, e.g. its
-            /// list of environments.
+            /// list of environments, or a Jamf Pro server reached directly.
             case organization
         }
 
@@ -32,22 +36,28 @@ extension JamfPlatform {
 
         public let baseURL: URL
         public let scope: Scope
+        public let server: JamfPlatform.Server
         public let errorStatus: ErrorStatus
         let http: HTTPClient
+        /// The recorder under the client, for the few requests that don't go
+        /// through it (e.g. images on another host).
+        public var recorder: RequestRecorder { http.recorder }
         private let tokens: any BearerTokenSource
         private let hints: @Sendable (JamfPlatformError) -> [String]
 
         /// A client for a saved connection.
         ///
         /// - Parameters:
-        ///   - connection: a Jamf Platform API connection: region or host
-        ///     override, Environment ID and client ID.
+        ///   - connection: a Jamf Platform API connection (region or host
+        ///     override, Environment ID and client ID), or a Jamf Pro
+        ///     connection, reached directly with no scope header.
         ///   - secret: the client secret, read when signing in; its errors are
         ///     passed on unchanged (e.g. the app's "no secret saved").
         ///   - scope: the connection's Environment ID by default.
         ///   - permits: the app's allow-list, checked before anything is sent.
         ///   - hints: the app's own hints for an error, shown before the
         ///     standard ones (e.g. what its allow-list allows).
+        ///   - headers: sent with every request, e.g. a header of the app's own.
         ///   - sleep, random, now: injectable for tests.
         /// - Throws: `JamfPlatformError` `.invalidEnvironmentID` when the
         ///   Environment ID isn't a UUID, `.invalidResponse` when the
@@ -60,13 +70,15 @@ extension JamfPlatform {
             errorStatus: ErrorStatus = .thrown,
             permits: @escaping @Sendable (HTTPRequest) -> Bool = { _ in true },
             hints: @escaping @Sendable (JamfPlatformError) -> [String] = { _ in [] },
+            headers: [String: String] = [:],
             writeSpacing: Duration = .zero,
             sleep: @escaping @Sendable (Duration) async throws -> Void = { try await Task.sleep(for: $0) },
             random: @escaping @Sendable () -> Double = { Double.random(in: 0...1) },
             now: @escaping @Sendable () -> Date = { Date() }
         ) throws {
-            guard connection.service == .jamfPlatform, let baseURL = connection.jamfBaseURL else {
-                throw JamfPlatformError(.invalidResponse("“\(ConnectionMenuText.name(of: connection))” is not a Jamf Platform API connection with a valid address."))
+            let server: JamfPlatform.Server = connection.service == .jamfPro ? .jamfPro : .platformAPI
+            guard [.jamfPlatform, .jamfPro].contains(connection.service), let baseURL = connection.jamfBaseURL else {
+                throw JamfPlatformError(.invalidResponse("“\(ConnectionMenuText.name(of: connection))” is not a Jamf Platform API or Jamf Pro connection with a valid address."))
             }
             let tokens: JamfTokenProvider
             do {
@@ -75,27 +87,33 @@ extension JamfPlatform {
                 throw JamfPlatformError(error)
             }
             try self.init(baseURL: baseURL,
-                          scope: scope ?? .environment(connection.environmentID),
+                          scope: scope ?? (server == .jamfPro ? .organization : .environment(connection.environmentID)),
+                          server: server,
                           tokens: tokens, recorder: recorder, errorStatus: errorStatus, permits: permits, hints: hints,
-                          writeSpacing: writeSpacing, sleep: sleep, random: random, now: now)
+                          headers: headers, writeSpacing: writeSpacing, sleep: sleep, random: random, now: now)
         }
 
         /// A client with its own token source, e.g. for tests or credentials
         /// that aren't saved as a connection.
+        ///
+        /// - Parameter server: `.jamfPro` for a Jamf Pro server reached
+        ///   directly; give it `.organization` scope.
         public init(
             baseURL: URL,
             scope: Scope,
+            server: JamfPlatform.Server = .platformAPI,
             tokens: any BearerTokenSource,
             recorder: RequestRecorder,
             errorStatus: ErrorStatus = .thrown,
             permits: @escaping @Sendable (HTTPRequest) -> Bool = { _ in true },
             hints: @escaping @Sendable (JamfPlatformError) -> [String] = { _ in [] },
+            headers extraHeaders: [String: String] = [:],
             writeSpacing: Duration = .zero,
             sleep: @escaping @Sendable (Duration) async throws -> Void = { try await Task.sleep(for: $0) },
             random: @escaping @Sendable () -> Double = { Double.random(in: 0...1) },
             now: @escaping @Sendable () -> Date = { Date() }
         ) throws {
-            var headers = [String: String]()
+            var headers = extraHeaders
             switch scope {
             case .environment(let id):
                 let trimmed = id.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -108,11 +126,13 @@ extension JamfPlatform {
             }
             self.baseURL = baseURL
             self.scope = scope
+            self.server = server
             self.errorStatus = errorStatus
             self.tokens = tokens
             self.hints = hints
             http = HTTPClient(baseURL: baseURL, tokens: tokens, recorder: recorder, headers: headers,
-                              permits: permits, redirects: .sameHostHTTPSOnly, writeSpacing: writeSpacing,
+                              permits: permits, pathMapping: server == .jamfPro ? .jamfProDirect : .none,
+                              redirects: .sameHostHTTPSOnly, writeSpacing: writeSpacing,
                               sleep: sleep, random: random, now: now)
         }
 
@@ -160,9 +180,11 @@ extension JamfPlatform {
             }
         }
 
-        /// An error with the app's hints added, as the client throws it.
+        /// An error with the client's server and the app's hints added, as
+        /// the client throws it.
         public func failure(_ error: JamfPlatformError) -> JamfPlatformError {
             var annotated = error
+            annotated.server = server
             annotated.appHints += hints(error).filter { !annotated.appHints.contains($0) }
             return annotated
         }

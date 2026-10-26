@@ -150,7 +150,7 @@ public struct UpdateView: View {
         statusMessage = nil
         Task {
             do {
-                let (data, response) = try await URLSession.shared.data(from: url)
+                let (data, response) = try await URLSession.shared.data(for: URLRequest(url: url).withDefaultUserAgent())
                 let status = (response as? HTTPURLResponse)?.statusCode ?? 0
                 guard status == 200 else {
                     throw UpdateChecker.UpdateError(message: "The download failed (HTTP \(status)).")
