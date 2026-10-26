@@ -344,6 +344,11 @@ public nonisolated enum SensitiveRequests {
         /(?i)\/(?:api|pro)\/v\d+\/mobile-devices\/[^\/]+\/detail\/?$/,
         /(?i)\/(?:api|pro)\/v\d+\/computers-inventory\/[^\/]+\/(?:erase|filevault|view-device-lock-pin|view-recovery-lock-password)\/?$/,
         /(?i)\/(?:api|pro)\/v\d+\/local-admin-password\/.+\/password\/?$/,
+        // MDM commands: a lock or wipe PIN, an unlock token (step 7)
+        /(?i)\/(?:api|pro)\/v\d+\/mdm\/commands\/?$/,
+        /(?i)\/(?:api|pro)\/v\d+\/mobile-devices\/[^\/]+\/erase\/?$/,
+        // Classic commands can carry a passcode
+        /(?i)\/(?:JSSResource|proclassic)\/(?:computercommands|mobiledevicecommands)\//,
     ]
 
     public static func isSensitive(path: String) -> Bool {

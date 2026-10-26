@@ -101,6 +101,10 @@ extension JamfPro {
         public static let sendMobileDeviceRestartDeviceCommand: Privilege = "Send Mobile Device Restart Device Command"
         public static let sendMobileDeviceShutDownCommand: Privilege = "Send Mobile Device Shut Down Command"
         public static let updateInventoryForMobileDevices: Privilege = "Update Inventory for Mobile Devices"
+        public static let viewMDMCommandInformation: Privilege = "View MDM command information in Jamf Pro API"
+        public static let unmanageMobileDevices: Privilege = "Unmanage Mobile Devices"
+        public static let sendRenewMDMProfileCommand: Privilege = "Send Command to Renew MDM Profile"
+        public static let sendComputerInstallPackageCommand: Privilege = "Send Computer Remote Command to Install Package"
 
         // Other objects
         public static let createPolicies: Privilege = "Create Policies"

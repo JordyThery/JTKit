@@ -162,7 +162,10 @@ public nonisolated struct JamfPlatformError: Error, LocalizedError, Sendable {
             self.init(Kind.transport(method: method, path: path, code: code, message: message))
         case let .status(response, method, path, duringSignIn):
             let body = JamfPlatform.ErrorBody(data: response.data)
-            let text = body == nil ? HTTPError.detail(of: response) : nil
+            // a Classic API error page (HTML or XML) reads as its message
+            let text = body == nil
+                ? JamfClassic.errorMessage(in: response.data).map(Redaction.text) ?? HTTPError.detail(of: response)
+                : nil
             self.init(duringSignIn
                 ? Kind.signIn(status: response.status, body: body, text: text)
                 : Kind.status(response.status, body: body, text: text, method: method, path: path))

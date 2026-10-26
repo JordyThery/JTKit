@@ -208,6 +208,9 @@ public nonisolated enum RequestPath {
     public static func isSafe(_ path: String) -> Bool {
         var trimmed = Substring(path)
         if trimmed.hasPrefix("/") { trimmed.removeFirst() }
+        // one trailing slash is allowed: Jamf School's Move to Trash is
+        // documented as `devices/{udid}/`
+        if trimmed.hasSuffix("/") { trimmed.removeLast() }
         guard !trimmed.isEmpty else { return false }
         var allowed = CharacterSet.urlPathAllowed
         allowed.insert("%")

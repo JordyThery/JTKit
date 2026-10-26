@@ -343,6 +343,8 @@ extension JamfSchool {
         public let baseURL: URL
         let http: HTTPClient
         private let hints: @Sendable (JamfSchoolError) -> [String]
+        /// Device lists and details are recorded also when they succeed.
+        let recordsDeviceAnswers: Bool
         public var recorder: RequestRecorder { http.recorder }
 
         /// - Parameters:
@@ -350,6 +352,9 @@ extension JamfSchool {
         ///     trailing `/api` is accepted.
         ///   - networkID, apiKey: trimmed; both required.
         ///   - hints: the app's own hints for an error, shown before the standard ones.
+        ///   - recordsDeviceAnswers: record the device list and a device's
+        ///     details also when they succeed (Checkpoint's lookups, ROADMAP
+        ///     step 5); personal blocks are hidden, as in every recorded body.
         ///   - sleep, random: injectable for tests.
         /// - Throws: `JamfSchoolError` `.incomplete` when something is missing.
         public init(
@@ -359,6 +364,7 @@ extension JamfSchool {
             recorder: RequestRecorder,
             permits: @escaping @Sendable (HTTPRequest) -> Bool = { _ in true },
             hints: @escaping @Sendable (JamfSchoolError) -> [String] = { _ in [] },
+            recordsDeviceAnswers: Bool = false,
             sleep: @escaping @Sendable (Duration) async throws -> Void = { try await Task.sleep(for: $0) },
             random: @escaping @Sendable () -> Double = { Double.random(in: 0...1) }
         ) throws {
@@ -372,6 +378,7 @@ extension JamfSchool {
             }
             self.baseURL = baseURL
             self.hints = hints
+            self.recordsDeviceAnswers = recordsDeviceAnswers
             let authorization = "Basic " + Data("\(id):\(key)".utf8).base64EncodedString()
             http = HTTPClient(baseURL: baseURL, tokens: nil, recorder: recorder,
                               headers: ["Authorization": authorization], permits: permits,
@@ -386,6 +393,7 @@ extension JamfSchool {
             recorder: RequestRecorder,
             permits: @escaping @Sendable (HTTPRequest) -> Bool = { _ in true },
             hints: @escaping @Sendable (JamfSchoolError) -> [String] = { _ in [] },
+            recordsDeviceAnswers: Bool = false,
             sleep: @escaping @Sendable (Duration) async throws -> Void = { try await Task.sleep(for: $0) },
             random: @escaping @Sendable () -> Double = { Double.random(in: 0...1) }
         ) throws {
@@ -393,7 +401,8 @@ extension JamfSchool {
                 throw JamfSchoolError(.incomplete("“\(ConnectionMenuText.name(of: connection))” is not a Jamf School connection."))
             }
             try self.init(address: connection.serverURL, networkID: connection.clientID, apiKey: apiKey,
-                          recorder: recorder, permits: permits, hints: hints, sleep: sleep, random: random)
+                          recorder: recorder, permits: permits, hints: hints,
+                          recordsDeviceAnswers: recordsDeviceAnswers, sleep: sleep, random: random)
         }
 
         // MARK: Devices
@@ -431,7 +440,7 @@ extension JamfSchool {
             let safe = try Self.validated(udid)
             let data: Data
             do {
-                data = try await send(HTTPRequest(path: "api/devices/\(safe)"))
+                data = try await send(HTTPRequest(path: "api/devices/\(safe)", recordsBodies: recordsDeviceAnswers))
             } catch let error as JamfSchoolError where error.isDeviceNotFound {
                 return nil
             }
@@ -522,7 +531,7 @@ extension JamfSchool {
         }
 
         private func deviceList(_ query: [URLQueryItem]) async throws -> [Device] {
-            let data = try await send(HTTPRequest(path: "api/devices", query: query))
+            let data = try await send(HTTPRequest(path: "api/devices", query: query, recordsBodies: recordsDeviceAnswers))
             struct Body: Decodable { let devices: [Tolerant<Device>]? }
             // An answer without a device list isn't Jamf School's (e.g. a web
             // page from a wrong address): never read as "no devices".

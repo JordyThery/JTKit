@@ -1,5 +1,57 @@
 # Changelog
 
+## 0.8.1 (2026-10-26)
+Step 7 for Checkpoint: the MDM command list, the Platform API device calls
+deferred from step 6, the Classic API basics, and Jamf School's commands,
+Move to Trash and moving location. Additions, plus three changes every app
+gets: more calls never recorded with their contents, Classic error pages
+read as their message, and a trailing slash allowed in a request path.
+- `MDMCommand`: one list of the commands (Lock and Wipe Computer, Lock,
+  Wipe, Restart and Shut Down Device, Clear Passcode, Update Inventory,
+  Blank Push, Renew MDM Profile, Redeploy Jamf Framework, Remove MDM
+  Profile), each with its title, consequence (per product), whether it can
+  be undone, its PIN, whether it works over the Platform API, the kinds of
+  device it reaches and its Jamf Pro privilege.
+- `MDMCommand.plan(for:on:)`: which devices receive a command before it is
+  sent, and why the others don't (wrong kind of device, no management ID, no
+  UDID), with the sentence the confirmation shows ("5 selected, 3 will
+  receive the command; 2 have no management ID.").
+- `MDMCommand.Confirmation`, the rules decided by Jordy: something that can't
+  be undone (wipe, Remove MDM Profile, deleting a record) always names the
+  connection, also for one device; from two devices the number has to be
+  typed; a PIN is typed twice. Another action can name its connection
+  without being irreversible (Jamf School's Move to Trash). `problem(…)` says
+  what is still missing.
+- Sending to Jamf Pro (`JamfPlatform.Client.send(_:to:pin:)`), directly or
+  through the Platform API, as Checkpoint routed it; results per device
+  (sent, failed with the message, not processed, skipped with the reason).
+  Never repeated after a server error, only after a 429. A refusal names the
+  command's privilege. `deleteComputer(id:)` (v4) and `deleteMobileDevice(id:)`
+  (Classic API).
+- `ActivityLog.recordCommand`: one Action entry per command, counting the
+  devices it reached and naming every other one with the reason; failed when
+  a device failed, a warning when devices were only skipped.
+- Never recorded with contents, in every app: `v2/mdm/commands` (PIN, unlock
+  token), the mobile device erase, and the Classic computer and mobile device
+  commands (they can carry a passcode).
+- Platform API devices: `device(serial:)` (refused, `DeviceMismatch`, when no
+  returned serial matches exactly), `declarations(deviceID:)` with their
+  reasons and Blueprint ID, `restart(deviceID:)` and `shutDown(deviceID:)`
+  (a 422 is `DeviceActionRefused`). Refused on a direct Jamf Pro server.
+- `JamfClassic`: paths (`…/id/{id}`, create on `/id/0`), the new `<id>`, the
+  message of an HTML or XML error page, list unwrapping, and groups and their
+  members (asked for as JSON). `JamfPlatformError` shows a Classic error
+  page's message instead of its markup, in every app.
+- Jamf School: commands (`refresh`, `restart` with `clearPasscode=false`,
+  `wipe` with `clearActivationLock=false`, `unenroll`), Move to Trash
+  (`DELETE devices/{udid}/`) and moving location (JSON, twenty per request,
+  per-device outcome). `recordsDeviceAnswers` records the device list and
+  details also when they succeed (Checkpoint's lookups).
+- Privileges added: View MDM command information in Jamf Pro API, Unmanage
+  Mobile Devices, Send Command to Renew MDM Profile, Send Computer Remote
+  Command to Install Package.
+- `RequestPath` allows one trailing slash (Jamf School's Move to Trash).
+
 ## 0.8.0 (2026-10-26)
 Step 7 for Serial Number Reader: Jamf Pro lookups, Jamf School and Action
 entries. Additions, plus two changes to wording every app shows. The MDM

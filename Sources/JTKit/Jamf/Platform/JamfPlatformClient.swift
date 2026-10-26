@@ -159,6 +159,18 @@ extension JamfPlatform {
             }
         }
 
+        /// `send`, but an error status is always thrown, also by a client
+        /// that returns them (`errorStatus: .returned`): for JTKit's own calls.
+        func sendThrowing(_ request: HTTPRequest, privilege: JamfPro.Privilege? = nil) async throws -> HTTPResponse {
+            let response = try await send(request, privilege: privilege)
+            guard (200..<300).contains(response.status) else {
+                var error = JamfPlatformError(HTTPError.status(response, method: request.method, path: request.path, duringSignIn: false))
+                error.privilege = privilege
+                throw failure(error)
+            }
+            return response
+        }
+
         /// A GET, read as lossless JSON.
         public func json(_ path: String, query: [URLQueryItem] = [], privilege: JamfPro.Privilege? = nil) async throws -> LosslessJSON {
             let response = try await send(HTTPRequest(path: path, query: query), privilege: privilege)
