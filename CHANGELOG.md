@@ -1,5 +1,50 @@
 # Changelog
 
+## 0.7.0 (2026-10-26)
+Step 6: the Jamf Platform API, built with AppSettings2Blueprint. Additions,
+plus one new option in the shared connection editor. The device, DDM and
+device-action calls follow in a later 0.7.x.
+- `LosslessJSON` (`Core/`): JSON that keeps key order, duplicate keys and the
+  exact text of numbers, with its reader, writer, paths, `isSemanticallyEqual`
+  and `aligned(to:)`. Moved from AppSettings2Blueprint's `JSONValue`, renamed
+  so it doesn't collide with the copies still in other apps. Reads invalid
+  UTF-8 as an error on macOS 14 too.
+- Everything else is under `JamfPlatform` (`Jamf/Platform/`), for the same reason:
+  - `JamfPlatform.Client`: built from a `Connection` (region gateway or host
+    override, `X-Environment-Id` checked as a UUID before anything is sent),
+    or with `.legacyTenant` (`X-Tenant-Id`) or `.organization` scope. On
+    `HTTPClient`; the app's allow-list stays the app's. Redirects only to
+    HTTPS on the same host and port. `errorStatus: .returned` hands an error
+    status back instead of throwing (Jamf Deployer's preflight). `hints` adds
+    the app's own hints to every error it throws.
+  - `JamfPlatformError`: one reader for the gateway's, the benchmarks' and
+    the sign-in's error shapes (`JamfPlatform.ErrorBody`), named codes
+    (`JamfPlatform.ErrorCode`), one message format (status line,
+    `CODE (field): description`, Trace ID, the app's hints, the standard
+    hints), a copyable `report`. Messages go through `Redaction`; the Trace
+    ID stays visible in the bug-report export.
+  - `JamfPlatform.Poller` and `PollingPolicy`: from 2 s growing ×1.5 to 10 s,
+    for at most 5 minutes (shorter if an app sets it); Cancel stops at once;
+    the app names the errors that mean "not ready yet".
+  - `checkPermissions`: reads only, 4 at a time; allowed, missing permission
+    (403 only), not found, failed, unreachable; "Add the … permission" hints.
+  - `JamfPlatform.Page` and `allPages`: stop on `hasNext`, then `totalCount`,
+    then a short page; reaching the page limit is an error.
+  - `JamfPlatform.Blueprints`: list (search, sort), detail, create, change
+    steps (merge-patch), change scope, deploy, report, delete;
+    `startDeployment` and `watchDeployment`, which tells the new deployment
+    from the previous one by its start time. Models keep unknown states.
+    `BlueprintDetail` holds the exact bytes and the lossless JSON.
+  - `deviceGroups(filter:sort:)` and `JamfPlatform.RSQL`; `DeviceGroup` keeps
+    unknown device and group types.
+  - `JamfPlatform.environments(for:secret:recorder:)`: lists an
+    organization's environments; an integration scoped to one environment
+    gets `cannotListEnvironments`, which says so and where to find the ID.
+- `ConnectionsSettingsTab(environments:)`: a "Load Environments" button below
+  the Environment ID, then a picker; typing the ID still works, also when
+  the list can't be loaded. Reviewed with the apple-design skill: the
+  button's tooltip is short and a failure shows the editor's warning symbol.
+
 ## 0.6.4 (2026-10-26)
 For Intune Deployer's adoption of step 5. Additions only.
 - `Redaction`: an Azure Storage upload address hides its signature (`sig` is

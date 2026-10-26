@@ -171,6 +171,36 @@ nonisolated enum ConnectionServiceChoices {
 /// the HTTP status or a trace ID in `failureReason`.
 public typealias ConnectionTest<Record> = @MainActor (Record, [ConnectionSecretKind: String]) async throws -> String
 
+/// Lists the Jamf Platform API environments the editor's values can see, so
+/// the Environment ID can be picked instead of typed. Gets the same values as
+/// `ConnectionTest`; typically `JamfPlatform.environments(for:secret:recorder:)`.
+/// A thrown error is shown below the field, and typing the ID still works.
+public typealias ConnectionEnvironmentLoader<Record> = @MainActor (Record, [ConnectionSecretKind: String]) async throws -> [JamfPlatform.Environment]
+
+/// What the editor shows of the environment list.
+nonisolated enum EnvironmentListState: Equatable {
+    case idle
+    case loading
+    case loaded([JamfPlatform.Environment])
+    case failed(String)
+
+    static let emptyListMessage = "This integration sees no environments. Find the Environment ID in Jamf Account (account.jamf.com): open the API integration’s details and copy it from there."
+
+    /// The picker's choice for an Environment ID: the matching environment,
+    /// or "" when the ID was typed and isn't in the list.
+    static func choice(for environmentID: String, in environments: [JamfPlatform.Environment]) -> String {
+        let trimmed = environmentID.trimmingCharacters(in: .whitespacesAndNewlines)
+        return environments.first { $0.id.caseInsensitiveCompare(trimmed) == .orderedSame }?.id ?? ""
+    }
+
+    /// The list needs a sign-in: a client ID and a secret, typed or stored.
+    static func canLoad(_ connection: Connection, typedSecret: String?, hasStoredSecret: Bool) -> Bool {
+        connection.service == .jamfPlatform
+            && !connection.clientID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            && (!(typedSecret ?? "").isEmpty || hasStoredSecret)
+    }
+}
+
 /// Importing a connection from a file: "Import…" in the + menu of the
 /// Connections tab, e.g. a tenant profile exported on another Mac. The
 /// imported connection is saved and selected. An import never replaces a
@@ -261,6 +291,7 @@ public struct ConnectionsSettingsTab<Record: ConnectionRecord, AppSection: View>
     let deleteMessage: String?
     let didDelete: (Record) -> Void
     let test: ConnectionTest<Record>?
+    let environments: ConnectionEnvironmentLoader<Record>?
     let appSection: (Binding<Record>) -> AppSection
 
     @State private var editingID: UUID?
@@ -299,6 +330,8 @@ public struct ConnectionsSettingsTab<Record: ConnectionRecord, AppSection: View>
     ///   - didDelete: called after a connection and its secrets were deleted,
     ///     e.g. to clear choices the app stored for it.
     ///   - test: tests the editor's values; without it there is no Test Connection button.
+    ///   - environments: lists the Jamf Platform API environments, so the
+    ///     Environment ID can be picked; without it the ID is only typed.
     ///   - appSection: the app's own `Section`s for the record, below the shared fields.
     public init(
         store: ConnectionStore<Record>,
@@ -319,6 +352,7 @@ public struct ConnectionsSettingsTab<Record: ConnectionRecord, AppSection: View>
         deleteMessage: String? = nil,
         didDelete: @escaping (Record) -> Void = { _ in },
         test: ConnectionTest<Record>? = nil,
+        environments: ConnectionEnvironmentLoader<Record>? = nil,
         @ViewBuilder appSection: @escaping (Binding<Record>) -> AppSection
     ) {
         self.store = store
@@ -339,6 +373,7 @@ public struct ConnectionsSettingsTab<Record: ConnectionRecord, AppSection: View>
         self.deleteMessage = deleteMessage
         self.didDelete = didDelete
         self.test = test
+        self.environments = environments
         self.appSection = appSection
     }
 
@@ -599,6 +634,7 @@ public struct ConnectionsSettingsTab<Record: ConnectionRecord, AppSection: View>
                              roles: roles,
                              footer: footer,
                              test: test,
+                             environments: environments,
                              hasChanges: $editorHasChanges,
                              appSection: appSection)
                 .id(editingID)
@@ -632,14 +668,15 @@ extension ConnectionsSettingsTab where AppSection == EmptyView {
         delete: ((Record) async throws -> Void)? = nil,
         deleteMessage: String? = nil,
         didDelete: @escaping (Record) -> Void = { _ in },
-        test: ConnectionTest<Record>? = nil
+        test: ConnectionTest<Record>? = nil,
+        environments: ConnectionEnvironmentLoader<Record>? = nil
     ) {
         self.init(store: store, services: services, optionalFields: optionalFields,
                   allowsChangingService: allowsChangingService, serviceGroups: serviceGroups,
                   signInMethods: signInMethods, roles: roles, height: height,
                   footer: footer, readOnlyFields: readOnlyFields, protectServices: protectServices,
                   newRecord: newRecord, add: add, importer: importer, delete: delete, deleteMessage: deleteMessage,
-                  didDelete: didDelete, test: test) { _ in
+                  didDelete: didDelete, test: test, environments: environments) { _ in
             EmptyView()
         }
     }
@@ -704,6 +741,7 @@ private struct ConnectionEditor<Record: ConnectionRecord, AppSection: View>: Vie
     let roles: [ConnectionRole]
     let footer: String?
     let test: ConnectionTest<Record>?
+    let environments: ConnectionEnvironmentLoader<Record>?
     @Binding var hasChanges: Bool
     let appSection: (Binding<Record>) -> AppSection
 
@@ -718,12 +756,14 @@ private struct ConnectionEditor<Record: ConnectionRecord, AppSection: View>: Vie
     @State private var showingKeyImporter = false
     @State private var importedKeyName: String?
     @State private var keyImportError: String?
+    @State private var environmentState = EnvironmentListState.idle
 
     init(store: ConnectionStore<Record>, saved: Record, services: [ConnectionService],
          signInMethods: [ConnectionService: [SignInMethod]], optionalFields: Set<ConnectionOptionalField>,
          readOnlyFields: Set<ConnectionField>, protectServices: Set<ConnectionService>,
          roles: [ConnectionRole], footer: String?,
-         test: ConnectionTest<Record>?, hasChanges: Binding<Bool>,
+         test: ConnectionTest<Record>?, environments: ConnectionEnvironmentLoader<Record>?,
+         hasChanges: Binding<Bool>,
          appSection: @escaping (Binding<Record>) -> AppSection) {
         self.store = store
         self.services = services
@@ -734,6 +774,7 @@ private struct ConnectionEditor<Record: ConnectionRecord, AppSection: View>: Vie
         self.roles = roles
         self.footer = footer
         self.test = test
+        self.environments = environments
         self._hasChanges = hasChanges
         self.appSection = appSection
         self._saved = State(initialValue: saved)
@@ -816,7 +857,12 @@ private struct ConnectionEditor<Record: ConnectionRecord, AppSection: View>: Vie
         .onAppear(perform: loadSecrets)
         .onChange(of: isChanged, initial: true) { hasChanges = isChanged }
         .onChange(of: draft) { testState = .idle }
-        .onChange(of: secrets) { testState = .idle }
+        .onChange(of: secrets) {
+            testState = .idle
+            environmentState = .idle
+        }
+        // a list loaded with other sign-in values may not be this integration's
+        .onChange(of: [current.region.rawValue, current.hostOverride, current.clientID]) { environmentState = .idle }
     }
 
     // MARK: Fields
@@ -839,6 +885,9 @@ private struct ConnectionEditor<Record: ConnectionRecord, AppSection: View>: Vie
                     TextField("Host override", text: connection.hostOverride, prompt: Text("Leave empty for the region’s gateway"))
                 }
                 textField(.environmentID, "Environment ID", text: connection.environmentID, prompt: "From Jamf Account")
+                if environments != nil && !readOnlyFields.contains(.environmentID) {
+                    environmentRows
+                }
                 textField(.clientID, "Client ID", text: connection.clientID)
                 secretField(.main)
                 if optionalFields.contains(.jamfProWebURL) {
@@ -898,6 +947,80 @@ private struct ConnectionEditor<Record: ConnectionRecord, AppSection: View>: Vie
             }
         } footer: {
             issuesFooter(current.issues.filter { $0.contains("Jamf Protect") })
+        }
+    }
+
+    /// Below the Environment ID: a picker once the list is loaded, the button
+    /// that loads it, and why it couldn't be loaded. Typing the ID always works.
+    @ViewBuilder
+    private var environmentRows: some View {
+        if case .loaded(let list) = environmentState, !list.isEmpty {
+            Picker("Environment", selection: environmentChoice(in: list)) {
+                Text(current.environmentID.isEmpty ? "Choose…" : "Not in the list").tag("")
+                ForEach(list) { environment in
+                    Text(environment.name).tag(environment.id)
+                }
+            }
+        }
+        HStack(alignment: .firstTextBaseline, spacing: 8) {
+            Button(isLoaded ? "Reload Environments" : "Load Environments") { loadEnvironments() }
+                .disabled(!canLoadEnvironments || environmentState == .loading)
+                .help("Pick from the environments this integration can see")
+            if environmentState == .loading {
+                ProgressView()
+                    .controlSize(.small)
+                    .accessibilityLabel("Loading environments")
+            }
+            Spacer(minLength: 0)
+        }
+        switch environmentState {
+        case .failed(let text):
+            // the same warning label as the field issues, so it reads as a problem without color alone
+            Label(text, systemImage: "exclamationmark.triangle.fill")
+                .symbolRenderingMode(.multicolor)
+                .font(.callout)
+                .textSelection(.enabled)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .fixedSize(horizontal: false, vertical: true)
+        case .loaded(let list) where list.isEmpty:
+            Text(EnvironmentListState.emptyListMessage)
+                .font(.callout)
+                .foregroundStyle(.secondary)
+                .textSelection(.enabled)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .fixedSize(horizontal: false, vertical: true)
+        default:
+            EmptyView()
+        }
+    }
+
+    private var isLoaded: Bool {
+        if case .loaded = environmentState { return true }
+        return false
+    }
+
+    private var canLoadEnvironments: Bool {
+        EnvironmentListState.canLoad(current, typedSecret: secrets[.main], hasStoredSecret: hasStoredSecret.contains(.main))
+    }
+
+    /// Picking an environment fills in its ID; "" (a typed ID) changes nothing.
+    private func environmentChoice(in list: [JamfPlatform.Environment]) -> Binding<String> {
+        Binding(
+            get: { EnvironmentListState.choice(for: current.environmentID, in: list) },
+            set: { id in if !id.isEmpty { draft.connection.environmentID = id } })
+    }
+
+    private func loadEnvironments() {
+        guard let environments else { return }
+        environmentState = .loading
+        let record = draft
+        let typed = changedSecrets
+        Task {
+            do {
+                environmentState = .loaded(try await environments(record, typed))
+            } catch {
+                environmentState = .failed(connectionTestFailureText(error))
+            }
         }
     }
 

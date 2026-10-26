@@ -1,0 +1,265 @@
+import Foundation
+
+extension JamfPlatform {
+    /// An error code in a Platform API answer. Known ones have names; any
+    /// other code the server sends is kept as it is.
+    public struct ErrorCode: RawRepresentable, Hashable, Sendable, ExpressibleByStringLiteral {
+        public let rawValue: String
+
+        public init(rawValue: String) {
+            self.rawValue = rawValue
+        }
+
+        public init(stringLiteral value: String) {
+            rawValue = value
+        }
+
+        /// The integration lacks a permission (or an endpoint version is outdated).
+        public static let badPermissions: ErrorCode = "BAD_PERMISSIONS"
+        /// The Environment ID doesn't belong to this integration.
+        public static let invalidRequestContextID: ErrorCode = "INVALID_REQUEST_CONTEXT_ID"
+        /// No such tenant for the environment, e.g. device groups in Jamf School.
+        public static let tenantNotFound: ErrorCode = "TENANT_NOT_FOUND"
+        /// A Blueprint assigned to a division can't be changed through the API.
+        public static let divisionPatchNotAllowed: ErrorCode = "DIVISION_PATCH_NOT_ALLOWED"
+        public static let invalidField: ErrorCode = "INVALID_FIELD"
+        public static let notFound: ErrorCode = "NOT_FOUND"
+    }
+
+    /// An error answer, read from every shape the apps receive:
+    /// - the gateway's `{httpStatus, traceId, errors}`, with `errors` as one
+    ///   object or a list;
+    /// - the compliance benchmarks' `{message, error, statusCode, logref}`;
+    /// - the sign-in's `{error, error_description}`.
+    public struct ErrorBody: Hashable, Sendable {
+        public struct Item: Hashable, Sendable {
+            public var code: String?
+            public var field: String?
+            public var description: String?
+
+            public init(code: String? = nil, field: String? = nil, description: String? = nil) {
+                self.code = code
+                self.field = field
+                self.description = description
+            }
+
+            /// `CODE (field): description`, leaving out what's missing.
+            public var line: String {
+                var head = code ?? ""
+                if let field, !field.isEmpty { head += head.isEmpty ? field : " (\(field))" }
+                guard let description, !description.isEmpty else { return head }
+                return head.isEmpty ? description : "\(head): \(description)"
+            }
+        }
+
+        public var httpStatus: Int?
+        public var traceID: String?
+        public var errors: [Item]
+
+        public init(httpStatus: Int? = nil, traceID: String? = nil, errors: [Item] = []) {
+            self.httpStatus = httpStatus
+            self.traceID = traceID
+            self.errors = errors
+        }
+
+        /// Nil when the answer isn't a JSON object in one of the known shapes.
+        public init?(data: Data) {
+            guard let json = try? LosslessJSON(data: data), let object = json.objectValue else { return nil }
+            func text(_ key: String) -> String? {
+                switch object[key] {
+                case .string(let value)?: value
+                case .number(let value)?: value.literal
+                default: nil
+                }
+            }
+            func item(_ value: LosslessJSON) -> Item? {
+                guard value.objectValue != nil else { return nil }
+                return Item(code: value["code"]?.stringValue, field: value["field"]?.stringValue,
+                            description: value["description"]?.stringValue)
+            }
+            if object["errors"] != nil || object["traceId"] != nil {
+                httpStatus = object["httpStatus"]?.numberValue?.intValue
+                traceID = text("traceId")
+                switch object["errors"] {
+                case .array(let array)?: errors = array.compactMap(item)
+                case let value?: errors = item(value).map { [$0] } ?? []
+                case nil: errors = []
+                }
+            } else if object["error_description"] != nil || object["error"]?.stringValue != nil || object["message"] != nil {
+                // the sign-in's and the benchmarks' shapes carry the same parts
+                httpStatus = object["statusCode"]?.numberValue?.intValue
+                traceID = text("logref")
+                errors = [Item(code: text("error"), description: text("error_description") ?? text("message"))]
+            } else {
+                return nil
+            }
+            guard httpStatus != nil || traceID != nil || !errors.isEmpty else { return nil }
+        }
+
+        public func contains(_ code: ErrorCode) -> Bool {
+            errors.contains { $0.code == code.rawValue }
+        }
+    }
+}
+
+/// Why a Jamf Platform API request failed, shown in one format in every app:
+/// the HTTP status line, one `CODE (field): description` line per error, the
+/// Trace ID, then hints (the app's own first, then the standard ones).
+/// Everything shown goes through `Redaction`.
+public nonisolated struct JamfPlatformError: Error, LocalizedError, Sendable {
+    public enum Kind: Sendable {
+        /// Not sent: not a request the app makes, or an unsafe path.
+        case refused(method: String, path: String)
+        /// No answer from the server.
+        case transport(method: String, path: String, code: URLError.Code, message: String)
+        /// The sign-in was refused.
+        case signIn(status: Int, body: JamfPlatform.ErrorBody?, text: String?)
+        /// The server answered with an error status.
+        case status(Int, body: JamfPlatform.ErrorBody?, text: String?, method: String, path: String)
+        /// Not sent: the Environment ID isn't a UUID.
+        case invalidEnvironmentID(String)
+        /// The answer couldn't be read, or the connection has no usable address.
+        case invalidResponse(String)
+        /// The server kept returning more pages than any real list has.
+        case pageLimitReached(path: String, pages: Int)
+        /// The integration can't list environments: it is scoped to one environment.
+        case cannotListEnvironments
+    }
+
+    public var kind: Kind
+    /// The app's own hints, shown before the standard ones; the client adds
+    /// them from its `hints`.
+    public var appHints: [String]
+
+    public init(_ kind: Kind, appHints: [String] = []) {
+        self.kind = kind
+        self.appHints = appHints
+    }
+
+    /// JTKit's HTTP error in the Platform API's terms, with the error body read.
+    /// (`Kind.` is spelled out: `HTTPError` has cases with the same names, and
+    /// `.refused(…)` alone would call this initializer again.)
+    public init(_ error: HTTPError) {
+        switch error {
+        case let .refused(method, path):
+            self.init(Kind.refused(method: method, path: path))
+        case let .transport(method, path, code, message):
+            self.init(Kind.transport(method: method, path: path, code: code, message: message))
+        case let .status(response, method, path, duringSignIn):
+            let body = JamfPlatform.ErrorBody(data: response.data)
+            let text = body == nil ? HTTPError.detail(of: response) : nil
+            self.init(duringSignIn
+                ? Kind.signIn(status: response.status, body: body, text: text)
+                : Kind.status(response.status, body: body, text: text, method: method, path: path))
+        case let .invalidURL(message), let .decoding(message):
+            self.init(Kind.invalidResponse(message))
+        }
+    }
+
+    /// The HTTP status of an error answer or a refused sign-in.
+    public var status: Int? {
+        switch kind {
+        case let .signIn(status, _, _), let .status(status, _, _, _, _): status
+        default: nil
+        }
+    }
+
+    public var body: JamfPlatform.ErrorBody? {
+        switch kind {
+        case let .signIn(_, body, _), let .status(_, body, _, _, _): body
+        default: nil
+        }
+    }
+
+    /// Shown unmasked, also in the bug-report export: Jamf support asks for it.
+    public var traceID: String? { body?.traceID }
+
+    public func hasCode(_ code: JamfPlatform.ErrorCode) -> Bool {
+        body?.contains(code) ?? false
+    }
+
+    /// The hints every app shows for this error.
+    public var standardHints: [String] {
+        var hints = [String]()
+        if hasCode(.invalidRequestContextID) {
+            hints.append("The Environment ID doesn’t belong to this integration. Copy it from the integration’s details in Jamf Account.")
+        }
+        if hasCode(.divisionPatchNotAllowed) {
+            hints.append("This Blueprint is assigned to a division and can’t be changed through the API.")
+        }
+        switch kind {
+        case let .signIn(status, _, _) where status == 400 || status == 401:
+            hints.append("Check the client ID, client secret and region. Jamf Account integrations expire after six months.")
+        case .status(401, _, _, _, _):
+            hints.append("Jamf didn’t accept the sign-in. Check the client ID, client secret and region.")
+        case .status(403, _, _, _, _):
+            hints.append("The API integration is missing a permission for this request, or isn’t scoped to this environment. Check its permissions in Jamf Account.")
+        case .status(429, _, _, _, _):
+            hints.append("Jamf is limiting how many requests this app sends. Wait a minute, then try again.")
+        case let .status(status, _, _, _, _) where (500..<600).contains(status):
+            hints.append("Jamf had a problem answering. Try again in a few minutes.")
+        default:
+            break
+        }
+        return hints
+    }
+
+    /// The message: the error, the app's hints (its own, then `extraHints`),
+    /// then the standard ones, each shown once.
+    public func message(appHints extraHints: [String] = []) -> String {
+        var lines: [String]
+        switch kind {
+        case let .refused(method, path):
+            lines = ["Refused before sending: \(method) \(path) is not a request this app makes."]
+        case let .transport(_, _, _, message):
+            lines = ["Network error: \(message)"]
+        case let .signIn(status, body, text):
+            lines = ["Sign-in failed: " + Self.statusLine(status)] + Self.detailLines(body: body, text: text)
+        case let .status(status, body, text, _, _):
+            lines = [Self.statusLine(status)] + Self.detailLines(body: body, text: text)
+        case let .invalidEnvironmentID(value):
+            lines = ["The Environment ID “\(value)” is not a UUID (8-4-4-4-12 hexadecimal characters). Copy it from Jamf Account."]
+        case let .invalidResponse(message):
+            lines = ["Unexpected response: \(message)"]
+        case let .pageLimitReached(path, pages):
+            lines = ["Stopped after \(pages) pages of \(path): the server kept returning more pages than expected. The list is incomplete."]
+        case .cannotListEnvironments:
+            lines = [
+                "This API integration is scoped to one environment, so it can’t list environments. Only an integration with organization scope can.",
+                "Find the Environment ID in Jamf Account (account.jamf.com): open this API integration’s details, copy the Environment ID shown there and paste it into the field.",
+            ]
+        }
+        for hint in appHints + extraHints + standardHints where !lines.contains(hint) {
+            lines.append(hint)
+        }
+        return Redaction.text(lines.joined(separator: "\n"))
+    }
+
+    public var errorDescription: String? { message() }
+
+    /// Everything about the error for a bug report, ready to copy: the
+    /// request and the message (with the start of an answer that wasn't in a
+    /// known shape, redacted).
+    public var report: String {
+        var lines = [String]()
+        switch kind {
+        case let .refused(method, path), let .transport(method, path, _, _), let .status(_, _, _, method, path):
+            lines.append("Request: \(method) \(path)")
+        default:
+            break
+        }
+        lines.append(message())
+        return Redaction.text(lines.joined(separator: "\n"))
+    }
+
+    private static func statusLine(_ status: Int) -> String {
+        "HTTP \(status) \(HTTPURLResponse.localizedString(forStatusCode: status).capitalized)"
+    }
+
+    private static func detailLines(body: JamfPlatform.ErrorBody?, text: String?) -> [String] {
+        guard let body else { return text.map { [String($0.prefix(500))] } ?? [] }
+        var lines = body.errors.map(\.line).filter { !$0.isEmpty }
+        if let traceID = body.traceID { lines.append("Trace ID: \(traceID)") }
+        return lines
+    }
+}
