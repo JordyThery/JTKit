@@ -142,3 +142,55 @@ public final class ActivityLog {
         entries.removeAll()
     }
 }
+
+// MARK: - Actions
+
+extension ActivityLogEntry {
+    /// The category of what the user asked for, as opposed to the requests
+    /// it took.
+    public static let actionCategory = "Action"
+
+    /// What the user asked for, e.g. "Sent Restart to 3 devices", "Restarted
+    /// iPhone over USB" or "Read the FileVault recovery key for …".
+    ///
+    /// - Parameters:
+    ///   - devices: serial numbers, UDIDs or ECIDs the action was about,
+    ///     masked in the bug-report export (also when the summary doesn't
+    ///     show them).
+    ///   - failed: the action didn't happen; put why in `note`.
+    public static func action(
+        _ summary: String,
+        note: String? = nil,
+        failed: Bool = false,
+        service: String? = nil,
+        connection: String? = nil,
+        devices: [String] = [],
+        duration: TimeInterval? = nil
+    ) -> ActivityLogEntry {
+        let named = devices.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty }
+        var identifiers = named.map { FoundIdentifier(.device, $0) }
+        for found in IdentifierMasker.identifiers(inText: summary) + IdentifierMasker.identifiers(inText: note ?? "")
+        where !identifiers.contains(found) {
+            identifiers.append(found)
+        }
+        return ActivityLogEntry(category: actionCategory, operation: "", detail: summary, duration: duration,
+                                note: note.map(Redaction.text), failedWithoutStatus: failed,
+                                service: service, connection: connection, identifiers: identifiers)
+    }
+}
+
+extension ActivityLog {
+    /// Adds an "Action" entry (`ActivityLogEntry.action`).
+    public func recordAction(
+        _ summary: String,
+        note: String? = nil,
+        failed: Bool = false,
+        service: String? = nil,
+        connection: String? = nil,
+        devices: [String] = [],
+        duration: TimeInterval? = nil
+    ) {
+        append(.action(summary, note: note, failed: failed, service: service, connection: connection,
+                       devices: devices, duration: duration))
+    }
+}

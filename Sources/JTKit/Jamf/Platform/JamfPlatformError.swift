@@ -124,6 +124,8 @@ public nonisolated struct JamfPlatformError: Error, LocalizedError, Sendable {
         case pageLimitReached(path: String, pages: Int)
         /// The integration can't list environments: it is scoped to one environment.
         case cannotListEnvironments
+        /// Not sent: a serial number or UDID with characters it can't hold.
+        case invalidIdentifier(String)
     }
 
     public var kind: Kind
@@ -133,11 +135,20 @@ public nonisolated struct JamfPlatformError: Error, LocalizedError, Sendable {
     /// Where the request went, which decides where a missing permission is
     /// fixed (Jamf Account, or Jamf Pro's API roles); the client sets it.
     public var server: JamfPlatform.Server
+    /// How the client signs in, which decides where a Jamf Pro privilege is
+    /// added (an API role, or a user account); the client sets it.
+    public var signIn: SignInMethod
+    /// The Jamf Pro privilege the request needs, named in the hint when Jamf
+    /// Pro refuses it (403); the calls set it from `JamfPro.Privilege`.
+    public var privilege: JamfPro.Privilege?
 
-    public init(_ kind: Kind, appHints: [String] = [], server: JamfPlatform.Server = .platformAPI) {
+    public init(_ kind: Kind, appHints: [String] = [], server: JamfPlatform.Server = .platformAPI,
+                signIn: SignInMethod = .apiClient, privilege: JamfPro.Privilege? = nil) {
         self.kind = kind
         self.appHints = appHints
         self.server = server
+        self.signIn = signIn
+        self.privilege = privilege
     }
 
     /// JTKit's HTTP error in the Platform API's terms, with the error body read.
@@ -192,12 +203,16 @@ public nonisolated struct JamfPlatformError: Error, LocalizedError, Sendable {
             hints.append("This Blueprint is assigned to a division and can’t be changed through the API.")
         }
         switch kind {
+        case let .signIn(status, _, _) where (status == 400 || status == 401) && server == .jamfPro:
+            hints.append(jamfProSignInHint)
         case let .signIn(status, _, _) where status == 400 || status == 401:
             hints.append("Check the client ID, client secret and region. Jamf Account integrations expire after six months.")
+        case .status(401, _, _, _, _) where server == .jamfPro:
+            hints.append("Jamf Pro didn’t accept the sign-in. " + jamfProSignInHint)
         case .status(401, _, _, _, _):
             hints.append("Jamf didn’t accept the sign-in. Check the client ID, client secret and region.")
         case .status(403, _, _, _, _) where server == .jamfPro:
-            hints.append("The API role is missing a privilege for this request. Add it in Jamf Pro under Settings › API Roles and Clients.")
+            hints.append(jamfProPrivilegeHint)
         case .status(403, _, _, _, _):
             hints.append("The API integration is missing a permission for this request, or isn’t scoped to this environment. Check its permissions in Jamf Account.")
         case .status(429, _, _, _, _):
@@ -208,6 +223,22 @@ public nonisolated struct JamfPlatformError: Error, LocalizedError, Sendable {
             break
         }
         return hints
+    }
+
+    /// A direct Jamf Pro sign-in has no region and no Jamf Account.
+    private var jamfProSignInHint: String {
+        signIn == .usernamePassword
+            ? "Check the username and password."
+            : "Check the client ID and client secret, and that the API client is enabled in Jamf Pro under Settings › API Roles and Clients."
+    }
+
+    /// Names the privilege when the request carries one: an API client gets
+    /// it from its API role, a user account from its own privileges.
+    private var jamfProPrivilegeHint: String {
+        let missing = privilege.map { "the “\($0.rawValue)” privilege" } ?? "a privilege for this request"
+        return signIn == .usernamePassword
+            ? "The user account is missing \(missing). Add it in Jamf Pro under Settings › User Accounts and Groups."
+            : "The API role is missing \(missing). Add it in Jamf Pro under Settings › API Roles and Clients."
     }
 
     /// The message: the error, the app's hints (its own, then `extraHints`),
@@ -229,6 +260,8 @@ public nonisolated struct JamfPlatformError: Error, LocalizedError, Sendable {
             lines = ["Unexpected response: \(message)"]
         case let .pageLimitReached(path, pages):
             lines = ["Stopped after \(pages) pages of \(path): the server kept returning more pages than expected. The list is incomplete."]
+        case let .invalidIdentifier(value):
+            lines = ["“\(value)” is not a serial number or UDID: only letters, digits and hyphens are allowed."]
         case .cannotListEnvironments:
             lines = [
                 "This API integration is scoped to one environment, so it can’t list environments. Only an integration with organization scope can.",

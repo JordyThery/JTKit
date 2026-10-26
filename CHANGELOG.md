@@ -1,5 +1,52 @@
 # Changelog
 
+## 0.8.0 (2026-10-26)
+Step 7 for Serial Number Reader: Jamf Pro lookups, Jamf School and Action
+entries. Additions, plus two changes to wording every app shows. The MDM
+command list, the Platform device calls and the Classic API basics follow
+with Checkpoint.
+- `JamfPro`: device lookups on `JamfPlatform.Client` (direct or through the
+  gateway): a computer (`v4/computers-inventory`) or mobile device
+  (`v2/mobile-devices/detail`) by serial or UDID, as a `Match` (none, one,
+  several). Only a record whose serial or UDID is the one asked for counts
+  (ignoring case). Serials and UDIDs with other characters than letters,
+  digits and hyphens are refused before sending (`validatedIdentifier`,
+  error kind `.invalidIdentifier`).
+- Batches: `computers(serials:)` and `mobileDevices(serials:)`, 50 quoted
+  serials per `=in=` filter, 4 requests at a time, one by one when Jamf Pro
+  refuses the filter (HTTP 400); failures per serial.
+- Typed, tolerant records `JamfPro.Computer` and `JamfPro.MobileDevice`:
+  every section and field optional; a value of an unexpected type reads as
+  nil instead of failing the lookup. v4 names (`lastCheckIn`), with v1's
+  `lastContactTime` still read. "-1" department, building and site IDs are nil.
+- A lookup can record its successful answer (`recording: .results`), trimmed
+  to the record's ID and the sections asked for; the default stays "errors only".
+- Asset tags: `setAssetTag(_:computerID:)` (`v4/computers-inventory-detail`)
+  and `setAssetTag(_:mobileDeviceID:)` (`v2/mobile-devices`), safe to repeat.
+- `jamfProVersion()` (`v1/jamf-pro-version`).
+- `JamfPro.Privilege`: one table of the Jamf Pro privileges the apps need.
+  Requests carry theirs (`send(_:privilege:)`, also on `get` and `json`).
+- Hints (changed wording): on a Jamf Pro server, a refused request (403)
+  names the missing privilege, pointing to Settings › API Roles and Clients
+  for an API client and to Settings › User Accounts and Groups for a user
+  account. A refused sign-in on a Jamf Pro server mentions no region or Jamf
+  Account: "Check the username and password." or "Check the client ID and
+  client secret, and that the API client is enabled in Jamf Pro under Settings
+  › API Roles and Clients." The Platform API's wording is unchanged.
+  `JamfPlatformError` gains `signIn` and `privilege`; the client sets them.
+- `JamfSchool.Client` on JTKit's `HTTPClient`: Network ID and API key
+  (Basic, shown as "Basic <redacted>"), 429 retried for every request, server
+  errors and network drops for reads; failures read from the status, the
+  body's `code` and known failure messages (also under HTTP 200). Device by
+  serial (a `Match`) or UDID (nil for "DeviceNotFound"), fleet, devices in
+  groups, groups, locations, ADE placeholders, asset tag, Test Connection.
+  `JamfSchool.Device` reads both shapes of the answer (flags as booleans or
+  0/1, the check-in in the instance's time zone). `JamfSchoolError` with
+  Checkpoint's explanations and standard hints.
+- Action entries: `ActivityLog.recordAction` and `ActivityLogEntry.action`,
+  category "Action", with the devices it was about masked in the bug-report
+  export.
+
 ## 0.7.2 (2026-10-26)
 Step 6 for Profile2Blueprint. Additions only.
 - `JamfPlatform.PermissionProblem`: Test Connection's message when signing in

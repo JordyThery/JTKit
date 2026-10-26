@@ -38,6 +38,9 @@ extension JamfPlatform {
         public let scope: Scope
         public let server: JamfPlatform.Server
         public let errorStatus: ErrorStatus
+        /// How the client signs in; decides the wording of Jamf Pro's
+        /// sign-in and privilege hints.
+        public let signIn: SignInMethod
         let http: HTTPClient
         /// The recorder under the client, for the few requests that don't go
         /// through it (e.g. images on another host).
@@ -88,7 +91,7 @@ extension JamfPlatform {
             }
             try self.init(baseURL: baseURL,
                           scope: scope ?? (server == .jamfPro ? .organization : .environment(connection.environmentID)),
-                          server: server,
+                          server: server, signIn: connection.signIn,
                           tokens: tokens, recorder: recorder, errorStatus: errorStatus, permits: permits, hints: hints,
                           headers: headers, writeSpacing: writeSpacing, sleep: sleep, random: random, now: now)
         }
@@ -102,6 +105,7 @@ extension JamfPlatform {
             baseURL: URL,
             scope: Scope,
             server: JamfPlatform.Server = .platformAPI,
+            signIn: SignInMethod = .apiClient,
             tokens: any BearerTokenSource,
             recorder: RequestRecorder,
             errorStatus: ErrorStatus = .thrown,
@@ -127,6 +131,7 @@ extension JamfPlatform {
             self.baseURL = baseURL
             self.scope = scope
             self.server = server
+            self.signIn = signIn
             self.errorStatus = errorStatus
             self.tokens = tokens
             self.hints = hints
@@ -139,20 +144,24 @@ extension JamfPlatform {
         /// Sends a request. Returns a 2xx answer, or with `errorStatus:
         /// .returned` any answer.
         ///
+        /// - Parameter privilege: the Jamf Pro privilege the request needs,
+        ///   named in the hint when Jamf Pro refuses it.
         /// - Throws: `JamfPlatformError`, `CancellationError`, or the secret's own error.
-        public func send(_ request: HTTPRequest) async throws -> HTTPResponse {
+        public func send(_ request: HTTPRequest, privilege: JamfPro.Privilege? = nil) async throws -> HTTPResponse {
             do {
                 return try await http.send(request)
             } catch let HTTPError.status(response, _, _, duringSignIn) where !duringSignIn && errorStatus == .returned {
                 return response
             } catch let error as HTTPError {
-                throw failure(JamfPlatformError(error))
+                var error = JamfPlatformError(error)
+                error.privilege = privilege
+                throw failure(error)
             }
         }
 
         /// A GET, read as lossless JSON.
-        public func json(_ path: String, query: [URLQueryItem] = []) async throws -> LosslessJSON {
-            let response = try await send(HTTPRequest(path: path, query: query))
+        public func json(_ path: String, query: [URLQueryItem] = [], privilege: JamfPro.Privilege? = nil) async throws -> LosslessJSON {
+            let response = try await send(HTTPRequest(path: path, query: query), privilege: privilege)
             do {
                 return try LosslessJSON(data: response.data)
             } catch {
@@ -161,8 +170,9 @@ extension JamfPlatform {
         }
 
         /// A GET, decoded.
-        public func get<T: Decodable>(_ type: T.Type, _ path: String, query: [URLQueryItem] = []) async throws -> T {
-            let response = try await send(HTTPRequest(path: path, query: query))
+        public func get<T: Decodable>(_ type: T.Type, _ path: String, query: [URLQueryItem] = [],
+                                      privilege: JamfPro.Privilege? = nil) async throws -> T {
+            let response = try await send(HTTPRequest(path: path, query: query), privilege: privilege)
             do {
                 return try JSONDecoder().decode(type, from: response.data)
             } catch {
@@ -185,6 +195,7 @@ extension JamfPlatform {
         public func failure(_ error: JamfPlatformError) -> JamfPlatformError {
             var annotated = error
             annotated.server = server
+            annotated.signIn = signIn
             annotated.appHints += hints(error).filter { !annotated.appHints.contains($0) }
             return annotated
         }
