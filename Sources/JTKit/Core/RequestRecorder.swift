@@ -57,6 +57,9 @@ public nonisolated struct RequestRecorder: Sendable {
     ///   - recordedJSON: trims a JSON body before it is redacted and recorded
     ///     (see `HTTPRequest.recordedJSON`); what is returned is unchanged.
     ///   - redirects: what to do when the server redirects.
+    ///   - recordsOnlyFailures: add an entry only when the request fails (an
+    ///     error, or status 400 and up), e.g. for the many blocks of one
+    ///     upload that the app sums up in one entry of its own.
     /// - Throws: `CancellationError` when cancelled, otherwise the session's error.
     public func send(
         _ request: URLRequest,
@@ -65,14 +68,15 @@ public nonisolated struct RequestRecorder: Sendable {
         of maxAttempts: Int = 1,
         recordsBodies: Bool = false,
         recordedJSON: RecordedJSONFilter? = nil,
-        redirects: RedirectRule = .follow
+        redirects: RedirectRule = .follow,
+        recordsOnlyFailures: Bool = false
     ) async throws -> (Data, HTTPURLResponse) {
         let date = Date()
         let started = ContinuousClock.now
         let delegate = redirects == .follow ? nil : RedirectDelegate(rule: redirects)
         let context = Context(request: request, category: category ?? self.category, date: date,
                               attempt: attempt, maxAttempts: maxAttempts, recordsBodies: recordsBodies,
-                              recordedJSON: recordedJSON)
+                              recordedJSON: recordedJSON, recordsOnlyFailures: recordsOnlyFailures)
         let data: Data
         let response: URLResponse
         do {
@@ -94,19 +98,63 @@ public nonisolated struct RequestRecorder: Sendable {
         return (data, http)
     }
 
-    /// Adds an entry that isn't a request, e.g. a wait before a retry or a
-    /// refused request, with this recorder's service and connection.
+    /// Downloads the answer to a temporary file, as `URLSession.download`
+    /// does, and records the request. The downloaded contents are never
+    /// recorded; an error answer (status 400 and up) is, as with `send`.
+    /// The caller moves or deletes the file.
+    /// - Throws: `CancellationError` when cancelled, otherwise the session's error.
+    public func download(
+        _ request: URLRequest,
+        category: String? = nil,
+        attempt: Int = 1,
+        of maxAttempts: Int = 1,
+        redirects: RedirectRule = .follow
+    ) async throws -> (URL, HTTPURLResponse) {
+        let date = Date()
+        let started = ContinuousClock.now
+        let delegate = redirects == .follow ? nil : RedirectDelegate(rule: redirects)
+        let context = Context(request: request, category: category ?? self.category, date: date,
+                              attempt: attempt, maxAttempts: maxAttempts, recordsBodies: false,
+                              recordedJSON: nil, recordsOnlyFailures: false, isDownload: true)
+        let file: URL
+        let response: URLResponse
+        do {
+            (file, response) = try await session.download(for: request, delegate: delegate)
+        } catch {
+            if Self.isCancellation(error) {
+                await record(context, duration: started.elapsedSeconds, cancelled: true)
+                throw CancellationError()
+            }
+            await record(context, duration: started.elapsedSeconds, error: error)
+            throw error
+        }
+        guard let http = response as? HTTPURLResponse else {
+            try? FileManager.default.removeItem(at: file)
+            let error = URLError(.badServerResponse)
+            await record(context, duration: started.elapsedSeconds, error: error)
+            throw error
+        }
+        // Only an error answer is read back, to be recorded like any other.
+        let errorAnswer = http.statusCode >= 400 ? (try? Data(contentsOf: file)) ?? Data() : Data()
+        await record(context, duration: started.elapsedSeconds, response: http, data: errorAnswer)
+        return (file, http)
+    }
+
+    /// Adds an entry that isn't a request, e.g. a wait before a retry, a
+    /// refused request or the summary of an upload, with this recorder's
+    /// service and connection.
     public func note(
         _ operation: String,
         _ detail: String,
         note: String,
         category: String? = nil,
+        duration: TimeInterval? = nil,
         isWarning: Bool = false,
         failed: Bool = false
     ) async {
         guard let log else { return }
         let entry = ActivityLogEntry(
-            category: category ?? self.category, operation: operation, detail: detail, note: note,
+            category: category ?? self.category, operation: operation, detail: detail, duration: duration, note: note,
             failedWithoutStatus: failed, isWarning: isWarning, service: service, connection: connection,
             identifiers: IdentifierMasker.identifiers(inPath: detail) + IdentifierMasker.identifiers(inText: note)
         )
@@ -127,6 +175,8 @@ public nonisolated struct RequestRecorder: Sendable {
         let maxAttempts: Int
         let recordsBodies: Bool
         let recordedJSON: RecordedJSONFilter?
+        var recordsOnlyFailures = false
+        var isDownload = false
     }
 
     private func record(
@@ -138,6 +188,10 @@ public nonisolated struct RequestRecorder: Sendable {
         cancelled: Bool = false
     ) async {
         guard let log else { return }
+        if context.recordsOnlyFailures {
+            let failed = error != nil || (response?.statusCode ?? 0) >= 400
+            guard failed, !cancelled else { return }
+        }
         let entry = Self.entry(context: context, duration: duration, response: response, data: data,
                                error: error, cancelled: cancelled, service: service, connection: connection)
         await log.append(entry)
@@ -209,7 +263,9 @@ public nonisolated struct RequestRecorder: Sendable {
                 if let key = pair.key as? String { result[key] = "\(pair.value)" }
             }
             responseHeaders = Redaction.headers(headers)
-            if !data.isEmpty {
+            if context.isDownload && response.statusCode < 400 {
+                bodyNotes.append("Downloaded file not recorded.")
+            } else if !data.isEmpty {
                 if context.recordsBodies || response.statusCode >= 400,
                    let body = trimmed(data, by: context.recordedJSON) {
                     let recorded = recordedBody(body, contentType: response.value(forHTTPHeaderField: "Content-Type"), name: "response",

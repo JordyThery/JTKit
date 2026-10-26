@@ -18,6 +18,8 @@ public nonisolated enum Redaction {
         "password", "secret", "passcode",
         "personalRecoveryKey", "recoveryLockPassword", "recoveryPassword",
         "pin", "unlockToken", "escrowToken",
+        // Azure Storage upload addresses (SAS) carry their signature here
+        "sig",
     ].map { $0.lowercased() })
 
     /// Keys whose whole value is replaced as one block: personal information
@@ -99,8 +101,10 @@ public nonisolated enum Redaction {
     }
 
     /// Free text (an error message, an XML document, a log line) with secrets
-    /// hidden: `Bearer …` and `Basic …` credentials, `"key": "value"` pairs,
-    /// `key=value` pairs and `<key>value</key>` elements for every secret key.
+    /// hidden: `Bearer …` and `Basic …` credentials, GitHub tokens (`ghp_`,
+    /// `gho_`, `ghu_`, `ghs_`, `ghr_`, `github_pat_`) wherever they appear,
+    /// `"key": "value"` pairs, `key=value` pairs and `<key>value</key>`
+    /// elements for every secret key.
     public static func text(_ text: String) -> String {
         var result = text
         for (regex, template) in textPatterns {
@@ -157,6 +161,8 @@ public nonisolated enum Redaction {
             (#"((?<![A-Za-z0-9_])(?:\#(keys))=)[^&\s"']+"#, "$1\(placeholder)"),
             // Authorization values
             (#"((?:Bearer|Basic)\s+)[A-Za-z0-9\-._~+/]+=*"#, "$1\(placeholder)"),
+            // GitHub tokens are recognisable by their prefix alone
+            (#"(?<![A-Za-z0-9_])(?:gh[pousr]_|github_pat_)[A-Za-z0-9_]+"#, placeholder),
         ]
         return specs.compactMap { pattern, template in
             (try? NSRegularExpression(pattern: pattern, options: [.caseInsensitive])).map { ($0, template) }

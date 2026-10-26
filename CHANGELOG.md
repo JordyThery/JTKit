@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.6.4 (2026-10-26)
+For Intune Deployer's adoption of step 5. Additions only.
+- `Redaction`: an Azure Storage upload address hides its signature (`sig` is
+  a secret field, in addresses, forms and text), and GitHub tokens (`ghp_`,
+  `gho_`, `ghu_`, `ghs_`, `ghr_`, `github_pat_`) are hidden anywhere in free
+  text, also inside a recorded error answer. A codeload address's `?token=`
+  was already hidden; now tested. An `Authorization: token …` header keeps
+  only the word "token", as every scheme does; now tested.
+- `RequestRecorder.download(_:)`: downloads to a temporary file, as
+  `URLSession.download` does, and records the request. The file is never
+  recorded; an error answer is, as with `send`.
+- `RequestRecorder.send(recordsOnlyFailures:)`: adds an entry only when the
+  request fails, e.g. for the blocks of an upload the app sums up itself.
+- `RequestRecorder.note(duration:)`: a note can carry a duration, e.g. an
+  upload's summary.
+
 ## 0.6.3 (2026-10-26)
 Fix, found while Jamf Deployer adopted step 5 (decided by Jordy: the default
 in every app, not an option).

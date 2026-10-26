@@ -232,4 +232,114 @@ struct RequestRecorderTests {
         #expect(!RedirectRule.sameHostHTTPSOnly.allows(from: from, to: URL(string: "https://evil.example/api/y")))
         #expect(!RedirectRule.sameHostHTTPSOnly.allows(from: from, to: URL(string: "https://jamf.example.com:8443/api/y")))
     }
+
+    // MARK: - Uploads and downloads
+
+    private static let uploadAddress =
+        "https://store.blob.core.windows.net/c/blob?sv=2019-02-02&sr=b&sig=SIGNATURE%2Bsecret%3D&se=2026-10-26&sp=rw&comp=block&blockid=YmxvY2s%3D"
+
+    @Test("An upload's address hides its signature, and its contents are never recorded")
+    func uploadRedacted() async throws {
+        let server = MockServer { _ in .json(500, #"<?xml version="1.0"?><Error><Code>InternalError</Code></Error>"#) }
+        let log = ActivityLog()
+        var upload = request("PUT", Self.uploadAddress)
+        upload.httpBody = Data("FILE-CONTENTS".utf8)
+        _ = try await RequestRecorder(session: server.session, log: log).send(upload)
+
+        #expect(server.requests.first?.bodyString == "FILE-CONTENTS", "the contents are sent")
+        let entry = try #require(log.entries.first)
+        let details = try #require(entry.request)
+        #expect(details.requestBody == nil)
+        #expect(details.url.contains("sig=\(Redaction.placeholder)"))
+        #expect(entry.detail.contains("sig=\(Redaction.placeholder)"))
+        let transcript = ActivityLogExport.transcript(of: entry)
+        #expect(!transcript.contains("SIGNATURE"))
+        #expect(!transcript.contains("FILE-CONTENTS"))
+    }
+
+    @Test("Recording only failures: a success adds nothing, a failure adds its entry")
+    func onlyFailures() async throws {
+        let status = Locked(201)
+        let server = MockServer { _ in .json(status.value, "") }
+        let log = ActivityLog()
+        let recorder = RequestRecorder(session: server.session, log: log)
+        _ = try await recorder.send(request("PUT", Self.uploadAddress), recordsOnlyFailures: true)
+        #expect(log.entries.isEmpty)
+
+        status.value = 503
+        _ = try await recorder.send(request("PUT", Self.uploadAddress), recordsOnlyFailures: true)
+        #expect(log.entries.count == 1)
+        #expect(log.entries.first?.status == 503)
+
+        server.respond { _ in throw URLError(.networkConnectionLost) }
+        await #expect(throws: URLError.self) {
+            _ = try await recorder.send(self.request("PUT", Self.uploadAddress), recordsOnlyFailures: true)
+        }
+        #expect(log.entries.count == 2)
+    }
+
+    @Test("A note can carry a duration")
+    func noteDuration() async throws {
+        let log = ActivityLog()
+        await RequestRecorder(log: log, category: "Upload").note("PUT", "app.pkg", note: "Uploaded", duration: 4.5)
+        #expect(log.entries.first?.duration == 4.5)
+        #expect(log.entries.first?.category == "Upload")
+    }
+
+    @Test("A download goes to a file; the file is never recorded")
+    func download() async throws {
+        let server = MockServer { _ in MockResponse(status: 200, headers: ["Content-Type": "application/zip"], body: Data("ZIP-CONTENTS".utf8)) }
+        let log = ActivityLog()
+        let (file, response) = try await RequestRecorder(session: server.session, log: log, category: "GitHub")
+            .download(request("GET", "https://api.github.com/repos/o/r/zipball/main",
+                              headers: ["Authorization": "Bearer ghp_secretsecretsecret"]))
+        defer { try? FileManager.default.removeItem(at: file) }
+
+        #expect(response.statusCode == 200)
+        #expect(try Data(contentsOf: file) == Data("ZIP-CONTENTS".utf8))
+        let entry = try #require(log.entries.first)
+        #expect(entry.category == "GitHub")
+        #expect(entry.status == 200)
+        #expect(entry.request?.bodyNote == "Downloaded file not recorded.")
+        let transcript = ActivityLogExport.transcript(of: entry)
+        #expect(!transcript.contains("ZIP-CONTENTS"))
+        #expect(!transcript.contains("ghp_secret"))
+    }
+
+    @Test("A download redirected to codeload with ?token= never shows the token")
+    func downloadRedirectToken() async throws {
+        let codeload = try #require(URL(string: "https://codeload.github.com/o/r/legacy.zip/refs/heads/main?token=EPHEMERAL123"))
+        let server = MockServer { request in
+            request.url.host() == "api.github.com"
+                ? .redirect(302, to: codeload)
+                : MockResponse(status: 200, headers: ["Content-Type": "application/zip"], body: Data("ZIP".utf8))
+        }
+        let log = ActivityLog()
+        let recorder = RequestRecorder(session: server.session, log: log)
+        let (file, _) = try await recorder.download(request("GET", "https://api.github.com/repos/o/r/zipball/main"))
+        try? FileManager.default.removeItem(at: file)
+        #expect(server.requests.last?.url == codeload, "the redirect was followed")
+
+        // the codeload address itself, recorded directly
+        let (direct, _) = try await recorder.download(URLRequest(url: codeload))
+        try? FileManager.default.removeItem(at: direct)
+
+        #expect(log.entries.count == 2)
+        for entry in log.entries {
+            #expect(!ActivityLogExport.transcript(of: entry).contains("EPHEMERAL123"))
+        }
+        let directEntry = try #require(log.entries.first { $0.detail.hasPrefix("/o/r/") })
+        #expect(directEntry.request?.url.hasSuffix("?token=\(Redaction.placeholder)") == true)
+    }
+
+    @Test("A download's error answer is recorded, as with send")
+    func downloadError() async throws {
+        let server = MockServer { _ in .json(404, #"{"message":"Not Found"}"#) }
+        let log = ActivityLog()
+        let (file, response) = try await RequestRecorder(session: server.session, log: log)
+            .download(request("GET", "https://api.github.com/repos/o/r/zipball/main"))
+        try? FileManager.default.removeItem(at: file)
+        #expect(response.statusCode == 404)
+        #expect(log.entries.first?.request?.responseBody?.contains("Not Found") == true)
+    }
 }

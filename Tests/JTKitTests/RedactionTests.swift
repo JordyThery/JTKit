@@ -102,6 +102,40 @@ struct RedactionTests {
         #expect(!(transport.errorDescription ?? "").contains("abc"))
     }
 
+    @Test("An Azure Storage upload address hides its signature")
+    func azureSignature() throws {
+        let address = "https://store.blob.core.windows.net/c/blob?sv=2019-02-02&sr=b&sig=abc%2Bdef%3D&se=2026-10-26T12%3A00%3A00Z&sp=rw&comp=block&blockid=YmxvY2s%3D"
+        let redacted = Redaction.url(try #require(URL(string: address)))
+        #expect(redacted == "https://store.blob.core.windows.net/c/blob?sv=2019-02-02&sr=b&sig=\(hidden)&se=2026-10-26T12%3A00%3A00Z&sp=rw&comp=block&blockid=YmxvY2s%3D")
+        #expect(!Redaction.text("PUT \(address) failed").contains("abc%2Bdef"))
+    }
+
+    @Test("A codeload address hides its token parameter")
+    func codeloadToken() throws {
+        let address = "https://codeload.github.com/owner/repo/legacy.zip/refs/heads/main?token=ABCDEF123456"
+        let redacted = Redaction.url(try #require(URL(string: address)))
+        #expect(redacted == "https://codeload.github.com/owner/repo/legacy.zip/refs/heads/main?token=\(hidden)")
+    }
+
+    @Test("A GitHub token in an Authorization header of the form “token …” keeps only the word")
+    func gitHubTokenHeader() {
+        let headers = Redaction.headers(["Authorization": "token ghp_16C7e42F292c6912E7710c838347Ae178B4a"])
+        #expect(headers.first?.value == "token \(hidden)")
+    }
+
+    @Test("GitHub tokens are hidden anywhere in free text, by their prefix",
+          arguments: ["ghp_", "gho_", "ghu_", "ghs_", "ghr_", "github_pat_"])
+    func gitHubTokensInText(prefix: String) throws {
+        let token = prefix + "11ABCDEFG0123456789_abcdefghijklmnopqrstuvwxyz"
+        let text = Redaction.text("Request failed; token was \(token). Retry with (\(token))")
+        #expect(text == "Request failed; token was \(hidden). Retry with (\(hidden))")
+        // also inside an error answer, as the recorder cleans it
+        let body = try #require(Redaction.body(Data(#"{"message":"Bad credentials \#(token)"}"#.utf8)))
+        #expect(!Redaction.text(body).contains(token))
+        // a word that merely contains the prefix stays
+        #expect(Redaction.text("high_ghp_value") == "high_ghp_value")
+    }
+
     @Test("Strict form encoding keeps + & = and quotes from changing a request")
     func formEncoding() {
         #expect(FormEncoding.encode("s3cr3t+with&specials=") == "s3cr3t%2Bwith%26specials%3D")
