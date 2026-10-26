@@ -1,5 +1,54 @@
 # Changelog
 
+## 0.10.0 (2026-10-26)
+Step 9: Apple Business Manager and Apple School Manager, for Checkpoint (the
+only app that uses them). Additions, and three safeguards for every app.
+- `ABM` (`ABM/`): the two services (`ABM.Service`: address, sign-in scope,
+  Release in Business only, the names in messages), serial numbers checked
+  before they go into an address or a query (letters and digits; lowercase
+  made uppercase).
+- `ABM.TokenProvider`: the private-key sign-in (OAuth client credentials with
+  an ES256-signed client assertion, 20 minutes, a new one each sign-in), the
+  key read at each sign-in and kept nowhere, renewal 60 s before expiry, one
+  shared sign-in, the EC-labelled PKCS#8 key from Apple School Manager. A
+  refused sign-in shows only Apple's `error` and `error_description`.
+- `ABM.Client` on `HTTPClient`: device, AppleCare coverage, Activation Lock
+  (Apple's documented server error is no answer), assigned server, servers,
+  the organization snapshot, built-in management devices and details, audit
+  events. Lists follow `links.next` only on Apple's own address; an answer
+  without `data` is an error, and so is reaching 1,000 pages. In a snapshot,
+  a server whose list can't be read is skipped with a warning and the devices
+  that may be on it get an unknown assignment (`Snapshot.unknownAssignments`).
+- `ABM.Error`: the shared format (status line, `CODE: title — detail`,
+  Apple's Error ID, the app's hints, then the standard ones).
+- Typed, tolerant records: `OrgDevice`, `AppleCareCoverage`, `ActivationLock`,
+  `MDMServer`, `ManagedDevice`, `ManagedDeviceDetail`, `AuditEvent`,
+  `Snapshot`.
+- The six writes (`ABM.ActivityType`, `ABM.Activity`) beside `MDMCommand`,
+  with its `Confirmation`: every dialog names the organization; Release,
+  Assign with Migration Deadline and Update Migration Deadline ask for the
+  number from two devices; Release and Cancel Migration are red; Update
+  Migration Deadline warns when the deadline is earlier. Checked before
+  sending (Release in School, a missing server or deadline, more than 90
+  days). Never repeated after a server error or a dropped connection, only
+  after a 429. `watch`/`perform` follow Apple's job for up to 2 minutes and
+  read its outcome (`ActivityOutcome`) from Apple's documented values.
+- `HTTPClient`: `rateLimit` (at most N requests in a rolling window, every
+  attempt counted; waits logged, Cancel stops them), `RetryRules.fixedWaits`
+  and `everyNetworkErrorIsADrop` (`RetryRules.appleBusiness`: 5, 15, 45 s),
+  `HTTPRequest.serverErrorIsAnAnswer`.
+- `MDMCommand.Confirmation` gains `asksNumber`; Action entries can carry a
+  warning (`isWarning`).
+- **Every app:** the token a client sent is taken out of an error answer, the
+  error message and the log wherever it appears (`RequestRecorder.send`'s
+  `knownSecrets`, `Redaction.removing`); free text loses PEM private keys
+  (also cut short) and signed tokens (JWTs, recognised only by their `eyJ`
+  start); Apple's signed download address (`downloadUrl`, `Signature=`) is
+  hidden; Apple's sign-in is a sensitive call (only method, path, status and
+  duration recorded). Found by Checkpoint's tests: a sign-in error repeating
+  the signed request, or an API error repeating the token, reached the log,
+  the bug-report export and the message.
+
 ## 0.9.1 (2026-10-26)
 Step 8 for Checkpoint: Intune devices and commands. Additions; one label change.
 - `IntuneManagedDevice` (`Intune/IntuneDevices.swift`): a typed, tolerant

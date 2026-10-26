@@ -20,6 +20,9 @@ public nonisolated enum Redaction {
         "pin", "unlockToken", "escrowToken",
         // Azure Storage upload addresses (SAS) carry their signature here
         "sig",
+        // Apple's signed download addresses (an activity's CSV, step 9): the
+        // whole address is a temporary credential, its signature the secret
+        "signature", "downloadUrl",
     ].map { $0.lowercased() })
 
     /// Keys whose whole value is replaced as one block: personal information
@@ -102,7 +105,9 @@ public nonisolated enum Redaction {
 
     /// Free text (an error message, an XML document, a log line) with secrets
     /// hidden: `Bearer …` and `Basic …` credentials, GitHub tokens (`ghp_`,
-    /// `gho_`, `ghu_`, `ghs_`, `ghr_`, `github_pat_`) wherever they appear,
+    /// `gho_`, `ghu_`, `ghs_`, `ghr_`, `github_pat_`), signed tokens (JWTs,
+    /// recognised only by their `eyJ` start, so ordinary text is left alone)
+    /// and PEM private keys, also cut short, wherever they appear,
     /// `"key": "value"` pairs, `key=value` pairs and `<key>value</key>`
     /// elements for every secret key.
     public static func text(_ text: String) -> String {
@@ -112,6 +117,24 @@ public nonisolated enum Redaction {
             result = regex.stringByReplacingMatches(in: result, range: range, withTemplate: template)
         }
         return result
+    }
+
+    /// Exact values the caller knows are secret (a token it sent), replaced
+    /// wherever they appear, also percent-encoded. Longest first, so a value
+    /// containing another goes whole.
+    public static func removing(_ secrets: [String], from text: String) -> String {
+        var result = text
+        for secret in usableKnownSecrets(secrets) {
+            result = result.replacingOccurrences(of: secret, with: placeholder)
+            let encoded = FormEncoding.encode(secret)
+            if encoded != secret { result = result.replacingOccurrences(of: encoded, with: placeholder) }
+        }
+        return result
+    }
+
+    /// Known secrets worth looking for: 8 characters or more, longest first.
+    static func usableKnownSecrets(_ secrets: [String]) -> [String] {
+        Array(Set(secrets.filter { $0.count >= 8 })).sorted { $0.count > $1.count }
     }
 
     /// `a=1&client_secret=x` with secret field values hidden. Names are
@@ -163,6 +186,13 @@ public nonisolated enum Redaction {
             (#"((?:Bearer|Basic)\s+)[A-Za-z0-9\-._~+/]+=*"#, "$1\(placeholder)"),
             // GitHub tokens are recognisable by their prefix alone
             (#"(?<![A-Za-z0-9_])(?:gh[pousr]_|github_pat_)[A-Za-z0-9_]+"#, placeholder),
+            // A PEM private key, whole or cut short (Apple Business and School
+            // Manager's key, step 9); JSON writes its line breaks as \n
+            (#"-----BEGIN ([A-Z ]*)PRIVATE KEY-----(?:[\s\S]*?-----END \1PRIVATE KEY-----|[A-Za-z0-9+/=\s\\]*)"#, placeholder),
+            // A signed token (JWT) or what is left of one: its header and
+            // payload are base64url JSON, so they start with "eyJ" (matched
+            // case-sensitively); the parts after it go too
+            (#"(?<![A-Za-z0-9_-])(?-i:eyJ)[A-Za-z0-9_-]{10,}(?:\.[A-Za-z0-9_-]*){0,2}"#, placeholder),
         ]
         return specs.compactMap { pattern, template in
             (try? NSRegularExpression(pattern: pattern, options: [.caseInsensitive])).map { ($0, template) }

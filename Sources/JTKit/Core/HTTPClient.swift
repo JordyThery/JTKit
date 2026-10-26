@@ -43,6 +43,10 @@ public nonisolated struct HTTPRequest: Sendable {
     /// means that attempt did it, so it counts as done. The answer then has
     /// status 404. A 404 on the first attempt is still an error.
     public var notFoundAfterRepeatIsDone: Bool
+    /// A server error (5xx) is this request's answer: returned at once, not
+    /// retried or thrown. For a read whose server error is documented as a
+    /// state, e.g. Apple's Activation Lock for a device in an internal state.
+    public var serverErrorIsAnAnswer: Bool
 
     public init(
         method: String = "GET",
@@ -57,7 +61,8 @@ public nonisolated struct HTTPRequest: Sendable {
         recordedJSON: RecordedJSONFilter? = nil,
         withholdsContents: Bool = false,
         encodedQuery: String? = nil,
-        notFoundAfterRepeatIsDone: Bool = false
+        notFoundAfterRepeatIsDone: Bool = false,
+        serverErrorIsAnAnswer: Bool = false
     ) {
         self.method = method
         self.path = path
@@ -72,6 +77,7 @@ public nonisolated struct HTTPRequest: Sendable {
         self.withholdsContents = withholdsContents
         self.encodedQuery = encodedQuery
         self.notFoundAfterRepeatIsDone = notFoundAfterRepeatIsDone
+        self.serverErrorIsAnAnswer = serverErrorIsAnAnswer
     }
 
     /// GET and HEAD.
@@ -170,14 +176,30 @@ public nonisolated struct RetryRules: Sendable, Hashable {
     public var firstWait: TimeInterval
     public var randomness: TimeInterval
     public var longestWait: TimeInterval
+    /// Waits after attempt 1, 2, … used instead of doubling (the last one
+    /// repeats); `Retry-After` still comes first. Nil: doubling.
+    public var fixedWaits: [TimeInterval]?
+    /// Every network error counts as a short drop worth another try (for
+    /// reads and edits safe to repeat), not only the usual few: Apple
+    /// Business and School Manager answer their limit by dropping the
+    /// connection, in more than one way.
+    public var everyNetworkErrorIsADrop: Bool
 
     public static let standard = RetryRules()
 
-    public init(maxAttempts: Int = 4, firstWait: TimeInterval = 1, randomness: TimeInterval = 0.5, longestWait: TimeInterval = 120) {
+    /// Apple Business and School Manager (step 9, decided by Jordy): 5, 15
+    /// and 45 s, because once Apple's quota is spent it stays quiet for a
+    /// while and a short retry only spends another request.
+    public static let appleBusiness = RetryRules(fixedWaits: [5, 15, 45], everyNetworkErrorIsADrop: true)
+
+    public init(maxAttempts: Int = 4, firstWait: TimeInterval = 1, randomness: TimeInterval = 0.5, longestWait: TimeInterval = 120,
+                fixedWaits: [TimeInterval]? = nil, everyNetworkErrorIsADrop: Bool = false) {
         self.maxAttempts = maxAttempts
         self.firstWait = firstWait
         self.randomness = randomness
         self.longestWait = longestWait
+        self.fixedWaits = fixedWaits
+        self.everyNetworkErrorIsADrop = everyNetworkErrorIsADrop
     }
 
     /// Short network drops worth another try.
@@ -188,6 +210,10 @@ public nonisolated struct RetryRules: Sendable, Hashable {
     /// The wait after a failed attempt (1, 2, …) without `Retry-After`.
     /// - Parameter random: between 0 and 1.
     public func backoff(afterAttempt attempt: Int, random: Double) -> TimeInterval {
+        if let fixedWaits, let last = fixedWaits.last {
+            let index = min(max(attempt, 1) - 1, fixedWaits.count - 1)
+            return min(fixedWaits.indices.contains(index) ? fixedWaits[index] : last, longestWait)
+        }
         let doubled = firstWait * pow(2, Double(max(attempt, 1) - 1))
         return min(doubled + random * randomness, longestWait)
     }
@@ -209,6 +235,23 @@ public nonisolated struct RetryRules: Sendable, Hashable {
             }
         }
         return nil
+    }
+}
+
+/// At most so many requests in any rolling window, every attempt counted
+/// (Apple Business and School Manager: 18 a minute per organization). A
+/// request that would go over waits, written to the activity log; Cancel
+/// stops the wait.
+public nonisolated struct RateLimit: Sendable, Hashable {
+    public var requests: Int
+    public var window: TimeInterval
+    /// Shown in the log before the wait, e.g. "Apple allows about 20 requests a minute".
+    public var explanation: String
+
+    public init(requests: Int, per window: TimeInterval, explanation: String) {
+        self.requests = max(requests, 1)
+        self.window = window
+        self.explanation = explanation
     }
 }
 
@@ -260,6 +303,9 @@ public actor HTTPClient {
     private let redirects: RedirectRule
     private let writeSpacing: Duration
     private let maxConcurrent: Int?
+    private let rateLimit: RateLimit?
+    /// When the requests in the current window started, oldest first.
+    private var recentRequests: [Date] = []
     private var inProgress = 0
     private var waitingTurns: [CheckedContinuation<Void, Never>] = []
     private let rules: RetryRules
@@ -281,6 +327,8 @@ public actor HTTPClient {
     ///   - maxConcurrent: at most this many requests at a time (Microsoft
     ///     Graph: 4); the others wait in order. A request keeps its turn while
     ///     it waits to be retried. Nil: no limit.
+    ///   - rateLimit: at most so many requests in a rolling window (Apple
+    ///     Business and School Manager). Nil: no limit.
     ///   - sleep, random, now: injectable for tests.
     public init(
         baseURL: URL,
@@ -292,6 +340,7 @@ public actor HTTPClient {
         redirects: RedirectRule = .follow,
         writeSpacing: Duration = .zero,
         maxConcurrent: Int? = nil,
+        rateLimit: RateLimit? = nil,
         rules: RetryRules = .standard,
         sleep: @escaping @Sendable (Duration) async throws -> Void = { try await Task.sleep(for: $0) },
         random: @escaping @Sendable () -> Double = { Double.random(in: 0...1) },
@@ -306,6 +355,7 @@ public actor HTTPClient {
         self.redirects = redirects
         self.writeSpacing = writeSpacing
         self.maxConcurrent = maxConcurrent.map { max($0, 1) }
+        self.rateLimit = rateLimit
         self.rules = rules
         self.sleep = sleep
         self.random = random
@@ -341,7 +391,8 @@ public actor HTTPClient {
         try await send(HTTPRequest(path: path, query: query)).decoded(type)
     }
 
-    /// Sends the request, retrying by the rules. Returns only a 2xx answer.
+    /// Sends the request, retrying by the rules. Returns only a 2xx answer
+    /// (and a 5xx for `serverErrorIsAnAnswer`).
     ///
     /// - Throws: `HTTPError`, `CancellationError`, or the token source's error.
     public func send(_ request: HTTPRequest) async throws -> HTTPResponse {
@@ -366,27 +417,37 @@ public actor HTTPClient {
             attempt += 1
             try Task.checkCancellation()
             if !request.isRead { try await spaceWrite() }
-            var urlRequest = try await makeURLRequest(request, url: url)
+            let made = try await makeURLRequest(request, url: url)
+            var urlRequest = made.request
+            let token = made.token
             urlRequest.httpMethod = request.method.uppercased()
+            try await reserveSlot(for: request)
+            let knownSecrets = token.map { [$0] } ?? []
 
             let data: Data
             let http: HTTPURLResponse
             do {
                 (data, http) = try await recorder.send(urlRequest, attempt: attempt, of: rules.maxAttempts,
                                                        recordsBodies: request.recordsBodies, recordedJSON: request.recordedJSON,
-                                                       redirects: redirects, withholdsContents: request.withholdsContents)
+                                                       redirects: redirects, withholdsContents: request.withholdsContents,
+                                                       knownSecrets: knownSecrets)
             } catch let error as URLError {
-                if RetryRules.networkDrops.contains(error.code) && repeatable && attempt < rules.maxAttempts {
+                let isDrop = rules.everyNetworkErrorIsADrop || RetryRules.networkDrops.contains(error.code)
+                if isDrop && repeatable && attempt < rules.maxAttempts {
                     mayHaveBeenDone = true
                     try await wait(rules.backoff(afterAttempt: attempt, random: random()),
                                    reason: "Network error", request: request, nextAttempt: attempt + 1)
                     continue
                 }
                 throw HTTPError.transport(method: request.method, path: request.path, code: error.code,
-                                          message: Redaction.text(error.localizedDescription))
+                                          message: Redaction.removing(knownSecrets, from: Redaction.text(error.localizedDescription)))
             }
 
-            let response = HTTPResponse(status: http.statusCode, headers: Self.headers(of: http), data: data)
+            // an error answer can repeat the token; it is shown and kept, so
+            // the token goes first (a success is returned as it came)
+            let isError = !(200..<300).contains(http.statusCode)
+            let response = HTTPResponse(status: http.statusCode, headers: Self.headers(of: http),
+                                        data: isError ? Self.removing(knownSecrets, from: data) : data)
             switch http.statusCode {
             case 200..<300:
                 return response
@@ -396,6 +457,8 @@ public actor HTTPClient {
                 await recorder.note(request.method, request.path,
                                     note: "HTTP 401: signing in again, attempt \(attempt + 1) of \(rules.maxAttempts).",
                                     category: "Retry", isWarning: true)
+            case 500..<600 where request.serverErrorIsAnAnswer:
+                return response
             case 404 where request.notFoundAfterRepeatIsDone && mayHaveBeenDone:
                 await recorder.note(request.method, request.path,
                                     note: "HTTP 404 after a repeat: an earlier attempt already did it.",
@@ -428,7 +491,8 @@ public actor HTTPClient {
         }
     }
 
-    private func makeURLRequest(_ request: HTTPRequest, url: URL) async throws -> URLRequest {
+    /// The request, and the token it carries.
+    private func makeURLRequest(_ request: HTTPRequest, url: URL) async throws -> (request: URLRequest, token: String?) {
         var urlRequest = URLRequest(url: url)
         urlRequest.httpBody = request.body
         for (name, value) in headers.merging(request.headers, uniquingKeysWith: { $1 }) {
@@ -440,10 +504,43 @@ public actor HTTPClient {
             urlRequest.setValue(request.contentType ?? (isClassic ? "application/xml" : "application/json"),
                                 forHTTPHeaderField: "Content-Type")
         }
+        var token: String?
         if let tokens {
-            urlRequest.setValue("Bearer \(try await tokens.token())", forHTTPHeaderField: "Authorization")
+            token = try await tokens.token()
+            urlRequest.setValue("Bearer \(token ?? "")", forHTTPHeaderField: "Authorization")
         }
-        return urlRequest
+        return (urlRequest, token)
+    }
+
+    /// Waits until another request fits in the rate limit's window. The
+    /// slot is taken before anything is sent, so simultaneous requests queue.
+    private func reserveSlot(for request: HTTPRequest) async throws {
+        guard let rateLimit else { return }
+        while true {
+            let current = now()
+            recentRequests.removeAll { current.timeIntervalSince($0) >= rateLimit.window }
+            guard recentRequests.count >= rateLimit.requests, let oldest = recentRequests.first else {
+                recentRequests.append(current)
+                return
+            }
+            let delay = max(rateLimit.window - current.timeIntervalSince(oldest), 0) + 0.1
+            await recorder.note(request.method, request.path,
+                                note: "\(rateLimit.explanation): waiting \(Int(delay.rounded(.up))) s.",
+                                category: "Retry", isWarning: true)
+            do {
+                try await sleep(.milliseconds(Int((delay * 1000).rounded())))
+            } catch {
+                await recorder.note(request.method, request.path, note: "Cancelled while waiting.", category: "Retry")
+                throw CancellationError()
+            }
+        }
+    }
+
+    /// The data with each known secret replaced, when it is text.
+    private static func removing(_ secrets: [String], from data: Data) -> Data {
+        guard !secrets.isEmpty, let text = String(data: data, encoding: .utf8) else { return data }
+        let cleaned = Redaction.removing(secrets, from: text)
+        return cleaned == text ? data : Data(cleaned.utf8)
     }
 
     /// Waits before the next attempt, written to the log first. Cancelling
