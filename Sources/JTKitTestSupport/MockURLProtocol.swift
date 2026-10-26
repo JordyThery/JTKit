@@ -43,7 +43,9 @@ public struct MockResponse: Sendable {
 
 /// Routes every request on a session to a test-provided handler.
 ///
-/// The handler is global, so test suites that use it must be `.serialized`.
+/// `install` sets one global handler, so test suites that use it must be
+/// `.serialized`. A `MockServer` has a handler of its own, so tests that each
+/// use their own server can run at the same time.
 public final class MockURLProtocol: URLProtocol, @unchecked Sendable {
     public typealias Handler = @Sendable (RecordedRequest) throws -> MockResponse
 
@@ -72,15 +74,23 @@ public final class MockURLProtocol: URLProtocol, @unchecked Sendable {
     override public class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
 
     override public func startLoading() {
+        let serverID = request.value(forHTTPHeaderField: MockServer.header)
+        var headers = request.allHTTPHeaderFields ?? [:]
+        headers = headers.filter { $0.key.caseInsensitiveCompare(MockServer.header) != .orderedSame }
         let recordedRequest = RecordedRequest(
             method: request.httpMethod ?? "GET",
             url: request.url!,
-            headers: request.allHTTPHeaderFields ?? [:],
+            headers: headers,
             body: request.httpBody ?? Self.readStream(request.httpBodyStream)
         )
-        let handler = Self.lock.withLock { () -> Handler? in
-            Self.recorded.append(recordedRequest)
-            return Self.handler
+        let handler: Handler?
+        if let serverID {
+            handler = MockServer.route(serverID, recordedRequest)
+        } else {
+            handler = Self.lock.withLock { () -> Handler? in
+                Self.recorded.append(recordedRequest)
+                return Self.handler
+            }
         }
 
         do {
@@ -111,5 +121,58 @@ public final class MockURLProtocol: URLProtocol, @unchecked Sendable {
             data.append(buffer, count: count)
         }
         return data
+    }
+}
+
+/// A fake server for one session, with its own handler and its own list of
+/// requests, so tests that use different servers can run at the same time.
+///
+/// ```swift
+/// let server = MockServer { request in .json(200, "{}") }
+/// let client = HTTPClient(…, recorder: RequestRecorder(session: server.session, log: nil))
+/// #expect(server.requests.count == 1)
+/// ```
+public final class MockServer: @unchecked Sendable {
+    static let header = "X-JTKit-Mock-Server"
+
+    private static let lock = NSLock()
+    nonisolated(unsafe) private static var servers: [String: MockServer] = [:]
+
+    private let id = UUID().uuidString
+    private let lock = NSLock()
+    private var handler: MockURLProtocol.Handler
+    private var recorded: [RecordedRequest] = []
+    public let session: URLSession
+
+    public init(_ handler: @escaping MockURLProtocol.Handler) {
+        self.handler = handler
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [MockURLProtocol.self]
+        configuration.httpAdditionalHeaders = [Self.header: id]
+        session = URLSession(configuration: configuration)
+        Self.lock.withLock { Self.servers[id] = self }
+    }
+
+    /// Replaces the handler, e.g. for the second half of a test.
+    public func respond(_ handler: @escaping MockURLProtocol.Handler) {
+        lock.withLock { self.handler = handler }
+    }
+
+    /// Every request received, oldest first.
+    public var requests: [RecordedRequest] {
+        lock.withLock { recorded }
+    }
+
+    /// Stops routing to this server; later requests fail.
+    public func shutDown() {
+        Self.lock.withLock { _ = Self.servers.removeValue(forKey: id) }
+    }
+
+    static func route(_ id: String, _ request: RecordedRequest) -> MockURLProtocol.Handler? {
+        guard let server = lock.withLock({ servers[id] }) else { return nil }
+        return server.lock.withLock {
+            server.recorded.append(request)
+            return server.handler
+        }
     }
 }

@@ -26,6 +26,17 @@ public final class InMemorySecretStore: SecretStore, @unchecked Sendable {
         lock.withLock { secrets[account] }
     }
 
+    /// Like `KeychainSecretStore.deleteSecrets(withAccountPrefix:)`.
+    @discardableResult
+    public func deleteSecrets(withAccountPrefix prefix: String) -> Bool {
+        guard !prefix.isEmpty else { return false }
+        return lock.withLock {
+            guard !refuses else { return false }
+            secrets = secrets.filter { !$0.key.hasPrefix(prefix) }
+            return true
+        }
+    }
+
     @discardableResult
     public func setSecret(_ secret: String?, for account: String) -> Bool {
         lock.withLock {

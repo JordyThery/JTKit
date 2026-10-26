@@ -105,6 +105,31 @@ public nonisolated struct KeychainSecretStore: SecretStore {
         return status == errSecSuccess
     }
 
+    /// Deletes every item of this service whose account starts with `prefix`,
+    /// e.g. all of one tenant's block settings (`<UUID>.`). An empty prefix
+    /// deletes nothing. Returns false when a lookup or a delete failed.
+    @discardableResult
+    public func deleteSecrets(withAccountPrefix prefix: String) -> Bool {
+        guard !prefix.isEmpty else { return false }
+        let query: [String: Any] = [kSecClass as String: kSecClassGenericPassword,
+                                    kSecAttrService as String: service,
+                                    kSecMatchLimit as String: kSecMatchLimitAll,
+                                    kSecReturnAttributes as String: true]
+        var items: CFTypeRef?
+        let status = SecItemCopyMatching(query as CFDictionary, &items)
+        if status == errSecItemNotFound { return true }
+        guard status == errSecSuccess, let found = items as? [[String: Any]] else {
+            log?("[Keychain] lookup for prefix \(prefix) failed: \(status)")
+            return false
+        }
+        var succeeded = true
+        for attributes in found {
+            guard let account = attributes[kSecAttrAccount as String] as? String, account.hasPrefix(prefix) else { continue }
+            succeeded = setSecret(nil, for: account) && succeeded
+        }
+        return succeeded
+    }
+
     private func baseQuery(account: String, dataProtection: Bool = false) -> [String: Any] {
         var query: [String: Any] = [kSecClass as String: kSecClassGenericPassword,
                                     kSecAttrService as String: service,

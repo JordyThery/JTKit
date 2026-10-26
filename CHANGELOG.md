@@ -1,5 +1,46 @@
 # Changelog
 
+## 0.6.0 (2026-10-26)
+ROADMAP step 5: Jamf sign-in, HTTP basics and the shared activity log, first
+adopted by Profile2Blueprint. Additions only; apps that don't use them work as
+before (Jamf Deployer and Intune Deployer get the new window look when they
+next update).
+- `Core/`: `RequestRecorder` sends one request, times it, redacts it and adds
+  an entry to the activity log. Request bodies are never recorded, response
+  bodies only for errors, unless a request is marked safe (`recordsBodies`).
+  Bodies over 256 KB aren't recorded; text is cut at 20,000 characters.
+  Sensitive Jamf calls (unlock token, erase, FileVault key, lock PIN, Recovery
+  Lock and LAPS passwords) record only method, path, status and duration.
+- `Core/`: `HTTPClient` on top of it: bearer token, the app's headers, the
+  app's list of allowed requests (paths with `..` or encoded slashes always
+  refused), redirect rules, write spacing, Jamf Pro direct path mapping.
+  `RetryRules`, the same in every app: at most 4 attempts; 429 for every
+  method; server errors and network drops for reads and edits marked safe to
+  repeat; `Retry-After` in seconds or as an HTTP date; doubling waits with a
+  little randomness; no wait over 120 s; one new sign-in after a 401. Each
+  wait is logged and cancelling stops it at once.
+- `Jamf/`: `JamfTokenProvider`: API client (Platform API and Jamf Pro) and
+  username/password, both token formats, renewed 60 s before expiry, one
+  shared sign-in, made from a `Connection` (`Connection.jamfBaseURL`).
+- `Core/`: `Redaction` (headers, forms, JSON at any depth, XML elements, free
+  text, query parameters, error messages) and `FormEncoding`.
+- `Core/`: `IdentifierMasker`: serials, UDIDs, IMEI/MEID/EID, MAC and IP
+  addresses, emails, usernames, full names and device names, replaced with
+  stable placeholders in the bug-report export.
+- `Core/`: `ActivityLogEntry` gains `isWarning`, `service`, `connection`,
+  `request` (`ActivityRequestDetails`) and `identifiers`. `ActivityLogWindow`
+  (⇧⌘L) with search, Problems Only, a detail pane, Clear, "Export for Bug
+  Report…" and "Export Unmasked…" (`ActivityLogExport`, with app and macOS
+  versions), also in the menu bar; ⌘C copies an entry. Failed statuses show a
+  failure symbol, warnings a warning symbol.
+- `AppShell/`: `ConnectionPicker`, `ConnectionMenuItems` and
+  `ConnectionCommands` take the app's own items below the connections
+  (`extraItems`); the picker takes a `label` shown instead of the connection.
+- `Core/`: `KeychainSecretStore.deleteSecrets(withAccountPrefix:)` (also in
+  `InMemorySecretStore`).
+- `JTKitTestSupport`: `MockServer`, a fake server per session, so tests using
+  different servers can run at the same time.
+
 ## 0.5.5 (2026-10-25)
 From adopting ROADMAP step 4 in Intune Deployer. Additions only; apps that
 don't use them work as before.
