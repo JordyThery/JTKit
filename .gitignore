@@ -1,6 +1,14 @@
 .DS_Store
 /.build
-/.swiftpm
+/.swiftpm/*
+# except the shared JTKit scheme, so ⌘U runs JTKitTests and JTKitMSALTests on any Mac
+!/.swiftpm/xcode/
+/.swiftpm/xcode/*
+!/.swiftpm/xcode/xcshareddata/
+/.swiftpm/xcode/xcshareddata/*
+!/.swiftpm/xcode/xcshareddata/xcschemes/
+/.swiftpm/xcode/xcshareddata/xcschemes/*
+!/.swiftpm/xcode/xcshareddata/xcschemes/JTKit.xcscheme
 /Packages
 xcuserdata/
 DerivedData/

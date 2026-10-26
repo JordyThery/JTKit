@@ -33,6 +33,16 @@ public nonisolated struct HTTPRequest: Sendable {
     /// answer's. For requests whose contents the app knows can carry a
     /// secret, e.g. licence serial numbers.
     public var withholdsContents: Bool
+    /// A query that is already percent-encoded, sent as given (after `query`):
+    /// for query syntax that strict encoding would change, such as Microsoft
+    /// Graph's `$select` and `$filter`, and next-page links. It must be
+    /// correctly encoded, or the request isn't sent.
+    public var encodedQuery: String?
+    /// For a delete that is safe to repeat: a 404 after an earlier attempt
+    /// may have reached the server (a server error or a dropped connection)
+    /// means that attempt did it, so it counts as done. The answer then has
+    /// status 404. A 404 on the first attempt is still an error.
+    public var notFoundAfterRepeatIsDone: Bool
 
     public init(
         method: String = "GET",
@@ -45,7 +55,9 @@ public nonisolated struct HTTPRequest: Sendable {
         safeToRepeat: Bool = false,
         recordsBodies: Bool = false,
         recordedJSON: RecordedJSONFilter? = nil,
-        withholdsContents: Bool = false
+        withholdsContents: Bool = false,
+        encodedQuery: String? = nil,
+        notFoundAfterRepeatIsDone: Bool = false
     ) {
         self.method = method
         self.path = path
@@ -58,6 +70,8 @@ public nonisolated struct HTTPRequest: Sendable {
         self.recordsBodies = recordsBodies
         self.recordedJSON = recordedJSON
         self.withholdsContents = withholdsContents
+        self.encodedQuery = encodedQuery
+        self.notFoundAfterRepeatIsDone = notFoundAfterRepeatIsDone
     }
 
     /// GET and HEAD.
@@ -245,6 +259,9 @@ public actor HTTPClient {
     private nonisolated let pathMapping: PathMapping
     private let redirects: RedirectRule
     private let writeSpacing: Duration
+    private let maxConcurrent: Int?
+    private var inProgress = 0
+    private var waitingTurns: [CheckedContinuation<Void, Never>] = []
     private let rules: RetryRules
     private let sleep: @Sendable (Duration) async throws -> Void
     private let random: @Sendable () -> Double
@@ -261,6 +278,9 @@ public actor HTTPClient {
     ///   - pathMapping: `.jamfProDirect` for Jamf Pro without the gateway.
     ///   - redirects: what to do when the server redirects.
     ///   - writeSpacing: the shortest time between the start of two writes.
+    ///   - maxConcurrent: at most this many requests at a time (Microsoft
+    ///     Graph: 4); the others wait in order. A request keeps its turn while
+    ///     it waits to be retried. Nil: no limit.
     ///   - sleep, random, now: injectable for tests.
     public init(
         baseURL: URL,
@@ -271,6 +291,7 @@ public actor HTTPClient {
         pathMapping: PathMapping = .none,
         redirects: RedirectRule = .follow,
         writeSpacing: Duration = .zero,
+        maxConcurrent: Int? = nil,
         rules: RetryRules = .standard,
         sleep: @escaping @Sendable (Duration) async throws -> Void = { try await Task.sleep(for: $0) },
         random: @escaping @Sendable () -> Double = { Double.random(in: 0...1) },
@@ -284,6 +305,7 @@ public actor HTTPClient {
         self.pathMapping = pathMapping
         self.redirects = redirects
         self.writeSpacing = writeSpacing
+        self.maxConcurrent = maxConcurrent.map { max($0, 1) }
         self.rules = rules
         self.sleep = sleep
         self.random = random
@@ -299,8 +321,15 @@ public actor HTTPClient {
         var basePath = components.percentEncodedPath
         while basePath.hasSuffix("/") { basePath.removeLast() }
         components.percentEncodedPath = basePath + "/" + path
-        if !request.query.isEmpty {
-            components.percentEncodedQuery = FormEncoding.encode(request.query)
+        var queries = request.query.isEmpty ? [] : [FormEncoding.encode(request.query)]
+        if let encoded = request.encodedQuery, !encoded.isEmpty {
+            guard Self.isEncodedQuery(encoded) else {
+                throw HTTPError.invalidURL("The query of \(request.path) is not correctly encoded.")
+            }
+            queries.append(encoded)
+        }
+        if !queries.isEmpty {
+            components.percentEncodedQuery = queries.joined(separator: "&")
         }
         guard let url = components.url else {
             throw HTTPError.invalidURL("Could not build an address for \(request.path).")
@@ -326,6 +355,12 @@ public actor HTTPClient {
         let repeatable = request.isRead || request.safeToRepeat
         var attempt = 0
         var renewedToken = false
+        // an earlier attempt may have been carried out: a server error or a
+        // dropped connection, not a 429 or 401 (nothing was done)
+        var mayHaveBeenDone = false
+
+        await takeTurn()
+        defer { finishTurn() }
 
         while true {
             attempt += 1
@@ -342,6 +377,7 @@ public actor HTTPClient {
                                                        redirects: redirects, withholdsContents: request.withholdsContents)
             } catch let error as URLError {
                 if RetryRules.networkDrops.contains(error.code) && repeatable && attempt < rules.maxAttempts {
+                    mayHaveBeenDone = true
                     try await wait(rules.backoff(afterAttempt: attempt, random: random()),
                                    reason: "Network error", request: request, nextAttempt: attempt + 1)
                     continue
@@ -360,8 +396,14 @@ public actor HTTPClient {
                 await recorder.note(request.method, request.path,
                                     note: "HTTP 401: signing in again, attempt \(attempt + 1) of \(rules.maxAttempts).",
                                     category: "Retry", isWarning: true)
+            case 404 where request.notFoundAfterRepeatIsDone && mayHaveBeenDone:
+                await recorder.note(request.method, request.path,
+                                    note: "HTTP 404 after a repeat: an earlier attempt already did it.",
+                                    category: "Retry")
+                return response
             case 429 where attempt < rules.maxAttempts,
                  500..<600 where repeatable && attempt < rules.maxAttempts:
+                if http.statusCode != 429 { mayHaveBeenDone = true }
                 let delay = RetryRules.retryAfter(response.header("Retry-After"), now: now())
                     ?? rules.backoff(afterAttempt: attempt, random: random())
                 try await wait(delay, reason: "HTTP \(http.statusCode)", request: request, nextAttempt: attempt + 1)
@@ -418,6 +460,35 @@ public actor HTTPClient {
             await recorder.note(request.method, request.path, note: "Cancelled while waiting.", category: "Retry")
             throw CancellationError()
         }
+    }
+
+    /// Waits for a turn when the client has a limit; turns are handed out
+    /// in the order they were asked for.
+    private func takeTurn() async {
+        guard let maxConcurrent else { return }
+        if inProgress < maxConcurrent {
+            inProgress += 1
+            return
+        }
+        await withCheckedContinuation { waitingTurns.append($0) }
+    }
+
+    /// Hands the turn straight to the next waiting request, if any.
+    private func finishTurn() {
+        guard maxConcurrent != nil else { return }
+        if waitingTurns.isEmpty {
+            inProgress -= 1
+        } else {
+            waitingTurns.removeFirst().resume()
+        }
+    }
+
+    /// Only characters a query may hold, and every `%` starts an escape.
+    private nonisolated static func isEncodedQuery(_ query: String) -> Bool {
+        var allowed = CharacterSet.urlQueryAllowed
+        allowed.insert("%")
+        return query.unicodeScalars.allSatisfy(allowed.contains) && query.removingPercentEncoding != nil
+            && query.firstMatch(of: /%(?![0-9A-Fa-f]{2})/) == nil
     }
 
     private func spaceWrite() async throws {

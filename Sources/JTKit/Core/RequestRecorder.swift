@@ -344,7 +344,9 @@ public typealias RecordedJSONFilter = @Sendable (Any) -> Any
 /// device secret (Checkpoint's unlock token, erase PIN, FileVault recovery
 /// key, lock PIN, Recovery Lock password and LAPS password). Matched on the
 /// path, for Jamf Pro directly (`/api/…`) and through the Platform API
-/// gateway (`/pro/…`).
+/// gateway (`/pro/…`), and on Microsoft Graph (`/v1.0/…`, `/beta/…`): an app
+/// upload's commit (the app's encryption key), FileVault and BitLocker
+/// recovery keys, LAPS passwords.
 public nonisolated enum SensitiveRequests {
     nonisolated(unsafe) private static let patterns: [Regex<Substring>] = [
         /(?i)\/(?:api|pro)\/v\d+\/mobile-devices\/[^\/]+\/detail\/?$/,
@@ -355,6 +357,12 @@ public nonisolated enum SensitiveRequests {
         /(?i)\/(?:api|pro)\/v\d+\/mobile-devices\/[^\/]+\/erase\/?$/,
         // Classic commands can carry a passcode
         /(?i)\/(?:JSSResource|proclassic)\/(?:computercommands|mobiledevicecommands)\//,
+        // Microsoft Graph (step 8): an app upload's commit carries the app's
+        // encryption key; FileVault and BitLocker recovery keys; LAPS passwords
+        /(?i)\/(?:v1\.0|beta)\/deviceAppManagement\/mobileApps\/[^\/]+\/(?:[^\/]+\/)?contentVersions\/[^\/]+\/files\/[^\/]+\/commit\/?$/,
+        /(?i)\/(?:v1\.0|beta)\/deviceManagement\/managedDevices\/[^\/]+\/getFileVaultKey\/?$/,
+        /(?i)\/(?:v1\.0|beta)\/informationProtection\/bitlocker\/recoveryKeys\/[^\/]+\/?$/,
+        /(?i)\/(?:v1\.0|beta)\/(?:directory\/)?deviceLocalCredentials\/[^\/]+\/?$/,
     ]
 
     public static func isSensitive(path: String) -> Bool {
