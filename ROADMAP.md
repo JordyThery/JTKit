@@ -253,7 +253,7 @@ Found during step 5 (2026-10-26); left out of step 5 by Jordy and done next, bef
 ### Step 6: Jamf Platform API (0.7.0)
 - **Source:** JamfMigrator `PlatformClient` (regions, polling, permission probe, gateway errors; tested). Add Blueprint and device-group calls from AppSettings2Blueprint, Blueprint Managed Preferences Editor, Profile2Blueprint and Jamf Deployer.
 - **First app:** AppSettings2Blueprint (decided by Jordy on 2026-10-26: it uses the most of the Blueprint side). **Then:** JamfMigrator, Blueprint Managed Preferences Editor, Profile2Blueprint, Jamf Deployer. Checkpoint and Serial Number Reader adopt in step 7 (see below).
-- **Before step 6:** fix Blueprint Managed Preferences Editor's backup write separately (see "Per app").
+- **Before step 6:** fix Blueprint Managed Preferences Editor's backup write separately (see "Per app"). Done 2026-10-26.
 - **Check by hand:** list Blueprints and device groups; one harmless write on a test tenant.
 
 #### What the apps do today (surveyed 2026-10-26)
@@ -305,6 +305,7 @@ Every app's own region enum goes in favour of JTKit's `JamfRegion`; saved raw va
 **Per app (what stays in the app)**
 - **AppSettings2Blueprint:** declaration encoding and decoding, rules and validation, App Settings component builders (`AppSettingsLocator`), `BlueprintWriter`'s prepare, back up, write, verify and restore, `BackupStore`, CSV, App Store and code-signature lookups, its allow-list, the Jamf School detection (using JTKit's `TENANT_NOT_FOUND`).
 - **Blueprint Managed Preferences Editor:** `ManagedPreferencesLocator`, the Managed Preferences editor, plist model, import and export, its allow-list. **Fixed separately before step 6:** `Blueprints/BackupStore.swift:50` writes with `[.atomic, .withoutOverwriting]`, which Foundation doesn't allow together (AppSettings2Blueprint already fixed its copy); a backup is written before every save and restore.
+  - Done (2026-10-26), checked by hand by Jordy and merged into main: backups are written with `.withoutOverwriting` only, and the Restore list sorts names numerically without ".json", so same-millisecond "-2" … "-10" backups list in the right order (AppSettings2Blueprint's sorting fix). Tests for both, on a temporary folder.
 - **Profile2Blueprint:** the migration (`BlueprintBuilder`, naming, `PlistToJSON`, eligibility and fidelity checks), Classic profiles and `ClassicScopeService`, history, demo servers (step 10), its scope-only allow-list rule, the 30-minute report watch setting.
 - **JamfMigrator:** `ObjectType` registry and transforms (group remapping inside Blueprints), compliance benchmarks (on JTKit's polling), `PreflightReport`, Jamf Pro groups, Classic XML. Blueprints keep going through its general object engine; deploy-and-watch, errors, polling and the probe come from JTKit.
 - **Jamf Deployer:** its preflight check list and snapshot, Day 0, the engine, `ErrorTranslation`, `CreateFailureRecovery`, `TenantClients`.
