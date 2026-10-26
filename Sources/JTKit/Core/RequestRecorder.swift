@@ -18,6 +18,9 @@ import Foundation
 ///   inside the server's message (`client_secret=…`, `Bearer …`) is hidden too;
 /// - for sensitive calls (`SensitiveRequests`), only method, path, status and
 ///   duration;
+/// - secrets the sender knows exactly (`knownSecrets`: the token it sent,
+///   the signed sign-in request) are removed wherever they appear, also
+///   where no pattern would find them, e.g. a token repeated in an error;
 /// - bodies over 256 KB are not recorded; recorded text is cut at 20,000
 ///   characters.
 public nonisolated struct RequestRecorder: Sendable {
@@ -64,6 +67,8 @@ public nonisolated struct RequestRecorder: Sendable {
     ///     upload that the app sums up in one entry of its own.
     ///   - withholdsContents: record it as a sensitive call (see
     ///     `HTTPRequest.withholdsContents`).
+    ///   - knownSecrets: exact values never to record, wherever they appear
+    ///     (values under 8 characters are ignored).
     /// - Throws: `CancellationError` when cancelled, otherwise the session's error.
     public func send(
         _ request: URLRequest,
@@ -74,7 +79,8 @@ public nonisolated struct RequestRecorder: Sendable {
         recordedJSON: RecordedJSONFilter? = nil,
         redirects: RedirectRule = .follow,
         recordsOnlyFailures: Bool = false,
-        withholdsContents: Bool = false
+        withholdsContents: Bool = false,
+        knownSecrets: [String] = []
     ) async throws -> (Data, HTTPURLResponse) {
         let request = request.withDefaultUserAgent()
         let date = Date()
@@ -83,7 +89,7 @@ public nonisolated struct RequestRecorder: Sendable {
         let context = Context(request: request, category: category ?? self.category, date: date,
                               attempt: attempt, maxAttempts: maxAttempts, recordsBodies: recordsBodies,
                               recordedJSON: recordedJSON, recordsOnlyFailures: recordsOnlyFailures,
-                              withholdsContents: withholdsContents)
+                              withholdsContents: withholdsContents, knownSecrets: knownSecrets)
         let data: Data
         let response: URLResponse
         do {
@@ -186,6 +192,7 @@ public nonisolated struct RequestRecorder: Sendable {
         var recordsOnlyFailures = false
         var isDownload = false
         var withholdsContents = false
+        var knownSecrets: [String] = []
     }
 
     private func record(
@@ -203,7 +210,7 @@ public nonisolated struct RequestRecorder: Sendable {
         }
         let entry = Self.entry(context: context, duration: duration, response: response, data: data,
                                error: error, cancelled: cancelled, service: service, connection: connection)
-        await log.append(entry)
+        await log.append(Self.removing(context.knownSecrets, from: entry))
     }
 
     private static func entry(
@@ -305,6 +312,31 @@ public nonisolated struct RequestRecorder: Sendable {
         )
     }
 
+    /// The entry with each known secret replaced by the placeholder in every
+    /// text it holds.
+    static func removing(_ secrets: [String], from entry: ActivityLogEntry) -> ActivityLogEntry {
+        let secrets = Redaction.usableKnownSecrets(secrets)
+        guard !secrets.isEmpty else { return entry }
+        func clean(_ text: String) -> String { Redaction.removing(secrets, from: text) }
+        func clean(_ headers: [HTTPHeader]) -> [HTTPHeader] {
+            headers.map { HTTPHeader(name: $0.name, value: clean($0.value)) }
+        }
+        var entry = entry
+        entry.detail = clean(entry.detail)
+        entry.note = entry.note.map(clean)
+        if var request = entry.request {
+            request.url = clean(request.url)
+            request.requestHeaders = clean(request.requestHeaders)
+            request.responseHeaders = clean(request.responseHeaders)
+            request.requestBody = request.requestBody.map(clean)
+            request.responseBody = request.responseBody.map(clean)
+            request.error = request.error.map(clean)
+            request.bodyNote = request.bodyNote.map(clean)
+            entry.request = request
+        }
+        return entry
+    }
+
     /// The body as the app's filter leaves it, for recording only. Without
     /// a filter, or over the recording limit (not recorded anyway), the body
     /// is left as it is. With a filter, a body that isn't JSON can't be
@@ -346,7 +378,8 @@ public typealias RecordedJSONFilter = @Sendable (Any) -> Any
 /// path, for Jamf Pro directly (`/api/…`) and through the Platform API
 /// gateway (`/pro/…`), and on Microsoft Graph (`/v1.0/…`, `/beta/…`): an app
 /// upload's commit (the app's encryption key), FileVault and BitLocker
-/// recovery keys, LAPS passwords.
+/// recovery keys, LAPS passwords. And Apple's sign-in for Apple Business and
+/// School Manager (the signed request, the token).
 public nonisolated enum SensitiveRequests {
     nonisolated(unsafe) private static let patterns: [Regex<Substring>] = [
         /(?i)\/(?:api|pro)\/v\d+\/mobile-devices\/[^\/]+\/detail\/?$/,
@@ -363,6 +396,9 @@ public nonisolated enum SensitiveRequests {
         /(?i)\/(?:v1\.0|beta)\/deviceManagement\/managedDevices\/[^\/]+\/getFileVaultKey\/?$/,
         /(?i)\/(?:v1\.0|beta)\/informationProtection\/bitlocker\/recoveryKeys\/[^\/]+\/?$/,
         /(?i)\/(?:v1\.0|beta)\/(?:directory\/)?deviceLocalCredentials\/[^\/]+\/?$/,
+        // Apple Business and School Manager's sign-in (step 9): the request
+        // carries the signed client assertion, the answer the token
+        /(?i)^\/auth\/oauth2\/v2\/token\/?$/,
     ]
 
     public static func isSensitive(path: String) -> Bool {

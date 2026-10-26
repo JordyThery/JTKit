@@ -407,9 +407,13 @@ extension MDMCommand {
         ///     from two devices.
         ///   - namesConnection: names the connection anyway (Jamf School's
         ///     Move to Trash, decided by Jordy).
+        ///   - asksNumber: asks for the number from two devices, or not,
+        ///     whatever `irreversible` says (Apple's migration deadlines,
+        ///     decided by Jordy). Nil: as `irreversible`.
         public init(action actionTitle: String, subject: String?, count: Int, message: String,
                     irreversible: Bool, namesConnection: Bool = false, connectionName: String?,
-                    needsPIN: Bool = false, explanation: String? = nil, isDestructive: Bool) {
+                    needsPIN: Bool = false, explanation: String? = nil, isDestructive: Bool,
+                    asksNumber: Bool? = nil) {
             let devices = count == 1 ? subject ?? "1 Device" : "\(count) Devices"
             title = "\(actionTitle) — \(devices)"
             self.message = message
@@ -418,7 +422,7 @@ extension MDMCommand {
                 connectionLine = "On “\(connectionName)”."
             }
             self.explanation = explanation
-            typedCount = irreversible && count >= 2 ? count : nil
+            typedCount = (asksNumber ?? irreversible) && count >= 2 ? count : nil
             asksPINTwice = needsPIN
             self.isDestructive = isDestructive
         }

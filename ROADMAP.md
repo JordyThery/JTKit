@@ -465,6 +465,20 @@ Neither reads Graph's request ID (`innerError.request-id`) or sends a `client-re
 - **Rule:** write tests for its current behaviour first, then move it.
 - **First app:** Checkpoint.
 - **Check by hand:** look up devices in ABM and ASM.
+- **Later:** Serial Number Reader could show ABM status and AppleCare coverage (added by Jordy on 2026-10-26).
+- **Built, waiting for Jordy's check by hand (2026-10-26):** JTKit 0.10.0 (not tagged) and Checkpoint on it, on the `jtkit-abm` branches. JTKit's 479 tests and Checkpoint's 234 pass; all eight apps build. No live check by Claude (decided by Jordy: he tests by hand on the test organisation); the outcome reading follows Apple's documented `status`/`subStatus` values.
+
+#### Decided by Jordy (2026-10-26)
+- **Retries:** Apple keeps its 5, 15 and 45 s waits (`RetryRules.appleBusiness`, `Retry-After` first). A write is never repeated after a server error or a dropped connection, only after a 429. Reads follow JTKit's rules (server errors and drops retried, a 401 gets a new token once).
+- **Limit:** 18 requests in any rolling minute per organization, every attempt counted, the checks after a write too (`HTTPClient`'s new `rateLimit`).
+- **Token:** renewed 60 s before it expires (was 120 s).
+- **Confirmations:** all six writes name the organization; Release, Assign with Migration Deadline and Update Deadline ask for the number from two devices; Release and Cancel Migration are red; Update Deadline warns when the new deadline is earlier than a current one or past.
+- **After a write:** Apple's job is watched for up to 2 minutes (2 s growing to 10 s); the Action entry says Apple's outcome (done, partly failed, failed, stopped: a failure and an error shown; still processing or no answer: a warning). Before, accepting the write was logged as done.
+- **Failed reads** (AppleCare, assigned server, history, built-in management details) show as errors in the inspector, not as "none"; Activation Lock's documented server error stays "no answer".
+- **Snapshot:** a server whose list can't be read is skipped with a warning; devices Apple reports as assigned that no readable list holds show "Unknown", never "Unassigned".
+- **Serials:** letters and digits only before they go into an address or a query; lowercase made uppercase.
+- **Signed tokens** are recognised in free text only by their `eyJ` start, so ordinary text isn't hidden.
+- **Found by the tests first (fixed in 0.10.0 for every app):** a sign-in error repeating the signed request, or an API error repeating the token, reached the activity log, the bug-report export and the message. Now: Apple's sign-in is a sensitive call, its error shows only `error` and `error_description`, every client removes the token it sent from errors and the log, and free text loses PEM keys and JWTs.
 
 ### Step 10: Demo mode (0.11.0)
 - **Move:** demo mode with a fake server from Profile2Blueprint (`DemoFixtures`, `DemoBlueprintServer`), so every app can be tried and checked by hand without a tenant.

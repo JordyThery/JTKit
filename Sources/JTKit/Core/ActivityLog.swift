@@ -158,10 +158,12 @@ extension ActivityLogEntry {
     ///     masked in the bug-report export (also when the summary doesn't
     ///     show them).
     ///   - failed: the action didn't happen; put why in `note`.
+    /// - Parameter isWarning: e.g. Apple still processing a write (step 9).
     public static func action(
         _ summary: String,
         note: String? = nil,
         failed: Bool = false,
+        isWarning: Bool = false,
         service: String? = nil,
         connection: String? = nil,
         devices: [String] = [],
@@ -174,7 +176,7 @@ extension ActivityLogEntry {
             identifiers.append(found)
         }
         return ActivityLogEntry(category: actionCategory, operation: "", detail: summary, duration: duration,
-                                note: note.map(Redaction.text), failedWithoutStatus: failed,
+                                note: note.map(Redaction.text), failedWithoutStatus: failed, isWarning: isWarning,
                                 service: service, connection: connection, identifiers: identifiers)
     }
 }
@@ -185,12 +187,13 @@ extension ActivityLog {
         _ summary: String,
         note: String? = nil,
         failed: Bool = false,
+        isWarning: Bool = false,
         service: String? = nil,
         connection: String? = nil,
         devices: [String] = [],
         duration: TimeInterval? = nil
     ) {
-        append(.action(summary, note: note, failed: failed, service: service, connection: connection,
+        append(.action(summary, note: note, failed: failed, isWarning: isWarning, service: service, connection: connection,
                        devices: devices, duration: duration))
     }
 }
