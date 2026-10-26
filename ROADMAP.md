@@ -252,8 +252,63 @@ Found during step 5 (2026-10-26); left out of step 5 by Jordy and done next, bef
 
 ### Step 6: Jamf Platform API (0.7.0)
 - **Source:** JamfMigrator `PlatformClient` (regions, polling, permission probe, gateway errors; tested). Add Blueprint and device-group calls from AppSettings2Blueprint, Blueprint Managed Preferences Editor, Profile2Blueprint and Jamf Deployer.
-- **First app:** JamfMigrator. **Then:** AppSettings2Blueprint, Blueprint Managed Preferences Editor, Profile2Blueprint, Jamf Deployer.
+- **First app:** AppSettings2Blueprint (decided by Jordy on 2026-10-26: it uses the most of the Blueprint side). **Then:** JamfMigrator, Blueprint Managed Preferences Editor, Profile2Blueprint, Jamf Deployer. Checkpoint and Serial Number Reader adopt in step 7 (see below).
+- **Before step 6:** fix Blueprint Managed Preferences Editor's backup write separately (see "Per app").
 - **Check by hand:** list Blueprints and device groups; one harmless write on a test tenant.
+
+#### What the apps do today (surveyed 2026-10-26)
+
+| App | Blueprints | Device groups | Devices / DDM / actions | Other Platform calls |
+|---|---|---|---|---|
+| JamfMigrator | list, get, create, PATCH, delete, deploy | none (maps groups through Jamf Pro `pro/v2/groups`) | none | compliance benchmarks; 53 Jamf Pro types through the gateway |
+| AppSettings2Blueprint | list (search, sort), get, create, PATCH steps, PATCH scope, deploy, report | list | none | none |
+| Blueprint Managed Preferences Editor | list, get, PATCH steps, deploy | none | none | none |
+| Profile2Blueprint | list (by name), get, create, deploy, report | list (RSQL filter) | none | Classic configuration profiles: read, plus a scope-only PUT |
+| Jamf Deployer | none | none | none | `organization/v1/environments`; Jamf Pro through the gateway |
+| Checkpoint | names only (for links) | none (Classic groups) | device by serial, DDM declarations, restart, shut down | Jamf Pro through the gateway |
+| Serial Number Reader | none | none | none | Jamf Pro through `/pro` only |
+
+- **Models:** AppSettings2Blueprint and Blueprint Managed Preferences Editor read Blueprint overview, detail, deployment state and report by hand from their own lossless `JSONValue` (key order and number text kept, so a merge-patch sends untouched parts back byte for byte); components are walked as raw JSON. Profile2Blueprint has typed `Decodable` models (Blueprint, step, component, report, `PlatformGroup`, `Page<T>`); its `JSONValue` sorts keys on decode. JamfMigrator uses untyped dictionaries. Checkpoint has small local structs.
+- **Polling:** JamfMigrator `Poll.until` (fixed interval, 30–60 s, stops on the first error, real clock). AppSettings2Blueprint `DeploymentMonitor` (4 s × 45, tells the new deployment from the previous one by `lastDeployment.started`). Profile2Blueprint (2 s growing ×1.5 to 10 s, 5 min; report watched every 20 s for up to 30 min until nothing is pending). The others don't poll.
+- **Gateway errors:** five readers of `{httpStatus, traceId, errors}`: JamfMigrator (plus the benchmarks shape `{message, error, statusCode, logref}`), AppSettings2Blueprint and Blueprint Managed Preferences Editor (`errors` as object or array), Profile2Blueprint (plus the OAuth shape `{error, error_description}`, copyable `ErrorReport`), Checkpoint (array only). Serial Number Reader matches `INVALID_REQUEST_CONTEXT_ID` as text, but has the best hints (wrong Environment ID, 403 missing permission).
+- **Permission checks:** JamfMigrator probes each list with a GET (4 at a time, 403 = denied), but its "missing permission" list also counts 404s and network errors. Jamf Deployer's preflight has a table of Platform permissions and Jamf Pro privileges with "Add the … permission" hints. The other apps only name the permissions in Settings text.
+- **Duplicated:** seven region enums (JTKit already has `JamfRegion`), five error readers, three ways of polling, three copies of Blueprint list paging with different limits (AppSettings2Blueprint stops quietly at 1,000 pages, Profile2Blueprint throws), two identical device-group models, two `JSONValue` types, two deployment-state models.
+
+#### Design (decided by Jordy on 2026-10-26)
+
+**What JTKit adds** (`Jamf/Platform/`, JSON in `Core/`)
+
+| Part | What it does | Source |
+|---|---|---|
+| Platform client | Built from a JTKit `Connection`: gateway URL from the region or host override, `X-Environment-Id` (checked as a UUID). Options: return an error status instead of throwing (Jamf Deployer's preflight), Jamf Deployer's legacy `X-Tenant-Id`. Runs on JTKit's `HTTPClient`; each app's allow-list stays the app's. | JamfMigrator `PlatformClient`; setup as in AppSettings2Blueprint and Profile2Blueprint |
+| Platform error | One reader for every error shape above; named codes (`BAD_PERMISSIONS`, `INVALID_REQUEST_CONTEXT_ID`, `TENANT_NOT_FOUND`, `DIVISION_PATCH_NOT_ALLOWED`, `INVALID_FIELD`, `NOT_FOUND`); standard hints; copyable error report. | JamfMigrator `GatewayError` (tested), AppSettings2Blueprint `PlatformErrorDetails`, Profile2Blueprint `APIErrorBody`/`ErrorReport`, Serial Number Reader's hints |
+| Polling | Interval that grows to a maximum, time limit, Cancel, progress callback; the app names which errors mean "not ready yet" (e.g. a 404 just after a create); injectable waits and clock for tests. | Profile2Blueprint `PollingPolicy`, JamfMigrator's `Poll.until` call shape |
+| Permission probe | A list of checks (path, Platform permission, Jamf Pro privilege), reads only. Results: allowed, missing permission (403), not found (404), failed (other status), unreachable. | JamfMigrator `PermissionProbe`, Jamf Deployer's preflight table and hints |
+| Paging | One page model that stops on `hasNext` or `totalCount`/short page; reaching the page limit is an error, never a quiet cut-off. | Profile2Blueprint `Page<T>`, AppSettings2Blueprint's stop rules |
+| Blueprints | List (search, sort), get, create, PATCH steps (merge-patch), PATCH scope, deploy, report, delete (JamfMigrator). No undeploy (no app uses it). Models: overview, deployment state (unknown values kept), report, detail holding the full lossless JSON with read-only accessors (scope groups, division lock, steps, components). "Unchanged since read" check on `updated`. Deploy-and-watch, then the report. | AppSettings2Blueprint (widest, tested), Profile2Blueprint (monitor, report watch) |
+| Device groups | List with RSQL filter and sort; `PlatformGroup` with tolerant device and group types. | Profile2Blueprint (filter tests), same as AppSettings2Blueprint's |
+| Devices, DDM, device actions | Device by serial (refuses when no returned serial matches exactly), DDM declarations with reasons (`Error` detail first, then description, then code) and the Blueprint ID in a declaration identifier, restart and shut down (with the 422 message). | Checkpoint `JamfClient`; fake-network tests written as it moves (it has none) |
+| Environments | `organization/v1/environments` (no scope header). | Jamf Deployer `OrganizationService` |
+| Lossless JSON | `JSONValue` keeping key order, duplicate keys and number text, with parser, serializer, paths and semantic comparison. | AppSettings2Blueprint `JSONValue`, `JSONCoding`, `JSONSemantics` |
+
+Every app's own region enum goes in favour of JTKit's `JamfRegion`; saved raw values stay the same. Each app keeps its own default region (US in Checkpoint, EU in Serial Number Reader).
+
+**Decisions**
+- **Lossless JSON in JTKit:** yes. Blueprint Managed Preferences Editor and Profile2Blueprint switch to it. Profile2Blueprint's fidelity check must keep working with unsorted, lossless JSON; a test checks that explicitly.
+- **Polling:** one policy for every app, Profile2Blueprint's (2 s growing to 10 s, 5 min), with shorter limits where an app needs them (JamfMigrator's 60 s post-actions). AppSettings2Blueprint's watch can then take up to 5 min instead of 3. JTKit's deploy-and-watch keeps AppSettings2Blueprint's start-time check (`lastDeployment.started` differs from before the deploy) that tells the new deployment from the previous one. Profile2Blueprint's 30-minute report watch is an app setting, not the default.
+- **Permission probe:** "missing permission" is reported apart from "not found" and "couldn't check"; JamfMigrator's preflight list gets shorter and correct. Test Connection in AppSettings2Blueprint, Blueprint Managed Preferences Editor and Profile2Blueprint also lists missing read permissions; write permissions can't be checked without writing and stay as text.
+- **Error messages:** one format in every app: the HTTP status line, one `CODE (field): description` line per error, the Trace ID, and the standard hints, with each app's own hints on top. The Trace ID stays unmasked in the bug-report export.
+- **Environment ID from a list:** Settings › Connections can load the environments with Jamf Deployer's call and pick one; typing the ID stays possible (also when the list can't be loaded). Run the apple-design review on the change.
+- **Checkpoint and Serial Number Reader:** JTKit gets the device, DDM and action calls in 0.7.0 with tests; both apps adopt them in step 7, with their Jamf Pro code, so each is changed once.
+- **Jamf Deployer:** the small adoption: regions, environments, permission probe, error reading; the "status returned, not thrown" option keeps its preflight working.
+
+**Per app (what stays in the app)**
+- **AppSettings2Blueprint:** declaration encoding and decoding, rules and validation, App Settings component builders (`AppSettingsLocator`), `BlueprintWriter`'s prepare, back up, write, verify and restore, `BackupStore`, CSV, App Store and code-signature lookups, its allow-list, the Jamf School detection (using JTKit's `TENANT_NOT_FOUND`).
+- **Blueprint Managed Preferences Editor:** `ManagedPreferencesLocator`, the Managed Preferences editor, plist model, import and export, its allow-list. **Fixed separately before step 6:** `Blueprints/BackupStore.swift:50` writes with `[.atomic, .withoutOverwriting]`, which Foundation doesn't allow together (AppSettings2Blueprint already fixed its copy); a backup is written before every save and restore.
+- **Profile2Blueprint:** the migration (`BlueprintBuilder`, naming, `PlistToJSON`, eligibility and fidelity checks), Classic profiles and `ClassicScopeService`, history, demo servers (step 10), its scope-only allow-list rule, the 30-minute report watch setting.
+- **JamfMigrator:** `ObjectType` registry and transforms (group remapping inside Blueprints), compliance benchmarks (on JTKit's polling), `PreflightReport`, Jamf Pro groups, Classic XML. Blueprints keep going through its general object engine; deploy-and-watch, errors, polling and the probe come from JTKit.
+- **Jamf Deployer:** its preflight check list and snapshot, Day 0, the engine, `ErrorTranslation`, `CreateFailureRecovery`, `TenantClients`.
+- **Checkpoint, Serial Number Reader:** unchanged in step 6.
 
 ### Step 7: Jamf Pro, Jamf School and device actions (0.8.0)
 - **Source for coverage:** Checkpoint `JamfClient` (widest) and `JamfSchoolClient`. **Source for tested code:** Serial Number Reader (Jamf School tests).
