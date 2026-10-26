@@ -88,12 +88,10 @@ extension JamfPro {
         public static let viewRecoveryLock: Privilege = "View Recovery Lock"
         public static let viewComputerDeviceLockPin: Privilege = "View Computer Device Lock Pin"
         public static let viewLocalAdminPassword: Privilege = "View Local Admin Password"
-        public static let updateLocalAdminPassword: Privilege = "Update Local Admin Password"
 
         // Commands
         @available(*, deprecated, message: "Not a Jamf Pro privilege: v2/mdm/blank-push needs viewMDMCommandInformation.")
         public static let sendBlankPush: Privilege = "Send Blank Push"
-        public static let sendComputerRemoteCommand: Privilege = "Send Computer Remote Command"
         public static let sendComputerRemoteLockCommand: Privilege = "Send Computer Remote Lock Command"
         public static let sendComputerRemoteWipeCommand: Privilege = "Send Computer Remote Wipe Command"
         public static let sendComputerUnmanageCommand: Privilege = "Send Computer Unmanage Command"
@@ -103,7 +101,9 @@ extension JamfPro {
         public static let sendMobileDeviceRemovePasscodeCommand: Privilege = "Send Mobile Device Remove Passcode Command"
         public static let sendMobileDeviceRestartDeviceCommand: Privilege = "Send Mobile Device Restart Device Command"
         public static let sendMobileDeviceShutDownCommand: Privilege = "Send Mobile Device Shut Down Command"
-        public static let updateInventoryForMobileDevices: Privilege = "Update Inventory for Mobile Devices"
+        public static let sendInventoryRequestsToMobileDevices: Privilege = "Send Inventory Requests to Mobile Devices"
+        @available(*, deprecated, renamed: "sendInventoryRequestsToMobileDevices", message: "Jamf Pro names it Send Inventory Requests to Mobile Devices.")
+        public static let updateInventoryForMobileDevices: Privilege = "Send Inventory Requests to Mobile Devices"
         public static let viewMDMCommandInformation: Privilege = "View MDM command information in Jamf Pro API"
         public static let unmanageMobileDevices: Privilege = "Unmanage Mobile Devices"
         public static let sendRenewMDMProfileCommand: Privilege = "Send Command to Renew MDM Profile"

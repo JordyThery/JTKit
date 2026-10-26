@@ -133,7 +133,7 @@ public nonisolated enum MDMCommand: String, CaseIterable, Sendable, Hashable {
         case .blankPush: .viewMDMCommandInformation
         case .renewProfile: .sendRenewMDMProfileCommand
         case .redeployFramework: .sendComputerInstallPackageCommand
-        case .updateInventory: .updateInventoryForMobileDevices
+        case .updateInventory: .sendInventoryRequestsToMobileDevices
         case .lockMobile: .sendMobileDeviceRemoteLockCommand
         case .clearPasscode: .sendMobileDeviceRemovePasscodeCommand
         case .restartMobile: .sendMobileDeviceRestartDeviceCommand
