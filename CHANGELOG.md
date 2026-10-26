@@ -1,5 +1,49 @@
 # Changelog
 
+## 0.9.0 (2026-10-26)
+Step 8 for Intune Deployer: Microsoft Graph and Microsoft's sign-in.
+Additions, plus a new optional product. The Intune device list and commands
+follow with Checkpoint (0.9.1).
+- `Graph.Client` (`Intune/`) on JTKit's `HTTPClient`, so the shared retry
+  rules apply (4 attempts, waits at most 120 s, `Retry-After` also as a
+  date, a 401 gets a new token and one more try). v1.0 and beta addresses,
+  queries such as `$select` and `$filter` sent as written, a new
+  `client-request-id` with every request, at most 4 requests at a time.
+  Updates (PATCH, PUT) are safe to repeat, and so are deletes, where a 404
+  after a repeat counts as already gone; creates never are, `/assign` only
+  when the app says so. Activity log: category "Graph", service "Intune".
+- Paging: `@odata.nextLink` is followed only to `https://graph.microsoft.com`
+  (anything else is refused before the token goes there); an answer without
+  `value` is an error; reaching 1,000 pages is an error.
+- `GraphError`: the Jamf errors' format (status line, `code: message`,
+  Request ID and date, the app's hints, the standard hints). A 403 names the
+  missing permission from `Graph.Permission`'s table and who grants it
+  (delegated: accept at sign-in or admin consent; application: API
+  permissions and admin consent). The Request ID stays visible in the
+  bug-report export.
+- `EntraTokenProvider`: an app registration's client secret (client
+  credentials, `.default` scope, Microsoft's public cloud). Renews 60 s
+  before expiry, one shared sign-in, the secret read at each sign-in, forget
+  token, redirects only to HTTPS on the same host. Refused sign-ins show
+  Microsoft's error code and Trace ID, with hints for a wrong or expired
+  secret, an unknown app and an unknown tenant. `Graph.Client(connection:…)`
+  builds both from an Intune connection.
+- Never recorded, in every app: an app upload's `commit` (the app's
+  encryption key), FileVault and BitLocker recovery keys, LAPS passwords.
+- `HTTPClient`: `maxConcurrent` (a request keeps its turn while it waits to
+  be retried); `HTTPRequest.encodedQuery` (refused if not correctly encoded)
+  and `notFoundAfterRepeatIsDone`.
+- New product `JTKitMSAL`, the only one depending on MSAL (pinned exactly to
+  2.16.0, the newest release on 2026-10-26): `MicrosoftSignIn`, one per
+  client ID. Silent token first, then Microsoft's sign-in window; one window
+  at a time, shared by requests for the same permissions, while a request
+  for other permissions waits for it to close and then asks again (decided
+  by Jordy); after an expired sign-in the window is for the saved account;
+  the saved account found again at launch; sign-out; forced refresh.
+  `MicrosoftTokenSource` hands its tokens to `Graph.Client`.
+  `Acknowledgement.msal` is the notice for the pinned version. Apps without
+  JTKitMSAL ship nothing of MSAL, but resolve it (it is in `Package.resolved`).
+
 ## 0.8.5 (2026-10-26)
 Step 7 for Jamf Deployer: the privileges its preflight and Day 0 calls
 need. Additions only.
