@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.11.3 (2026-10-27)
+Step 10, for Profile2Blueprint. Additions; no app has to change.
+- `DemoJamfPlatformServer.add(groups:)`: an app adds its own sample device
+  groups after Contoso's (one with an ID already there replaces it), e.g. a
+  second group with the same name.
+- `DemoJamfPlatformServer.route(_:to:)`: requests under a path the app
+  names (e.g. `proclassic`) go to the app's own `DemoServer`, on the same
+  demo network, so an app's requests there run through JTKit's real client
+  like the rest. Sign-in stays the Platform server's; the longest path wins.
+
 ## 0.11.2 (2026-10-27)
 Step 10, for Blueprint Managed Preferences Editor. Additions; no app has to change.
 - `DemoJamfPlatformServer.add(_:)`: an app adds its own sample Blueprints to

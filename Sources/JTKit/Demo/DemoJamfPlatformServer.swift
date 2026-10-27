@@ -28,6 +28,8 @@ public nonisolated enum DemoScenario: String, Sendable, CaseIterable {
 /// - a deployment moves `PENDING → DEPLOYING → SUCCEEDED` over successive reads.
 ///
 /// Errors come in the gateway's shape, so JTKit reads them as from a tenant.
+/// An app can add its own device groups (`add(groups:)`) and its own services
+/// under a path (`route(_:to:)`), e.g. Classic API profiles behind the gateway.
 public nonisolated final class DemoJamfPlatformServer: DemoServer, @unchecked Sendable {
     private struct Stored {
         var blueprint: LosslessJSON.Object
@@ -44,7 +46,9 @@ public nonisolated final class DemoJamfPlatformServer: DemoServer, @unchecked Se
     private var patchCountValue = 0
     private var tokenCount = 0
     private var requestCountValue = 0
-    private let groups: [JamfPlatform.DeviceGroup]
+    private var groups: [JamfPlatform.DeviceGroup]
+    /// An app's own services under a path of this server (`route(_:to:)`).
+    private var routes: [(path: [String], server: any DemoServer)] = []
     private let scenario: DemoScenario?
     private let pollsToSucceed: Int
     private let failDeployments: Bool
@@ -116,11 +120,48 @@ public nonisolated final class DemoJamfPlatformServer: DemoServer, @unchecked Se
         lock.withLock { blueprints[id]?.blueprint }
     }
 
+    /// Adds device groups, e.g. an app's own sample groups, after the ones
+    /// already there. One whose ID is already there replaces it in place.
+    public func add(groups newGroups: [JamfPlatform.DeviceGroup]) {
+        lock.withLock {
+            for group in newGroups {
+                if let index = groups.firstIndex(where: { $0.id == group.id }) {
+                    groups[index] = group
+                } else {
+                    groups.append(group)
+                }
+            }
+        }
+    }
+
+    /// Hands every request whose path starts with `path` (e.g. `"proclassic"`)
+    /// to `server`, an app's own fake service behind this one, so the app's
+    /// requests there run through JTKit's real client like the rest. Sign-in
+    /// stays this server's. The longest matching path wins; a path given
+    /// again replaces its server.
+    public func route(_ path: String, to server: any DemoServer) {
+        let segments = path.split(separator: "/").map(String.init)
+        guard !segments.isEmpty else { return }
+        lock.withLock {
+            routes.removeAll { $0.path == segments }
+            routes.append((segments, server))
+            routes.sort { $0.path.count > $1.path.count }
+        }
+    }
+
     // MARK: Requests
 
     public func respond(to request: DemoRequest) -> DemoResponse {
         let parts = request.pathSegments
         let method = request.method
+        let routed: (any DemoServer)? = lock.withLock {
+            routes.first { parts.starts(with: $0.path) }?.server
+        }
+        if let routed {
+            lock.withLock { requestCountValue += 1 }
+            // Outside the lock: the app's server may take its time or ask this one.
+            return routed.respond(to: request)
+        }
         return lock.withLock {
             requestCountValue += 1
             if method == "POST", parts == ["auth", "token"] {
