@@ -107,7 +107,17 @@ public nonisolated final class DemoJamfProObjects: @unchecked Sendable {
         "v3/computer-prestages": ProKind(nameKey: "displayName", isPreStage: true),
         "v3/mobile-device-prestages": ProKind(nameKey: "displayName", isPreStage: true),
         "v1/device-enrollments": ProKind(readOnly: true),
+        "v1/volume-purchasing-locations": ProKind(),
+        "v1/self-service/branding/macos": ProKind(nameKey: "brandingName"),
     ]
+
+    /// Jamf's App Catalog (`/api/v1/app-installers/titles`): the same on
+    /// every tenant, read only.
+    static var appInstallerTitles: [[String: Any]] { [
+        ("0BC", "Google Chrome", "Google"), ("0C4", "Mozilla Firefox", "Mozilla"),
+        ("1D2", "Microsoft Teams", "Microsoft"), ("1F0", "Slack", "Slack Technologies"),
+        ("2A7", "Zoom", "Zoom Video Communications"), ("2C1", "1Password", "AgileBits"),
+    ].map { ["id": $0.0, "titleName": $0.1, "publisher": $0.2, "bundleId": "", "version": "1.0"] } }
 
     /// The settings pages: one object each, read and updated, never listed.
     static let settingsPaths: Set<String> = [
@@ -163,6 +173,16 @@ public nonisolated final class DemoJamfProObjects: @unchecked Sendable {
         for (id, icon) in seed.icons { icons[id] = icon }
     }
 
+    /// The Jamf Pro behind "Contoso (Demo)"'s Platform gateway (`/pro/…` and
+    /// `/proclassic/…`): Contoso's objects, with Automated Device Enrollment,
+    /// Apps and Books and Self Service branding set up.
+    public static func contosoPlatform() -> DemoJamfProObjects {
+        var seed = DemoJamfProObjectSamples.source
+        seed.pro["v1/volume-purchasing-locations"] = [DemoJamfProObjectSamples.volumePurchasingLocation(id: 1)]
+        seed.pro["v1/self-service/branding/macos"] = [DemoJamfProObjectSamples.branding(id: 1)]
+        return DemoJamfProObjects(host: DemoSamples.platformHost, version: "11.33.1-t1761000000000", seed: seed)
+    }
+
     /// Contoso's golden master, for "Contoso Source (Demo)".
     public static func contosoSource() -> DemoJamfProObjects {
         DemoJamfProObjects(host: DemoJamfProObjectSamples.sourceHost, version: "11.33.1-t1761000000000",
@@ -176,6 +196,22 @@ public nonisolated final class DemoJamfProObjects: @unchecked Sendable {
         DemoJamfProObjects(host: DemoJamfProObjectSamples.destinationHost, version: "11.34.0-t1763000000000",
                            seed: DemoJamfProObjectSamples.destination,
                            refusing: scenario == .missingPermission ? ["JSSResource/webhooks", "api/v3/sso"] : [])
+    }
+
+    // MARK: An app's own sample objects
+
+    /// Adds Jamf Pro API objects at a list path (e.g. `"v1/app-installers/deployments"`),
+    /// an app's own sample data after the ones already there. One whose ID
+    /// is already there replaces it in place; one without a numeric ID is skipped.
+    public func add(_ objects: [LosslessJSON.Object], at path: String) {
+        lock.withLock {
+            for object in objects {
+                guard let stored = DemoJSON.object(LosslessJSON.object(object).serialized()),
+                      let id = Int("\(stored["id"] ?? "")") else { continue }
+                pro[path, default: [:]][id] = stored
+                nextID = max(nextID, id)
+            }
+        }
     }
 
     // MARK: For tests and the app's checks
@@ -425,6 +461,7 @@ public nonisolated final class DemoJamfProObjects: @unchecked Sendable {
             return DemoResponse(status: 200, headers: ["Content-Type": "image/png"], body: icon.data)
         }
         if key == "v2/groups", method == "GET" { return page(platformGroups(), request) }
+        if let answer = setupRequest(request, key) { return answer }
         if let kind = Self.proKinds[key] {
             switch method {
             case "GET":
@@ -471,6 +508,11 @@ public nonisolated final class DemoJamfProObjects: @unchecked Sendable {
         let id = newID()
         object["id"] = "\(id)"
         if kind.isPreStage { Self.createPreStage(&object, id: id) }
+        if key == "v1/volume-purchasing-locations" {
+            // Jamf reads the token and never returns it; Apple's details come back instead.
+            object["serviceToken"] = nil
+            object.merge(DemoJamfProObjectSamples.volumePurchasingLocation(id: id, name: name)) { stored, _ in stored }
+        }
         pro[key, default: [:]][id] = object
         writeCountValue += 1
         return DemoJSON.response(201, ["id": "\(id)", "href": "https://\(host)/api/\(key)/\(id)"])
@@ -514,6 +556,66 @@ public nonisolated final class DemoJamfProObjects: @unchecked Sendable {
         default:
             return DemoJamfProServer.error(405, "METHOD_NOT_ALLOWED", "Method not allowed")
         }
+    }
+
+    /// A tenant's setup pages, as a deployment tool reads and writes them:
+    /// the server address, the App Catalog, the group lists, Automated Device
+    /// Enrollment's key and token upload, and the Jamf Protect link. Nil for
+    /// any other path.
+    private func setupRequest(_ request: DemoRequest, _ key: String) -> DemoResponse? {
+        switch (request.method, key) {
+        case ("GET", "v1/jamf-pro-server-url"):
+            return DemoJSON.response(200, ["url": "https://\(host)", "unsecuredEnrollmentUrl": ""])
+        case ("GET", "v1/app-installers/titles"):
+            return page(Self.appInstallerTitles, request)
+        case ("GET", "v1/computer-groups"):
+            return DemoJSON.response(200, groups(["v3/computer-groups/smart-groups", "v3/computer-groups/static-groups"])
+                .map { ["id": "\($0.id)", "name": $0.name, "smartGroup": $0.smart] })
+        case ("GET", "v1/mobile-device-groups"):
+            return DemoJSON.response(200, groups(["v2/mobile-device-groups/smart-groups", "v2/mobile-device-groups/static-groups"])
+                .map { ["id": $0.id, "name": $0.name, "isSmartGroup": $0.smart] })
+        case ("GET", "v1/device-enrollments/public-key"):
+            return DemoResponse(status: 200, headers: ["Content-Type": "application/x-pem-file"],
+                                body: Data(DemoJamfProObjectSamples.adePublicKey.utf8))
+        case ("POST", "v1/device-enrollments/upload-token"):
+            guard let body = DemoJSON.object(request.body), !"\(body["encodedToken"] ?? "")".isEmpty else {
+                return DemoJamfProServer.error(400, "INVALID_FIELD", "encodedToken must not be blank", field: "encodedToken")
+            }
+            let id = newID()
+            let file = "\(body["tokenFileName"] ?? "")"
+            let name = file.hasSuffix(".p7m") ? String(file.dropLast(4)) : file
+            // the token itself is never kept, as Jamf never returns it
+            pro["v1/device-enrollments", default: [:]][id] = [
+                "id": "\(id)", "name": name.isEmpty ? "Contoso ABM" : name, "supervisionIdentityId": "-1", "siteId": "-1",
+                "serverName": "Contoso Jamf Pro", "serverUuid": DemoSamples.uuid(0x7300 + id % 0x100),
+                "tokenExpirationDate": DemoJamfProObjectSamples.inAYear(),
+            ]
+            writeCountValue += 1
+            return DemoJSON.response(201, ["id": "\(id)", "href": "https://\(host)/api/v1/device-enrollments/\(id)"])
+        case ("GET", "v1/jamf-protect"):
+            return DemoJSON.response(200, settings[key] ?? ["autoInstall": false, "syncStatus": "NOT_REGISTERED"])
+        case ("POST", "v1/jamf-protect/register"):
+            guard let body = DemoJSON.object(request.body), let url = body["protectUrl"] as? String, !url.isEmpty else {
+                return DemoJamfProServer.error(400, "INVALID_FIELD", "protectUrl must not be blank", field: "protectUrl")
+            }
+            // the password is used once and never kept
+            settings["v1/jamf-protect"] = [
+                "id": "1", "apiClientId": "\(body["clientId"] ?? "")", "apiClientName": "Jamf Pro",
+                "registrationId": DemoSamples.uuid(0x7400), "protectUrl": url,
+                "lastSyncTime": DemoJamfProObjectSamples.now(), "syncStatus": "COMPLETED", "autoInstall": true,
+            ]
+            writeCountValue += 1
+            return DemoJSON.response(201, settings["v1/jamf-protect"] ?? [:])
+        default:
+            return nil
+        }
+    }
+
+    /// The groups in `lists`, in ID order, with whether they're smart.
+    private func groups(_ lists: [String]) -> [(id: Int, name: String, smart: Bool)] {
+        lists.flatMap { list in
+            (pro[list] ?? [:]).map { (id: $0.key, name: "\($0.value["name"] ?? "")", smart: list.hasSuffix("smart-groups")) }
+        }.sorted { $0.id < $1.id }
     }
 
     private func uploadIcon(_ request: DemoRequest) -> DemoResponse {

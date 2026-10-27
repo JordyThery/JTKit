@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.11.7 (2026-10-27)
+Step 10, for Jamf Deployer. Additions; no app has to change.
+- The Platform demo server answers the gateway's `/pro/…` (Jamf Pro API) and
+  `/proclassic/…` (Classic API) from a Jamf Pro object store of its own
+  (`DemoJamfPlatformServer(jamfPro:)`, `jamfPro`; "Contoso (Demo)" gets
+  `DemoJamfProObjects.contosoPlatform()`: Contoso's objects with Automated
+  Device Enrollment, Apps and Books and Self Service branding set up). An
+  app's own `route(_:to:)` still comes first.
+- Setup pages in `DemoJamfProObjects`, as Jamf answers them: volume purchasing
+  locations (list; create keeps no token and reads back Apple's details),
+  macOS Self Service branding (list, create), the Jamf Pro server address,
+  App Catalog titles, the v1 computer and mobile device group lists, the ADE
+  public key and token upload (makes an instance; the token isn't kept), and
+  the Jamf Protect link (read, register; the password isn't kept).
+- `DemoJamfProObjects.add(_:at:)`: an app's own sample objects at a Jamf Pro
+  API list path.
+
 ## 0.11.6 (2026-10-27)
 Step 10, for JamfMigrator. Additions; no app has to change.
 - `DemoJamfProObjects`: a general Jamf Pro object store behind a demo Jamf Pro

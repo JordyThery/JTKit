@@ -30,6 +30,8 @@ public nonisolated enum DemoScenario: String, Sendable, CaseIterable {
 /// Errors come in the gateway's shape, so JTKit reads them as from a tenant.
 /// An app can add its own device groups (`add(groups:)`) and its own services
 /// under a path (`route(_:to:)`), e.g. Classic API profiles behind the gateway.
+/// Given a Jamf Pro object store (`jamfPro`), the gateway's `/pro/…` and
+/// `/proclassic/…` are answered from it; an app's own route comes first.
 public nonisolated final class DemoJamfPlatformServer: DemoServer, @unchecked Sendable {
     private struct Stored {
         var blueprint: LosslessJSON.Object
@@ -50,6 +52,9 @@ public nonisolated final class DemoJamfPlatformServer: DemoServer, @unchecked Se
     /// An app's own services under a path of this server (`route(_:to:)`).
     private var routes: [(path: [String], server: any DemoServer)] = []
     private let scenario: DemoScenario?
+    /// The Jamf Pro behind the gateway: `/pro/…` is its Jamf Pro API,
+    /// `/proclassic/…` its Classic API.
+    public let jamfPro: DemoJamfProObjects?
     private let pollsToSucceed: Int
     private let failDeployments: Bool
 
@@ -65,14 +70,17 @@ public nonisolated final class DemoJamfPlatformServer: DemoServer, @unchecked Se
     ///   - scenario: e.g. `.jamfSchool`.
     ///   - pollsToSucceed: reads of a deploying Blueprint before it reports success.
     ///   - failDeployments: deployments end as failed instead.
+    ///   - jamfPro: the Jamf Pro behind the gateway (`/pro/…`, `/proclassic/…`); none by default.
     public init(
         groups: [JamfPlatform.DeviceGroup]? = nil,
         blueprints: [LosslessJSON.Object]? = nil,
         scenario: DemoScenario? = nil,
         pollsToSucceed: Int = 3,
-        failDeployments: Bool = false
+        failDeployments: Bool = false,
+        jamfPro: DemoJamfProObjects? = nil
     ) {
         self.scenario = scenario
+        self.jamfPro = jamfPro
         self.groups = scenario == .jamfSchool ? [] : (groups ?? DemoSamples.platformGroups)
         self.pollsToSucceed = pollsToSucceed
         self.failDeployments = failDeployments
@@ -161,6 +169,11 @@ public nonisolated final class DemoJamfPlatformServer: DemoServer, @unchecked Se
             lock.withLock { requestCountValue += 1 }
             // Outside the lock: the app's server may take its time or ask this one.
             return routed.respond(to: request)
+        }
+        if let jamfPro, let first = parts.first, first == "pro" || first == "proclassic", parts.count > 1 {
+            lock.withLock { requestCountValue += 1 }
+            // as the gateway does: the Jamf Pro API under /pro, the Classic API under /proclassic
+            return jamfPro.respond(to: request, parts: [first == "pro" ? "api" : "JSSResource"] + parts.dropFirst())
         }
         return lock.withLock {
             requestCountValue += 1
