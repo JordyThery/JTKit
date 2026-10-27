@@ -9,15 +9,26 @@ import SwiftUI
 ///     DemoModeToggle(demo: demo)
 /// }
 /// ```
+///
+/// The switch goes through `DemoMode.requestSwitch(to:)`, so an app that set
+/// `asksBeforeSwitching` gets its question first (`confirmsDemoModeSwitch`).
 public struct DemoModeToggle: View {
-    @Bindable var demo: DemoMode
+    let demo: DemoMode
+    let whenAsking: @MainActor () -> Void
 
-    public init(demo: DemoMode) {
+    /// - Parameter whenAsking: runs when the question is shown instead of
+    ///   switching, e.g. to bring the window with the question forward from
+    ///   the Connection menu.
+    public init(demo: DemoMode, whenAsking: @escaping @MainActor () -> Void = {}) {
         self.demo = demo
+        self.whenAsking = whenAsking
     }
 
     public var body: some View {
-        Toggle(DemoMode.title, isOn: $demo.isOn)
+        Toggle(DemoMode.title, isOn: Binding(
+            get: { demo.isOn },
+            set: { if demo.requestSwitch(to: $0) { whenAsking() } }
+        ))
     }
 }
 
@@ -25,6 +36,52 @@ extension ConnectionPickerLabel {
     /// What the connection picker shows while demo mode is on.
     public static let demo = ConnectionPickerLabel("Demo", systemImage: "testtube.2",
                                                    accessibilityLabel: "Connection in use: Demo Mode")
+
+    /// The picker naming the demo connection in use, e.g. "Contoso (Demo)",
+    /// as Checkpoint's does.
+    public static func demo(_ connection: Connection) -> ConnectionPickerLabel {
+        ConnectionPickerLabel(connection.name, systemImage: "testtube.2",
+                              accessibilityLabel: "Connection in use: \(connection.name)")
+    }
+}
+
+extension View {
+    /// The app's question before demo mode is turned on or off while it has
+    /// unsaved work (`DemoMode.asksBeforeSwitching`), e.g. "Turn on Demo Mode
+    /// and discard unsaved changes?". Put it on the window where the switch is.
+    /// - Parameter discarding: what switching discards, e.g. "unsaved changes".
+    public func confirmsDemoModeSwitch(_ demo: DemoMode, discarding: String = "unsaved changes") -> some View {
+        modifier(DemoModeSwitchConfirmation(demo: demo, discarding: discarding))
+    }
+}
+
+/// "Turn on/off Demo Mode and discard …?" with "Discard and Turn On/Off" and Cancel.
+struct DemoModeSwitchConfirmation: ViewModifier {
+    let demo: DemoMode
+    let discarding: String
+
+    /// The question for a waiting switch to `isOn`.
+    static func title(isOn: Bool, discarding: String) -> String {
+        "Turn \(isOn ? "on" : "off") \(DemoMode.title) and discard \(discarding)?"
+    }
+
+    static func confirmTitle(isOn: Bool) -> String {
+        "Discard and Turn \(isOn ? "On" : "Off")"
+    }
+
+    func body(content: Content) -> some View {
+        let target = demo.pendingSwitch ?? !demo.isOn
+        content.confirmationDialog(
+            Self.title(isOn: target, discarding: discarding),
+            isPresented: Binding(
+                get: { demo.pendingSwitch != nil },
+                set: { if !$0 { demo.cancelSwitch() } }
+            )
+        ) {
+            Button(Self.confirmTitle(isOn: target), role: .destructive) { demo.confirmSwitch() }
+            Button("Cancel", role: .cancel) { demo.cancelSwitch() }
+        }
+    }
 }
 
 /// The note above Settings › Connections while demo mode is on: the list

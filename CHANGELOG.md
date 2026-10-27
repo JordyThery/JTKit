@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.11.2 (2026-10-27)
+Step 10, for Blueprint Managed Preferences Editor. Additions; no app has to change.
+- `DemoJamfPlatformServer.add(_:)`: an app adds its own sample Blueprints to
+  the demo server (`demo.jamfPlatformServer`), stored the way the service
+  stores them, so an unchanged payload comes back byte for byte after a patch.
+- The demo switch can ask first: set `DemoMode.asksBeforeSwitching` (e.g.
+  "has unsaved edits") and add `confirmsDemoModeSwitch(_:)` to the window;
+  `DemoModeToggle` then waits for "Turn on/off Demo Mode and discard unsaved
+  changes?" (`requestSwitch(to:)`, `pendingSwitch`, `confirmSwitch()`,
+  `cancelSwitch()`). `DemoModeToggle(demo:whenAsking:)` brings the window
+  with the question forward from the Connection menu.
+- `ConnectionPickerLabel.demo(_:)`: the picker names the demo connection,
+  e.g. "Contoso (Demo)", as Checkpoint's does.
+
 ## 0.11.1 (2026-10-27)
 Step 10, second part: demo mode for Checkpoint. Additions; no app has to change.
 - `DemoWorld`: one shared set of 41 sample devices, the same in Apple

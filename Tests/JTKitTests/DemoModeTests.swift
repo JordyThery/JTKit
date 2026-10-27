@@ -66,6 +66,51 @@ struct DemoJamfPlatformServerTests {
         #expect(try await blueprints.report(id: id) == JamfPlatform.BlueprintReport(succeeded: 48, failed: 0, pending: 0))
     }
 
+    @Test("An app's own Blueprints are added in the service's form and come back unchanged after a patch")
+    func addedBlueprints() async throws {
+        let server = DemoJamfPlatformServer()
+        let id = DemoSamples.uuid(0xb901)
+        let payload = LosslessJSON.Object([
+            "payloadType": .string("com.apple.ManagedClient.preferences"),
+            "payloadIdentifier": .string("com.contoso.example.added"),
+            "payloadUUID": .string(DemoSamples.uuid(0xb902)),
+            "PayloadEnabled": .bool(true),
+            "PayloadContent": .object(LosslessJSON.Object(["com.contoso.example.app": .object(LosslessJSON.Object([
+                "Forced": .array([.object(LosslessJSON.Object(["mcx_preference_settings": .object(LosslessJSON.Object([
+                    "Ratio": .number(LosslessJSON.Number(literal: "1.0")),
+                ]))]))]),
+            ]))])),
+        ])
+        let blueprint = LosslessJSON.Object([
+            "id": .string(id),
+            "name": .string("Contoso – Added"),
+            "scope": .object(LosslessJSON.Object(["deviceGroups": .array([.string(DemoSamples.platformGroups[0].id)])])),
+            "created": .string("2026-01-01T00:00:00.000Z"),
+            "steps": .array([.object(LosslessJSON.Object([
+                "name": .string("Step 1"),
+                "components": .array([.object(LosslessJSON.Object([
+                    "identifier": .string("com.jamf.ddm-configuration-profile"),
+                    "configuration": .object(LosslessJSON.Object(["payloadContent": .array([.object(payload)])])),
+                ]))]),
+            ]))]),
+        ])
+        server.add([blueprint])
+        server.add([blueprint])
+
+        let (client, _) = try demoClient(server)
+        let blueprints = JamfPlatform.Blueprints(client: client)
+        #expect(try await blueprints.list().count == 7, "added once, after Contoso's")
+        let stored = try #require(server.blueprint(id: id)?["steps"]?[0]?["components"]?[0]?["configuration"]?["payloadContent"]?[0]?.objectValue)
+        #expect(stored["payloadUUID"] == .string("com.contoso.example.added"), "as the service stores it")
+        #expect(stored["PayloadEnabled"] == nil)
+        #expect(stored["payloadVersion"] != nil && stored["payloadOrganization"] != nil)
+
+        let steps = try #require(try await blueprints.detail(id: id).steps)
+        try await blueprints.patchSteps(id: id, steps: steps)
+        #expect(server.blueprint(id: id)?["steps"]?.serialized() == steps.serialized(), "byte for byte, 1.0 included")
+        #expect(String(decoding: steps.serialized(), as: UTF8.self).contains(#""Ratio":1.0"#))
+    }
+
     @Test("Changing a deployed Blueprint makes it Out of Date")
     func outOfDate() async throws {
         let (client, _) = try demoClient()
@@ -270,6 +315,46 @@ struct DemoModeSwitchTests {
             name: "Kept", description: nil, deviceGroups: [DemoSamples.platformGroups[0].id], steps: [])
         #expect(demo.jamfPlatformServer.createCount == 1)
         #expect(demo.jamfPlatform().session === source.session)
+    }
+
+    @Test("With unsaved work the switch waits for the app's question; without, it switches")
+    func asksBeforeSwitching() {
+        let (defaults, name) = defaults()
+        defer { defaults.removePersistentDomain(forName: name) }
+        let demo = DemoMode(key: "demoMode", defaults: defaults, arguments: [])
+        #expect(!demo.requestSwitch(to: true) && demo.isOn, "no question set: switches")
+        #expect(!demo.requestSwitch(to: true), "already on: nothing to ask")
+
+        var unsaved = true
+        demo.asksBeforeSwitching = { unsaved }
+        #expect(demo.requestSwitch(to: false))
+        #expect(demo.isOn && demo.pendingSwitch == false, "waits")
+        demo.cancelSwitch()
+        #expect(demo.isOn && demo.pendingSwitch == nil, "cancel keeps it on")
+
+        demo.requestSwitch(to: false)
+        demo.confirmSwitch()
+        #expect(!demo.isOn && demo.pendingSwitch == nil, "discard switches")
+        #expect(defaults.object(forKey: "demoMode") as? Bool == false)
+
+        unsaved = false
+        #expect(!demo.requestSwitch(to: true) && demo.isOn, "nothing unsaved: switches")
+        demo.confirmSwitch()
+        #expect(demo.isOn, "confirming without a waiting switch does nothing")
+        demo.isOn = false
+    }
+
+    @Test("The question and the picker's name, in the shared wording")
+    func wording() {
+        #expect(DemoModeSwitchConfirmation.title(isOn: true, discarding: "unsaved changes")
+                == "Turn on Demo Mode and discard unsaved changes?")
+        #expect(DemoModeSwitchConfirmation.title(isOn: false, discarding: "unsaved changes")
+                == "Turn off Demo Mode and discard unsaved changes?")
+        #expect(DemoModeSwitchConfirmation.confirmTitle(isOn: true) == "Discard and Turn On")
+        #expect(DemoModeSwitchConfirmation.confirmTitle(isOn: false) == "Discard and Turn Off")
+        let label = ConnectionPickerLabel.demo(.demoJamfPlatform)
+        #expect(label.title == "Contoso (Demo)" && label.systemImage == "testtube.2")
+        #expect(label.accessibilityLabel == "Connection in use: Contoso (Demo)")
     }
 
     @Test("The scratch folder is temporary and the same for the launch")

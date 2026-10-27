@@ -92,6 +92,25 @@ public nonisolated final class DemoJamfPlatformServer: DemoServer, @unchecked Se
         return id
     }
 
+    /// Adds Blueprints, e.g. an app's own sample data, after the ones already
+    /// there. They're stored the way the service stores them, as on create
+    /// (`com.jamf.ddm-configuration-profile` payloads included), so they read
+    /// back as from a tenant and an unchanged payload stays unchanged when
+    /// patched. One whose ID is already there replaces it in place; one
+    /// without an ID is skipped.
+    public func add(_ blueprints: [LosslessJSON.Object]) {
+        lock.withLock {
+            for var blueprint in blueprints {
+                guard let id = blueprint["id"]?.stringValue else { continue }
+                if let steps = blueprint["steps"]?.arrayValue {
+                    blueprint["steps"] = .array(Self.storedSteps(steps))
+                }
+                if self.blueprints[id] == nil { order.append(id) }
+                self.blueprints[id] = Stored(blueprint: blueprint)
+            }
+        }
+    }
+
     /// A Blueprint as the server holds it now, or nil.
     public func blueprint(id: String) -> LosslessJSON.Object? {
         lock.withLock { blueprints[id]?.blueprint }

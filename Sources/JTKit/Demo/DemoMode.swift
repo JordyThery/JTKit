@@ -47,6 +47,41 @@ public final class DemoMode {
         }
     }
 
+    /// Asked before the shared switch (`DemoModeToggle`) turns demo mode on
+    /// or off: true when the app has unsaved work that switching would
+    /// discard, so it asks first (`confirmsDemoModeSwitch`). Nil never asks.
+    @ObservationIgnored public var asksBeforeSwitching: (@MainActor () -> Bool)?
+
+    /// A switch waiting for the app's question: the value it would set.
+    public private(set) var pendingSwitch: Bool?
+
+    /// Turns demo mode on or off, or, when `asksBeforeSwitching` says so,
+    /// keeps the switch waiting in `pendingSwitch` for `confirmSwitch()` or
+    /// `cancelSwitch()`. Returns true when it waits.
+    @discardableResult
+    public func requestSwitch(to newValue: Bool) -> Bool {
+        guard newValue != isOn else { return false }
+        if asksBeforeSwitching?() == true {
+            pendingSwitch = newValue
+            return true
+        }
+        pendingSwitch = nil
+        isOn = newValue
+        return false
+    }
+
+    /// The question was answered "Discard": makes the waiting switch.
+    public func confirmSwitch() {
+        guard let pending = pendingSwitch else { return }
+        pendingSwitch = nil
+        isOn = pending
+    }
+
+    /// The question was cancelled: demo mode stays as it is.
+    public func cancelSwitch() {
+        pendingSwitch = nil
+    }
+
     /// Started with `-JTKitSandbox YES`: in-memory connections and secrets, no public lookups.
     public let isSandbox: Bool
     /// Started with `-JTKitDemoScenario <name>`.
