@@ -9,6 +9,10 @@ import Foundation
 ///
 /// Every request needs the token from its sign-in, as on a server; the
 /// `missingPermission` scenario refuses inventory and commands with 403.
+///
+/// Given an object store (`init(objects:)`), the server answers from it
+/// instead: a tenant whose objects an app copies (JamfMigrator), with no
+/// devices.
 public nonisolated final class DemoJamfProServer: DemoServer, @unchecked Sendable {
     /// What the server shows for each secret.
     public enum FakeSecret {
@@ -46,6 +50,8 @@ public nonisolated final class DemoJamfProServer: DemoServer, @unchecked Sendabl
     private var requestCountValue = 0
     private let scenario: DemoScenario?
     private let now: Date
+    /// The objects this server holds instead of `DemoWorld`'s devices.
+    public let objects: DemoJamfProObjects?
 
     /// Every request answered, sign-ins included.
     public var requestCount: Int { lock.withLock { requestCountValue } }
@@ -55,6 +61,7 @@ public nonisolated final class DemoJamfProServer: DemoServer, @unchecked Sendabl
     public init(scenario: DemoScenario? = nil, now: Date = Date()) {
         self.scenario = scenario
         self.now = now
+        objects = nil
         for device in DemoWorld.devices(managedBy: .jamfPro) {
             records[device.number] = Record(device: device, assetTag: device.assetTag,
                                             siteID: device.isComputer ? "1" : "2")
@@ -62,6 +69,14 @@ public nonisolated final class DemoJamfProServer: DemoServer, @unchecked Sendabl
                 scope[device.isComputer ? "computer-prestages" : "mobile-device-prestages"]?[device.serial] = "1"
             }
         }
+    }
+
+    /// A Jamf Pro holding `objects` (e.g. `.contosoSource()`) and no devices:
+    /// sign-in as on any demo Jamf Pro, everything else from the store.
+    public init(objects: DemoJamfProObjects) {
+        scenario = nil
+        now = Date()
+        self.objects = objects
     }
 
     /// A device's current asset tag, or nil once deleted.
@@ -84,6 +99,7 @@ public nonisolated final class DemoJamfProServer: DemoServer, @unchecked Sendabl
             guard let token = DemoJSON.bearer(request), tokens.contains(token) else {
                 return Self.error(401, "INVALID_TOKEN", "Unauthorized")
             }
+            if let objects { return objects.respond(to: request, parts: parts) }
             switch parts.first {
             case "api": return api(request, Array(parts.dropFirst()))
             case "JSSResource": return classic(request, Array(parts.dropFirst()))

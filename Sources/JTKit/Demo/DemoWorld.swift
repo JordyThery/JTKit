@@ -270,8 +270,23 @@ extension Connection {
         name: "\(DemoSamples.organization) Intune (Demo)", service: .intune, signIn: .entraClientSecret,
         clientID: DemoSamples.uuid(0xc041), tenantID: DemoWorld.intuneTenantID)
 
+    /// Demo mode's Jamf Pro to copy from (JamfMigrator's Source): Contoso's
+    /// golden master, objects only (`DemoJamfProObjects.contosoSource()`). Never saved.
+    public static let demoJamfProSource = Connection(
+        id: UUID(uuidString: DemoSamples.uuid(0xde24)) ?? UUID(),
+        name: "\(DemoSamples.organization) Source (Demo)", service: .jamfPro, signIn: .apiClient,
+        serverURL: "https://\(DemoJamfProObjectSamples.sourceHost)", clientID: DemoSamples.uuid(0xc032))
+
+    /// Demo mode's Jamf Pro to copy to (JamfMigrator's Destination): a fresh
+    /// Contoso tenant (`DemoJamfProObjects.contosoDestination()`). Never saved.
+    public static let demoJamfProDestination = Connection(
+        id: UUID(uuidString: DemoSamples.uuid(0xde25)) ?? UUID(),
+        name: "\(DemoSamples.organization) Destination (Demo)", service: .jamfPro, signIn: .apiClient,
+        serverURL: "https://\(DemoJamfProObjectSamples.destinationHost)", clientID: DemoSamples.uuid(0xc033))
+
     /// Every demo connection of Apple Business and School Manager and the MDMs.
     public static let demoConnections: [Connection] = [
         .demoAppleBusiness, .demoAppleSchool, .demoJamfPro, .demoJamfSchool, .demoIntune, .demoJamfPlatform,
+        .demoJamfProSource, .demoJamfProDestination,
     ]
 }
