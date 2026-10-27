@@ -522,7 +522,7 @@ Until step 11 exists, 1 means build, unit tests and the live checks Jordy asks f
 
 ## Not shared
 
-Each app's own engine (migration, deployment, rule building) and whole Settings screens; only the sections above are shared. Out of scope entirely: IntuneOnboard (with OnboardCore), Device Assist and its customer variants (DeviceAssist-Rituals, DeviceAssist-UMCUtrecht), and Replicator (fork).
+Each app's own engine (migration, deployment, rule building) and whole Settings screens; only the sections above are shared. Out of scope entirely: IntuneOnboard (with OnboardCore), Device Assist and its customer variants, and Replicator (fork).
 
 ## Versions
 
