@@ -290,7 +290,8 @@ nonisolated final class DemoServices: Sendable {
     init(scenario: DemoScenario?) {
         let key = P256.Signing.PrivateKey()
         applePrivateKeyPEM = key.pemRepresentation
-        platform = DemoJamfPlatformServer(scenario: scenario == .jamfSchool ? .jamfSchool : nil)
+        platform = DemoJamfPlatformServer(scenario: scenario == .jamfSchool ? .jamfSchool : nil,
+                                          jamfPro: .contosoPlatform())
         jamfPro = DemoJamfProServer(scenario: scenario)
         jamfProSource = DemoJamfProServer(objects: .contosoSource())
         jamfProDestination = DemoJamfProServer(objects: .contosoDestination(scenario: scenario))

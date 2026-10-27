@@ -348,6 +348,36 @@ public nonisolated enum DemoJamfProObjectSamples {
         return seed
     }
 
+    // MARK: Setup pages
+
+    /// An Apps and Books location as Jamf shows it, its token never included.
+    static func volumePurchasingLocation(id: Int, name: String = "Contoso Apps and Books") -> [String: Any] {
+        ["id": "\(id)", "name": name, "appleId": "apps@contoso.example", "organizationName": DemoSamples.organization,
+         "locationName": name, "countryCode": "US", "tokenExpiration": inAYear() + "T00:00:00Z",
+         "automaticallyPopulatePurchasedContent": true, "sendNotificationWhenNoLongerAssigned": false,
+         "autoRegisterManagedUsers": false, "siteId": "-1"]
+    }
+
+    /// A macOS Self Service branding configuration.
+    static func branding(id: Int) -> [String: Any] {
+        ["id": "\(id)", "applicationName": "Contoso Self Service", "brandingName": "Contoso Self Service",
+         "brandingNameSecondary": "", "homeHeading": "Welcome to Contoso", "homeSubheading": "",
+         "iconId": NSNull(), "brandingHeaderImageId": NSNull()]
+    }
+
+    /// Stands in for the public key Apple Business Manager asks for; not a real certificate.
+    static let adePublicKey = "-----BEGIN CERTIFICATE-----\nQ29udG9zbyBkZW1vIGtleSwgbm90IGEgcmVhbCBjZXJ0aWZpY2F0ZQ==\n-----END CERTIFICATE-----\n"
+
+    /// A date a year from today, as Jamf writes token expiry dates.
+    static func inAYear() -> String {
+        let date = Calendar(identifier: .gregorian).date(byAdding: .year, value: 1, to: Date()) ?? Date()
+        return date.formatted(.iso8601.year().month().day())
+    }
+
+    static func now() -> String {
+        Date().formatted(.iso8601)
+    }
+
     /// Jamf's own patch source, on every tenant.
     private static let patchSources: [String: [(Int, String)]] = [
         "patchinternalsources": [(1, "<patch_internal_source><id>1</id><name>Jamf</name><is_enabled>true</is_enabled>"
