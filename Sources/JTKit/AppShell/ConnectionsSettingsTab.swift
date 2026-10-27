@@ -50,9 +50,11 @@ public struct ConnectionRole {
     }
 
     /// The single role of apps that use one connection at a time.
-    public static func active(selection: Binding<UUID?>) -> ConnectionRole {
+    /// - Parameter demo: the demo connections it offers while demo mode is on
+    ///   (see `DemoConnectionChoice`); nil for an app without demo mode.
+    public static func active(selection: Binding<UUID?>, demo: DemoConnectionChoice? = nil) -> ConnectionRole {
         ConnectionRole("Active connection", useTitle: "Use This Connection", selection: selection,
-                       services: nil, all: nil, accessibilityName: ConnectionMenuText.menuTitle)
+                       services: nil, all: nil, demo: demo, accessibilityName: ConnectionMenuText.menuTitle)
     }
 
     /// Whether a connection can have this role.

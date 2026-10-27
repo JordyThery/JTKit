@@ -4,10 +4,10 @@ import Foundation
 /// Apple Business or School Manager, Jamf Pro, Jamf School and Intune (and
 /// Checkpoint can compare them). Every demo server reads its records from here.
 ///
-/// Contoso (Apple Business Manager) has 30 devices: Macs and iPads sent to
-/// "Contoso Jamf Pro", iPhones sent to "Contoso Intune". Contoso Academy
-/// (Apple School Manager) has 10, sent to "Contoso Academy Jamf School". One
-/// more Mac is in Jamf Pro only. The gaps a real fleet has are there on
+/// Contoso (Apple Business Manager) has 31 devices: Macs, iPads and one
+/// iPhone sent to "Contoso Jamf Pro", the other iPhones sent to "Contoso
+/// Intune". Contoso Academy (Apple School Manager) has 10, sent to "Contoso
+/// Academy Jamf School". One more Mac is in Jamf Pro only. The gaps a real fleet has are there on
 /// purpose, each once unless noted: iPhones missing from Intune (three), a
 /// Mac whose AppleCare has expired, a new iPad not assigned to any server, a
 /// Mac Apple has released that Jamf Pro still manages (release pending), a Mac
@@ -40,7 +40,7 @@ public nonisolated enum DemoWorld {
     }
 
     public struct Device: Sendable, Hashable, Identifiable {
-        /// 1…41, unique; also the device's ID in Jamf Pro.
+        /// 1…42, unique; also the device's ID in Jamf Pro.
         public let number: Int
         public let serial: String
         public let family: Family
@@ -224,6 +224,8 @@ public nonisolated enum DemoWorld {
         }
         // A Mac bought outside Apple Business Manager, enrolled in Jamf Pro by hand.
         add(.mac, organization: nil, server: nil, mdm: .jamfPro, order: nil)
+        // Contoso: an iPhone on Jamf Pro (42), added later so 1–41 stay as they were.
+        add(.iPhone, organization: .contoso, server: jamfProServerID, mdm: .jamfPro, order: "DEMO-1004")
         return result
     }
 

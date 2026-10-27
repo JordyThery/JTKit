@@ -88,8 +88,8 @@ struct DemoWorldDataTests {
 
     @Test("About forty devices across Contoso, Contoso Academy and Jamf Pro only")
     func shape() {
-        #expect(DemoWorld.devices.count == 41)
-        #expect(DemoWorld.devices(in: .contoso).count == 30)
+        #expect(DemoWorld.devices.count == 42)
+        #expect(DemoWorld.devices(in: .contoso).count == 31)
         #expect(DemoWorld.devices(in: .academy).count == 10)
         #expect(Set(DemoWorld.devices.map(\.family)) == Set(DemoWorld.Family.allCases))
         for device in DemoWorld.devices(in: .academy) where device.appleServerID != nil {
@@ -151,6 +151,22 @@ struct DemoJamfProServerTests {
         let devices = try await client.mobileDevices(serials: mobiles.map(\.serial))
         #expect(devices.records.count == mobiles.count)
         #expect(try await client.computers(serials: [DemoWorld.notInApple[0].serial]).records.count == 1)
+    }
+
+    @Test("Device 42 is an iPhone in Jamf Pro, found by serial and by UDID; 1–41 are unchanged")
+    func jamfProIPhone() async throws {
+        let iPhone = try #require(DemoWorld.devices.last)
+        #expect(iPhone.number == 42 && iPhone.serial == "ZZDEMOP42RX" && iPhone.family == .iPhone)
+        #expect(iPhone.organization == .contoso && iPhone.appleServerID == DemoWorld.jamfProServerID)
+        #expect(iPhone.managedBy == .jamfPro && iPhone.assetTag == "CT-1042")
+        #expect(DemoWorld.devices(managedBy: .jamfPro).filter { $0.family == .iPhone } == [iPhone])
+        #expect(DemoWorld.devices.prefix(41).map(\.number) == Array(1...41))
+        #expect(DemoWorld.devices[40].family == .mac && DemoWorld.devices[40].organization == nil)
+        let client = try jamfPro(demoMode())
+        let bySerial = try #require(try await client.mobileDevice(serial: iPhone.serial).record)
+        #expect(bySerial.udid == iPhone.udid)
+        let byUDID = try #require(try await client.mobileDevice(udid: iPhone.udid).record)
+        #expect(byUDID.hardware?.serialNumber == iPhone.serial && byUDID.general?.assetTag == iPhone.assetTag)
     }
 
     @Test("ADE instances carry Apple's server ID, PreStage scope can be changed")
@@ -300,8 +316,8 @@ struct DemoAppleBusinessServerTests {
         #expect(try await client.assignedServerID(serial: DemoWorld.missingFromIntune[0].serial) == DemoWorld.intuneServerID)
 
         let snapshot = try await client.organizationSnapshot()
-        #expect(snapshot.devices.count == 30)
-        #expect(snapshot.serverIDBySerial.count == 28, "one unassigned, one released")
+        #expect(snapshot.devices.count == 31)
+        #expect(snapshot.serverIDBySerial.count == 29, "one unassigned, one released")
         #expect(snapshot.unknownAssignments.isEmpty && snapshot.unreadableServers.isEmpty)
         let events = try await client.auditEvents(serial: expired.serial, start: Date(timeIntervalSinceNow: -86_400 * 500),
                                                   end: Date())
@@ -318,7 +334,7 @@ struct DemoAppleBusinessServerTests {
         ])
         let client = try ABM.Client(connection: .demoAppleBusiness, privateKey: { key.pemRepresentation },
                                     session: network.session, log: nil)
-        #expect(try await client.organizationSnapshot().devices.count == 30)
+        #expect(try await client.organizationSnapshot().devices.count == 31)
     }
 
     @Test("A write is accepted, watched to completion and changes the devices")
@@ -526,6 +542,23 @@ struct DemoConnectionChoiceTests {
         demo.isOn = true
         role.menuChoice(connectionCount: 2).wrappedValue = .all
         #expect(!demo.isOn && all.isChosen)
+    }
+
+    @Test("The single connection role offers demo connections too, and a saved one leaves demo mode")
+    func activeRole() {
+        let demo = demoMode()
+        let saved = UUID()
+        var selection: UUID? = saved
+        let binding = Binding(get: { selection }, set: { selection = $0 })
+        let choice = DemoConnectionChoice(mode: demo, connections: [.demoJamfPro, .demoJamfSchool])
+        let role = ConnectionRole.active(selection: binding, demo: choice)
+        #expect(role.title == ConnectionRole.active(selection: binding).title && !role.usesDemo)
+        demo.isOn = true
+        #expect(role.usesDemo && choice.selected == .demoJamfPro)
+        #expect(choice.label(allTitle: nil, roleName: role.title).title == "Contoso Jamf Pro (Demo)")
+        role.menuChoice(connectionCount: 1).wrappedValue = .connection(saved)
+        #expect(!demo.isOn && selection == saved)
+        #expect(ConnectionRole.active(selection: binding).demo == nil)
     }
 }
 
