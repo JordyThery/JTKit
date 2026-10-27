@@ -487,8 +487,51 @@ Neither reads Graph's request ID (`innerError.request-id`) or sends a `client-re
 
 ### Step 10: Demo mode (0.11.0)
 - **Move:** demo mode with a fake server from Profile2Blueprint (`DemoFixtures`, `DemoBlueprintServer`), widened to fake Jamf Pro, Jamf Platform, Jamf School, Intune and Apple Business/School Manager servers, so every app can run without a tenant. Demo mode never touches saved connections.
-- **First app:** AppSettings2Blueprint. **Then:** the other apps, starting with Checkpoint.
+- **First app:** AppSettings2Blueprint. **Then:** Checkpoint, Blueprint Managed Preferences Editor, Profile2Blueprint, Serial Number Reader, Intune Deployer, JamfMigrator, Jamf Deployer last (order decided by Jordy on 2026-10-27).
 - **Check by hand:** the app runs in demo mode without a tenant and shows believable sample data; switching back to a real connection works.
+
+#### What Profile2Blueprint does today (surveyed 2026-10-27)
+- A switch "Offline Demo Mode" (UserDefaults `demoMode`) in the slot of the connection picker and the Connection menu; the picker reads "Offline Demo" with `testtube.2`. Choosing a tenant leaves demo mode; the current tenant is never changed.
+- `AppModel.activeWorkspace()` picks the demo or the tenant's client; everything after that is the same code. The demo is a real `JamfPlatform.Client` on `https://<uuid>.demo.invalid` with a fixed token, its requests answered inside the app by `DemoURLProtocol` and `DemoBlueprintServer` (Blueprints and device groups in memory, with the live service's observed behaviour). `DemoFixtures` holds the Classic profiles and groups.
+- Gaps the JTKit version closes: the Classic side is swapped above JTKit (`DemoClassicAPI`), so it doesn't run the real code; `DemoURLProtocol` only claims `.demo.invalid` hosts, so a request to any other host would reach the network; only the Platform API is faked.
+- **Fixed in Profile2Blueprint before step 10 (2026-10-27, approved by Jordy, merged into main):** demo runs wrote into the real `history.json`, `scope-backups.json` and `sessions.json`. Demo mode now keeps them in a temporary folder of its own per launch (`DemoFiles`), and History shows the demo's entries while demo mode is on. A scope restore now checks where the backup was taken: a demo backup is never restored on a real tenant, a real one never in demo mode or on another tenant, before anything is sent (this couldn't happen before, but only because of how backups were looked up). The 22 demo entries in Jordy's `history.json` and 1 in `scope-backups.json` were removed after a dated copy in `_connection-backups/`; the 61 real entries and 3 real backups were checked byte for byte. Profile2Blueprint's turn in step 10 therefore only swaps its demo code for JTKit's.
+
+#### Design (decided by Jordy on 2026-10-27)
+- **Where it plugs in:** below JTKit's clients. Every client already takes a connection, a way to read the secret and a `RequestRecorder` (which carries the `URLSession`, sign-in included). In demo mode JTKit supplies all three; the app changes only the one place where it builds its clients, and everything below runs unchanged, its allow-list included.
+- **In `Sources/JTKit/Demo/`:**
+  - `DemoMode`: the switch (`@Observable`, main actor), saved under a key the app passes in (Profile2Blueprint keeps `demoMode`).
+  - `DemoNetwork`: one private session whose only protocol answers **every** request and routes it by host to a fake server (`*.demo.invalid` for Jamf, the real Microsoft and Apple hosts for Intune and ABM/ASM). An unknown host fails; nothing can leave the Mac.
+  - `DemoConnection`: connections made in memory, fixed IDs in a reserved fake range, Jamf hosts on `*.demo.invalid`, names like "Contoso (Demo)". Never put into `ConnectionStore`.
+  - `DemoSecretStore`: returns a fixed fake secret, refuses every write.
+  - Fake servers: `DemoJamfPlatformServer` (moved from Profile2Blueprint, plus devices, environments and permissions; apps can add their own routes, e.g. Profile2Blueprint's Classic profiles, which then go through JTKit), `DemoJamfProServer` (token, version, privileges, device inventory by serial, MDM commands, asset tag, FileVault/LAPS with fake values, and a general Classic object store for JamfMigrator), `DemoJamfSchoolServer`, `DemoIntuneServer` (Entra token, `managedDevices` and actions, a general Graph store for Intune Deployer, a fake upload host), `DemoAppleBusinessServer` (sign-in, devices, MDM servers, AppleCare, activities that move through Apple's statuses; ABM and ASM). The token endpoints are faked too, so sign-in code runs; only Intune Deployer's MSAL sign-in is replaced by a fixed demo token.
+  - `DemoWorld`: one shared set of sample data, so a device is the same in ABM, Jamf Pro and Intune (Checkpoint).
+  - `DemoModeToggle` and `DemoModeLabel`: the shared switch and picker label, the same wording everywhere.
+  - Data lives in memory and is reset at each launch; writes succeed in memory. Optional scenarios for error screens (`-JTKitDemoScenario missingPermission`, `serverErrors`).
+- **Sample data:** organisations "Contoso" and "Contoso Academy" (ASM, Jamf School). Hosts on `*.demo.invalid`, e-mail and web on `*.contoso.example`. Serials start with `ZZDEMO` (e.g. `ZZDEMO4K7Q2M`). IDs and UDIDs in the reserved fake UUID range. People: invented first names with the surname "Sample". About 40 devices with believable variety (missing from Intune, AppleCare expired, not assigned, release pending). A JTKit test checks every serial, host, e-mail and UUID in the sample data against these patterns, so no real value slips in.
+- **The switch in each app:** named **"Demo Mode"** everywhere (Profile2Blueprint's "Offline Demo Mode" is renamed on its turn, keeping the `demoMode` key). It sits in the connection picker's slot and the Connection menu; the picker reads "Demo" with `testtube.2`, help "Sample data. Nothing is sent to a tenant."; choosing a real connection leaves demo mode. Jamf Deployer (no picker) has it in its Tenant menu, with a small demo fleet in its sidebar. Available in **release builds** too. Confirmations still appear and name the demo organisation. The activity log shows "Demo" as the connection.
+- **"Demo" in every window's title** while demo mode is on, JTKit's own windows (About, Settings, Activity Log) included, so screenshots can't be mistaken for real data (added by Jordy).
+- **Real connections while in demo mode:** their names stay in the picker so you can switch back. Nothing else of them is used.
+- **Public lookups** that aren't a tenant (App Store search, GitHub baselines, the update check) keep working in demo mode; they are blocked in the UI-test sandbox.
+- **Per app:**
+
+  | App | Demo provides | Note |
+  |---|---|---|
+  | AppSettings2Blueprint | Platform: device groups, Blueprints | local app scan and App Store lookups stay real |
+  | Blueprint Managed Preferences Editor | Platform: Blueprints with managed preferences | |
+  | Checkpoint | all four services from `DemoWorld`, two organisations for "All" | |
+  | Intune Deployer | a Contoso tenant in the Graph store | MSAL replaced by a demo token; its client factory gains a session |
+  | Jamf Deployer | a small demo fleet | **stops at the plan:** Terraform's own network calls can't be faked, so deploy says it isn't available in demo mode |
+  | JamfMigrator | "Contoso Production" → "Contoso Staging" | general Classic store |
+  | Profile2Blueprint | Classic profiles on JTKit's Platform server | demo files already fixed (above) |
+  | Serial Number Reader | Jamf Pro and Jamf School lookups, plus a **pretend USB iPhone** | the pretend iPhone is the app's own code, in demo mode only; actions on it are simulated and can never reach real hardware |
+
+- **The guarantee,** each part enforced in code and tested in JTKit:
+  1. No real tenant: the demo session answers everything itself; a test builds every JTKit client in demo mode and checks every request was answered by a fake server.
+  2. No Keychain: demo connections carry `DemoSecretStore`; the app's Keychain store is never passed in.
+  3. No saved connections: demo connections never enter `ConnectionStore`, which also refuses to save a `.demo.invalid` host or an ID in the fake range; the current connection is left as it was.
+  4. No app files: what an app saves while in demo mode goes to a temporary folder from JTKit (`DemoMode.scratchDirectory`), as Profile2Blueprint now does.
+- **For step 11:** `JTKitUITestSupport` gets `launchInDemo()`, which starts the app with `-JTKitDemo YES -JTKitSandbox YES`: demo mode for that run only (not saved), an in-memory connections list and secret store, no update check, public lookups blocked. The smoke tests (launch, About, Settings tabs, connections editor with a throwaway connection, activity log showing "Demo", the app's main task) then get the same answers every time. `release-check.sh` also compares a fingerprint of the app's connections file and its Keychain item names (no secrets) before and after, and stops if they differ.
+- **Versions:** step by step. 0.11.0 brings the shared parts and the Platform server with AppSettings2Blueprint; each later server comes in a 0.11.x with the first app that needs it (Checkpoint: Jamf Pro, Jamf School, Intune devices, ABM/ASM and `DemoWorld`; Intune Deployer: the Graph store; JamfMigrator: the Classic store). Apps already on demo mode take each new version.
 
 ### Step 11: Autonomous testing and the release check (0.12.0) (added by Jordy on 2026-10-26)
 Replaces the 2026-10-25 "not planned" note: Jamf Deployer's long suites still aren't moved or run, but what makes its testing autonomous is.
