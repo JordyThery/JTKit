@@ -46,7 +46,14 @@ Only change an app when Jordy asks for that app.
 
 Never run the full UI test suites or the `run-*-ui-tests.sh` scripts of Jamf Deployer and AppSettings2Blueprint: they take too long and don't test the right things (decided by Jordy on 2026-10-25). Run a single UI test only when Jordy asks for it by name. "Run its tests" in a prompt or in `ROADMAP.md` means the unit tests.
 
-From step 11 on, each app has a release check (`Scripts/release-check.sh`, see ROADMAP step 11): build from its own project against the published JTKit, unit tests, short UI smoke tests in demo mode, and **required live checks against sandbox tenants** (decided by Jordy on 2026-10-26: they replace most of his hand checks). Live checks only run against tenants on the local allow-list outside git, create only prefixed objects and always clean up. Never name a real tenant in a repo.
+From step 11 on, each app has a release check (`Scripts/release-check.sh`, see ROADMAP step 11), in five stages: build from its own project against the published JTKit and sign in to the app's allow-listed tenants (`--tenants`: all of them), unit tests, short UI smoke tests in demo mode, **required live checks against sandbox tenants** (decided by Jordy on 2026-10-26: they replace most of his hand checks), and a report. Claude may run the release check and the apps' smoke-test classes unattended (decided by Jordy on 2026-10-27; start it with `nohup` and poll); the rule above for the full UI suites still stands.
+
+Live checks (decided by Jordy on 2026-10-27):
+- Only tenants on the allow-list, `~/Library/Application Support/JTKit Release Check/allowlist.json`: outside every repo, never committed, hostnames, non-secret IDs and access levels only. Deny by default. Never add a customer tenant. Never name a real tenant in a repo; tests and scripts use role names.
+- Access is enforced in code (`JTKitLiveCheck`): read-only tenants get GET only (plus sign-in and sign-out); Apple Business/School Manager is read only, assign, unassign, release and deadline changes never run; elsewhere only `JTKTEST`-prefixed objects are created, and only objects the run created are changed or deleted. Cleanup on every exit, also on failure. The production Jamf Pro is read only, and only with `--include-production`.
+- Never ask for secrets in chat and never print them. Credentials come from the login Keychain: the apps' saved connections, or `release-check-setup.sh`, which asks Jordy in Terminal with hidden input.
+- Jamf Deployer's live check keeps OpenTofu's state and its store in a temporary folder and never pushes in Team Mode.
+- New UI test targets are added with Xcode's own new-target tool, never by editing `project.pbxproj`.
 
 ## Releasing an app
 

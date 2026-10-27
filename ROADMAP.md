@@ -552,13 +552,98 @@ Neither reads Graph's request ID (`innerError.request-id`) or sends a `client-re
 Replaces the 2026-10-25 "not planned" note: Jamf Deployer's long suites still aren't moved or run, but what makes its testing autonomous is.
 - **Move into a `JTKitUITestSupport` product:** Jamf Deployer's UI-test helpers (`UITestSupport.swift`: launching the Debug build, finding fields and elements, the screen dump on failure) and a runner script template from its `Scripts/run-*-ui-tests.sh` (credentials from the login Keychain into environment variables, never into files or logs; cleanup on every exit).
 - **One release check per app** (`Scripts/release-check.sh`), run by Claude unattended, in this order, stopping at the first failure:
-  1. Build from the app's **own project** against the **published** JTKit version it names (not the workspace).
+  1. Build from the app's **own project** against the **published** JTKit version it names (not the workspace), and sign in to each allow-listed tenant the app uses (decided by Jordy on 2026-10-27).
   2. Unit tests.
   3. **UI smoke tests in demo mode:** launch, About, Settings tabs, connections editor, activity log and the app's main task. Minutes, not hours.
   4. **Live checks against sandbox tenants (required, decided by Jordy):** the same main task against real sandbox tenants (Jamf, Intune, Apple Business/School Manager, whichever the app uses), creating only objects with a recognisable prefix and removing them afterwards, also when a step fails. The tenants come from a local allow-list file outside git (no tenant names in the public repos); the check refuses to run against any tenant not on it. Credentials come from the login Keychain.
   5. A short report: what ran, what passed, what was cleaned up.
 - **First app:** Jamf Deployer (where the helpers come from). **Then:** every other app.
 - **Check by hand:** the release check passes unattended for each app; a deliberately broken build or a failing live step stops it and leaves no test objects behind.
+
+#### What the apps have today (surveyed 2026-10-27)
+- **Jamf Deployer** (`Jamf DeployerUITests`, 10 files, 88 tests, all live): one class `DeployerUITestCase` in `UITestSupport.swift`. Generic: `makeApp` (Debug build under `Build/Products/Debug`), the UI dump on failure (`UIDUMP-BEGIN…END`, no screenshot), `field`, `any`, `anyContaining`, `env` (skips when missing), `tap`, `scrollIntoView`, `type`, `paste` (through the pasteboard, cleared afterwards), `waitUntilGone`, `openSidebar`, `saveInDocuments`, `dialogButton`. Its own: `openTenant`, `connect`, `connectJamfPro`, `stageCustomCategory`, `removeTenant`, `waitForReview`, `deployCurrentPreview`, `previewAndDeploy`, `startRollout`, `removeCatalogSources`, `openSettings(of:)`, `checkForChanges`, `blockCheckbox`, `openExportSheet`, `chooseTenantAndFolder`. It passes no launch arguments. Ten `Scripts/run-*` scripts read Keychain items (`JamfDeployer-Spike`, `-Demo`, `-Beta`; accounts `base-url`, `client-id`, `client-secret`, …) into `TEST_RUNNER_*` variables, run `build-for-testing` and `test-without-building -only-testing:` per step (retried once without a result) and clean up on `EXIT`/`INT`/`TERM`; prefixes `UIT - `, `UIC - `, `UIF - `, `UIT EX - `, `UIT RN - `; no hostnames in the scripts.
+- **AppSettings2Blueprint** (`AppSettings2BlueprintUITests`, offline): `AppSettingsUITestCase` adds a temporary folder per test, a screenshot on failure, launch arguments, `relaunch`, `element(identifier:)`, `goToFolder`; `Scripts/run-ui-tests.sh` exports attachments with `xcresulttool`.
+- **No UI test target:** Blueprint Managed Preferences Editor, Checkpoint, Intune Deployer, JamfMigrator, Profile2Blueprint, Serial Number Reader.
+- **Live tests today:** only Intune Deployer's `LiveTenantTests` (read tests run on any ⌘U when a signed-in tenant exists; the write lifecycle needs `INTUNE_DEPLOYER_LIVE_WRITE=1`, prefix `[AUTOTEST]`, identity tags, `sweepAutotestObjects`).
+- **Demo launch arguments** (`-JTKitDemo`, `-JTKitSandbox`, `-JTKitDemoScenario`) already work in every app; no UI test uses them yet.
+- **One doorway:** every JTKit request, sign-in included, goes through `RequestRecorder.send`/`download`. Outside it: MSAL's own networking (Intune Deployer), OpenTofu (Jamf Deployer), plain `URLSession` calls (update check, Serial Number Reader's restore downloads). The Platform API, Graph and Apple's API share one host per region or service, so a hostname alone can't tell tenants apart there.
+
+#### Design (decided by Jordy on 2026-10-27)
+- **`JTKitUITestSupport`** (new library product, XCTest, for UI test targets only; doesn't link JTKit, its launch-argument names are checked against `DemoMode`'s by a JTKit test):
+  - From Jamf Deployer, made general: `makeApp` (app name passed in), the failure dump plus AppSettings2Blueprint's screenshot, `field`, `any`, `anyContaining`, `dialogButton`, `tap`, `type`, `scrollIntoView`, `waitUntilGone`, `openSidebar`, `paste`, `env`, and `saveInDocuments` as "save in a chosen folder". From AppSettings2Blueprint: the folder per test, `relaunch`, `element(identifier:)`, `goToFolder`. Jamf Deployer's own helpers stay in the app; its ten `run-*` scripts stay as they are and aren't run.
+  - New shared checks: `launchInDemo(scenario:)` (`-JTKitDemo YES -JTKitSandbox YES -ApplePersistenceIgnoreState YES`, Save panel in the test's folder), `checkAbout()`, `checkSettingsTabs(_:)` (General first, Updates last), `checkConnectionsEditor()` (adds and removes a throwaway connection in the sandbox's in-memory list), `checkActivityLog()` (⌘⇧L shows "Demo"), `checkDemoTitles()` ("— Demo" in every window title).
+- **Runner template** (`Scripts/release-check-lib.sh` in JTKit): each app's `Scripts/release-check.sh` (about 20 lines: app, scheme, the roles it uses) loads it from the published JTKit checkout the app resolved, so the script matches the JTKit version under test. From the `run-*` scripts: Keychain reads into `TEST_RUNNER_*` variables only, a temporary work folder, `-only-testing:` steps retried once without a result, cleanup on every exit (`EXIT`, `INT`, `TERM`). Claude starts it with `nohup` and polls.
+- **The five stages per app** (the list above in detail; stop at the first failure, cleanup runs either way):
+  1. **Build and sign in:** the allow-list exists, is readable by Jordy only and lies outside every git work tree; the app's roles are on it; leftovers from earlier runs are removed; `build-for-testing` from the app's own project against the published JTKit (a broken build stops here); then a sign-in and one small read for **each allow-listed tenant the app uses**. `release-check.sh --tenants` signs in to every tenant on the allow-list instead.
+  2. **Unit tests** (`test-without-building`).
+  3. **UI smoke tests in demo mode** (below).
+  4. **Live checks** (below).
+  5. **Report** in the run's folder: what ran, what passed, what was created and removed (counts), anything that couldn't be removed (which fails the check), and the app's connections file and Keychain item names compared before and after by fingerprint (no secrets read). Claude summarises it.
+- **The allow-list:** `~/Library/Application Support/JTKit Release Check/allowlist.json` (mode 600, outside every repo, never committed; runs and reports in `runs/` beside it). Per entry: a role name (what tests and scripts refer to, so no tenant is named in a repo), the service, the hostname or non-secret ID (Platform environment ID and region, Entra tenant ID, Apple organisation client ID), a `production` mark, and the access level. Never secrets. Deny by default: anything not on it is refused before it's sent. Claude drafts it from the apps' saved connections (hostnames and non-secret IDs only) and shows it to Jordy before the first run. It contains only these tenants, never a customer's:
+
+  | Role | Service | Access |
+  |---|---|---|
+  | Jamf test tenant A | Jamf Pro direct and Platform | **full:** create, update and delete only prefixed test objects, cleaned up on every exit |
+  | Jamf test tenant B | Jamf Pro direct and Platform | **full**, as A |
+  | Intune test tenant (Intune Deployer's demo tenant) | Intune | **create and remove:** creates prefixed test objects and removes them, also on failure; nothing else is changed or deleted |
+  | Jamf Pro read-only tenant | Jamf Pro | **read only** |
+  | Jamf School read-only tenant | Jamf School | **read only** |
+  | Production Jamf Pro | Jamf Pro, marked production | **read only**, and only with `--include-production`; not in the routine check |
+  | Apple organisations saved in Checkpoint | Apple Business / School Manager | **read only**; assign, unassign, release and deadline changes are never run |
+
+- **Enforced in code** (`JTKitLiveCheck`, a new test-only library product; apps never ship it). It plugs in where demo mode does: the check builds the app's clients with a `RequestRecorder` whose session refuses before sending. Each rule is tested in JTKit:
+  1. A host, environment, Entra tenant or Apple client ID not on the allow-list: refused.
+  2. **Read-only tenants: GET only.** The only other requests let through are sign-in and sign-out at the exact Jamf, Microsoft and Apple token paths. Every Apple activity (`orgDeviceActivities`) is refused.
+  3. **Full and create-and-remove tenants:** a create is refused unless the object's name starts with the prefix; an update or delete is refused unless the object is in the run's ledger (written to disk after every create, so a crash still leaves a cleanup list). MDM commands are refused (they aren't test objects).
+  4. Graph: before every request the bearer token's tenant ID is compared with the allow-list, which also covers MSAL's sign-in outside the doorway.
+- **Prefix:** `JTKTEST <app code> <run>` in every app (e.g. `JTKTEST JM 1027-1432 – Category`). **Cleanup on every exit:** delete the ledger's objects; then, on the full tenants only, a sweep of anything still named with `JTKTEST`. Once, on the first run, the sweep also removes old `UIT – ` (Jamf Deployer) and `[AUTOTEST]` (Intune Deployer, on the Intune test tenant, by its identity tag) leftovers. The create-and-remove tenant otherwise has no prefix sweep: only the ledger.
+- **Credentials:** never asked for in chat, never printed. The live checks run inside the app's own test host, so they reuse the app's saved connections (matched to the allow-list by host or ID) and never change them; the stage 5 fingerprint proves it. Where no saved connection exists, `release-check-setup.sh` asks in Terminal with hidden input (`security add-generic-password … -w` as the last option, so the secret never appears in a command line) and saves to the login Keychain, readable by `/usr/bin/security` only:
+
+  | Source | Keychain service | Account |
+  |---|---|---|
+  | AppSettings2Blueprint | `AppSettings2Blueprint.client-secret` | connection ID |
+  | Blueprint Managed Preferences Editor | `Blueprint Managed Preferences Editor.client-secret` | connection ID |
+  | Checkpoint | `DeviceStatus.secrets` | `jamf.<ID>`, `abm.<ID>` |
+  | Intune Deployer | MSAL's own cache (the app's saved Microsoft sign-in) | set by MSAL |
+  | Jamf Deployer | `be.jordythery.jamf-deployer.platform-client-secret`; its scripts' `JamfDeployer-Spike`, `-Demo`, `-Beta` | tenant ID; `base-url`, `client-id`, … |
+  | JamfMigrator | `JamfMigrator-tenant` | tenant ID |
+  | Profile2Blueprint | `be.jordythery.profile2blueprint.oauth-client-secret` | tenant ID |
+  | Serial Number Reader | `be.jordythery.SerialNumberReader.jamf` | connection ID |
+  | New, where no app has one | `be.jordythery.release-check` | `<role>/<item>` |
+
+  Intune Deployer uses its saved Microsoft sign-in; when MSAL needs Jordy again (about every 90 days), stage 1 stops and says to sign in once in the app. Before an app's turn Claude checks its Debug build is signed with the team (not "Sign to Run Locally"), so the test host can read its Keychain items without a prompt.
+- **UI smoke tests in demo mode** (one small class per app, about six tests, run with `-only-testing:`; a few minutes): launch, About, Settings tabs, connections editor, activity log, "— Demo" titles, and the main task:
+
+  | App | Main task |
+  |---|---|
+  | AppSettings2Blueprint | build a rule set, see its JSON, deploy to a Contoso Blueprint |
+  | Blueprint Managed Preferences Editor | edit a Microsoft AutoUpdate key, save; only that payload changes |
+  | Checkpoint | Sample Serials: ABM, Jamf and Intune columns, the 131-day gap |
+  | Intune Deployer | Plan on Contoso Intune (creates plus "Contoso – Legacy Wi-Fi" deleted), Apply with its confirmation |
+  | Jamf Deployer | Contoso: Check for Changes finds the Teams change, Preview shows the fixed plan, Deploy dimmed |
+  | JamfMigrator | Preview, Run, Verify clean |
+  | Profile2Blueprint | migrate a Contoso profile; the scope screen asks which Design Macs |
+  | Serial Number Reader | the pretend iPhone appears, its lookup finds Contoso Jamf Pro, a simulated Restart is logged |
+
+- **Live checks per app** (in the app's unit test target, skipped unless the release check switches them on):
+
+  | App | Tenants | Creates and does | Removes |
+  |---|---|---|---|
+  | AppSettings2Blueprint | A (Platform) | an empty prefixed device group and a prefixed Blueprint with an app-settings step scoped to it; edits the steps, deploys, reads back | Blueprint, group |
+  | Blueprint Managed Preferences Editor | A (Platform) | a prefixed Blueprint with managed preferences (made by the check; the app has no create) and an empty prefixed group; edits with the app's code, checks only the edited payload changed, deploys | Blueprint, group |
+  | Checkpoint | read only: Jamf Pro, Jamf School, the Apple organisations, the Intune test tenant (read only here); production only with `--include-production` | nothing; takes about 5 devices per Apple organisation per run (Apple's rate limit) and looks them up everywhere; no serials stored | — |
+  | Intune Deployer | Intune test tenant | its lifecycle (about 10 objects, `JTKTEST` prefix and identity tags), assignments only to an empty prefixed group, never All Devices; one update | the ledger's objects |
+  | Jamf Deployer | A (Platform), B (Jamf Pro direct) | a tiny prefixed set (a category and a script) deployed with OpenTofu; Check for Changes clean; one object changed by API; Check for Changes finds it; deploy reverts it | OpenTofu removes them, then the prefix sweep |
+  | JamfMigrator | A → B | the check makes prefixed source objects on A (category, script, smart group); migrates only those to B; Verify | on A and B |
+  | Profile2Blueprint | A (Platform) | a prefixed Classic profile and computer group; migrates to a prefixed Blueprint; scope change on the prefixed profile only | Blueprint, profile, group |
+  | Serial Number Reader | read only: Jamf Pro, Jamf School; production only with `--include-production` | nothing; one serial from a list read, then the app's own lookup; no USB | — |
+
+  - **Jamf Deployer:** OpenTofu's traffic doesn't pass the doorway, so it is protected by the allow-list check before any engine run, full tenants only, and the prefix sweep. Never Day 0 or any tenant-wide setting. OpenTofu's state and the run's store live in a temporary folder, never Jordy's real store, and nothing is pushed in Team Mode.
+  - **JamfMigrator:** prefixed source objects on tenant A are allowed (its CLAUDE.md is updated on its turn). A test-only "only these objects" filter, switched on by the release check, so a live run never relies on excluding everything else. Delete mode and Wipe never run live.
+  - **Intune Deployer:** its `LiveTenantTests` move behind the release check's switch, read tests included, so ⌘U never reaches a tenant.
+- **On Jordy's Mac** (Claude lists the exact prompts at the first run): once, Developer Mode for the command-line tools (`DevToolsSecurity -enable`) and UI automation without a password (`automationmodetool enable-automationmode-without-authentication`), and Accessibility for Xcode's test runner if macOS asks. During stage 3 the Mac stays awake, logged in and unlocked, and isn't used (3–5 minutes per app; the script runs `caffeinate`; a Focus mode keeps notifications away). The login Keychain stays unlocked. Rough time for all five stages: Serial Number Reader and Blueprint Managed Preferences Editor 8–10 minutes, AppSettings2Blueprint and Profile2Blueprint 10–12, Checkpoint 10–15, JamfMigrator 12–15, Intune Deployer 12–18, Jamf Deployer 25–35.
+- **UI test targets:** Claude adds the six missing ones with Xcode's own new-target tool, never by editing `project.pbxproj`, and checks each is a macOS UI testing bundle whose target application is the right app.
+- **Order:** Jamf Deployer first (0.12.0: `JTKitUITestSupport`, `JTKitLiveCheck`, the template), then AppSettings2Blueprint, Blueprint Managed Preferences Editor, Profile2Blueprint, JamfMigrator, Serial Number Reader (first read-only tenants), Checkpoint, Intune Deployer. Additions a later app needs come as 0.12.x; step 12's fixes then follow as the next version.
 
 ### Step 12: Independent review of JTKit (decided by Jordy on 2026-10-26)
 - A full code review of JTKit by Claude Fable, run separately from the conversations that built it, against these rules: secrets never logged or exported, retries and "never repeat a write", confirmation rules for irreversible commands, the standards above, and the public API before it's frozen.
