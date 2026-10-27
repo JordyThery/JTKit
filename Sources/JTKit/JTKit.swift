@@ -5,7 +5,7 @@ import Foundation
 /// Components are added one at a time; see CLAUDE.md for the plan.
 public enum JTKit {
     /// Version of this package. Keep in sync with the git tag.
-    public static let version = "0.11.5"
+    public static let version = "0.11.6"
 
     /// "AppName/version", sent as the User-Agent of every request JTKit makes
     /// unless the request sets its own. The name is the app's bundle name

@@ -150,6 +150,10 @@ public final class DemoMode {
     public var jamfPlatformServer: DemoJamfPlatformServer { services().platform }
     /// The servers behind the other demo connections; they hold `DemoWorld`.
     public var jamfProServer: DemoJamfProServer { services().jamfPro }
+    /// The servers behind "Contoso Source (Demo)" and "Contoso Destination
+    /// (Demo)"; their objects are in `objects`.
+    public var jamfProSourceServer: DemoJamfProServer { services().jamfProSource }
+    public var jamfProDestinationServer: DemoJamfProServer { services().jamfProDestination }
     public var jamfSchoolServer: DemoJamfSchoolServer { services().jamfSchool }
     public var intuneServer: DemoIntuneServer { services().intune }
     public var appleBusinessServer: DemoAppleBusinessServer { services().appleBusiness }
@@ -272,6 +276,8 @@ extension Connection {
 nonisolated final class DemoServices: Sendable {
     let platform: DemoJamfPlatformServer
     let jamfPro: DemoJamfProServer
+    let jamfProSource: DemoJamfProServer
+    let jamfProDestination: DemoJamfProServer
     let jamfSchool: DemoJamfSchoolServer
     let intune: DemoIntuneServer
     let appleBusiness: DemoAppleBusinessServer
@@ -286,6 +292,8 @@ nonisolated final class DemoServices: Sendable {
         applePrivateKeyPEM = key.pemRepresentation
         platform = DemoJamfPlatformServer(scenario: scenario == .jamfSchool ? .jamfSchool : nil)
         jamfPro = DemoJamfProServer(scenario: scenario)
+        jamfProSource = DemoJamfProServer(objects: .contosoSource())
+        jamfProDestination = DemoJamfProServer(objects: .contosoDestination(scenario: scenario))
         jamfSchool = DemoJamfSchoolServer(scenario: scenario)
         intune = DemoIntuneServer(scenario: scenario)
         appleBusiness = DemoAppleBusinessServer(organization: .contoso, scenario: scenario)
@@ -295,6 +303,8 @@ nonisolated final class DemoServices: Sendable {
         var servers: [String: any DemoServer] = [
             DemoSamples.platformHost: platform,
             DemoWorld.jamfProHost: jamfPro,
+            DemoJamfProObjectSamples.sourceHost: jamfProSource,
+            DemoJamfProObjectSamples.destinationHost: jamfProDestination,
             DemoWorld.jamfSchoolHost: jamfSchool,
             DemoAppleSignInServer.host: signIn,
             ABM.Service.business.host: appleBusiness,

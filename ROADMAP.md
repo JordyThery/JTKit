@@ -532,7 +532,7 @@ Neither reads Graph's request ID (`innerError.request-id`) or sends a `client-re
   | Checkpoint | all four services from `DemoWorld`, two organisations for "All" | |
   | Intune Deployer | a Contoso tenant in the Graph store | MSAL replaced by a demo token; its client factory gains a session |
   | Jamf Deployer | a small demo fleet | **stops at the plan:** Terraform's own network calls can't be faked, so deploy says it isn't available in demo mode |
-  | JamfMigrator | "Contoso Production" → "Contoso Staging" | general Classic store |
+  | JamfMigrator | "Contoso Source (Demo)" → "Contoso Destination (Demo)", direct Jamf Pro (Blueprints and Benchmarks Blocked) | general Jamf Pro object store, Classic and Pro API (names and direct tenants decided by Jordy on 2026-10-27) |
   | Profile2Blueprint | Classic profiles on JTKit's Platform server | demo files already fixed (above) |
   | Serial Number Reader | Jamf Pro and Jamf School lookups, plus a **pretend USB iPhone** | the pretend iPhone is the app's own code, in demo mode only; actions on it are simulated and can never reach real hardware |
 

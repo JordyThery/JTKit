@@ -1,5 +1,31 @@
 # Changelog
 
+## 0.11.6 (2026-10-27)
+Step 10, for JamfMigrator. Additions; no app has to change.
+- `DemoJamfProObjects`: a general Jamf Pro object store behind a demo Jamf Pro
+  server (`DemoJamfProServer(objects:)`), for every type JamfMigrator copies, on
+  both APIs. Classic: JSON or XML lists, XML details, create with `…/id/0`
+  answering the new ID, `PUT` merged into the stored object (an icon-only PUT
+  keeps the rest), `DELETE`, accounts groups by `groupid`, 409 "Duplicate
+  name" and 404 as Jamf's HTML pages, written passwords read back as
+  `password_sha256`. Jamf Pro API: paged lists, create answering `id` and
+  `href`, `PUT`, merge-patch `PATCH`, `DELETE`, duplicate names refused, the
+  settings pages (passwords never read back), the version. Jamf's special
+  cases: PreStage version locks (409 `OPTIMISTIC_LOCK_FAILED`), profile UUID
+  and nested IDs, no admin or Recovery Lock password; patch titles created by
+  subscribing through Classic and patched with merge-patch only (415
+  otherwise); patch policies created under their title; icon upload and
+  download; ADE instances; `/api/v2/groups`.
+- Two demo tenants, `Connection.demoJamfProSource` ("Contoso Source (Demo)",
+  a golden master with objects of every type that refer to each other) and
+  `Connection.demoJamfProDestination` ("Contoso Destination (Demo)", a fresh
+  tenant with Jamf's built-ins, one identical object, a few that differ and one
+  only there), direct Jamf Pro on `*.demo.invalid`, in `demoConnections`;
+  their servers are `DemoMode.jamfProSourceServer` and
+  `jamfProDestinationServer`. The `missingPermission` scenario refuses the
+  destination's webhooks and single sign-on with 403.
+- "Contoso Jamf Pro (Demo)" is unchanged.
+
 ## 0.11.5 (2026-10-27)
 Step 10, for Intune Deployer. Additions; no app has to change.
 - `DemoIntuneServer` holds a general Graph store for "Contoso Intune (Demo)":
