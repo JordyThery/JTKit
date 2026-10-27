@@ -482,6 +482,7 @@ Neither reads Graph's request ID (`innerError.request-id`) or sends a `client-re
 
 ### Before step 10 (decided by Jordy on 2026-10-26)
 1. **JTKit 0.10.0 round:** every app that isn't on 0.10.0 yet moves to it, because its free-text cleaning of PEM private-key blocks and `eyJ…` tokens protects every app's log. No app code changes; minimum, `Package.resolved`, unit tests.
+   - **Done (2026-10-27):** all eight apps are on 0.10.0. Checkpoint already was; AppSettings2Blueprint, Blueprint Managed Preferences Editor, Intune Deployer, Jamf Deployer, JamfMigrator, Profile2Blueprint and Serial Number Reader moved to it, each resolved from its own project against the published 0.10.0 and with its unit tests passing. Only the minimum and `Package.resolved` changed (MSAL now appears there too, pulled in by JTKit).
 2. **A CLAUDE.md per app:** Xcode's Claude keeps its notes per opened folder (`ClaudeAgentConfig/projects/<folder>/memory/`), so work in `Apps.xcworkspace` doesn't see what was learned about an app. Each app gets a CLAUDE.md in its repo with the lasting, non-sensitive knowledge from those notes (release process, naming, architecture, what not to touch). Sensitive notes (tenant names, credentials, customer details) stay in Xcode's memory only, because the repos are public. Jordy approves each file before it's committed.
 
 ### Step 10: Demo mode (0.11.0)
