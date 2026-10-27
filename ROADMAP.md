@@ -480,14 +480,44 @@ Neither reads Graph's request ID (`innerError.request-id`) or sends a `client-re
 - **Signed tokens** are recognised in free text only by their `eyJ` start, so ordinary text isn't hidden.
 - **Found by the tests first (fixed in 0.10.0 for every app):** a sign-in error repeating the signed request, or an API error repeating the token, reached the activity log, the bug-report export and the message. Now: Apple's sign-in is a sensitive call, its error shows only `error` and `error_description`, every client removes the token it sent from errors and the log, and free text loses PEM keys and JWTs.
 
+### Before step 10 (decided by Jordy on 2026-10-26)
+1. **JTKit 0.10.0 round:** every app that isn't on 0.10.0 yet moves to it, because its free-text cleaning of PEM private-key blocks and `eyJ…` tokens protects every app's log. No app code changes; minimum, `Package.resolved`, unit tests.
+2. **A CLAUDE.md per app:** Xcode's Claude keeps its notes per opened folder (`ClaudeAgentConfig/projects/<folder>/memory/`), so work in `Apps.xcworkspace` doesn't see what was learned about an app. Each app gets a CLAUDE.md in its repo with the lasting, non-sensitive knowledge from those notes (release process, naming, architecture, what not to touch). Sensitive notes (tenant names, credentials, customer details) stay in Xcode's memory only, because the repos are public. Jordy approves each file before it's committed.
+
 ### Step 10: Demo mode (0.11.0)
-- **Move:** demo mode with a fake server from Profile2Blueprint (`DemoFixtures`, `DemoBlueprintServer`), so every app can be tried and checked by hand without a tenant.
-- **Not planned (decided 2026-10-25):** the full UI test suites and `run-*-ui-tests.sh` scripts of Jamf Deployer and AppSettings2Blueprint are not moved, copied as a template or used as a check (see "Testing" in CLAUDE.md). Jamf Deployer's UI-test helpers (`UITestSupport.swift`) move into a `JTKitUITestSupport` product only if Jordy asks for a specific UI test that needs them.
+- **Move:** demo mode with a fake server from Profile2Blueprint (`DemoFixtures`, `DemoBlueprintServer`), widened to fake Jamf Pro, Jamf Platform, Jamf School, Intune and Apple Business/School Manager servers, so every app can run without a tenant. Demo mode never touches saved connections.
 - **First app:** AppSettings2Blueprint. **Then:** the other apps, starting with Checkpoint.
 - **Check by hand:** the app runs in demo mode without a tenant and shows believable sample data; switching back to a real connection works.
 
+### Step 11: Autonomous testing and the release check (0.12.0) (added by Jordy on 2026-10-26)
+Replaces the 2026-10-25 "not planned" note: Jamf Deployer's long suites still aren't moved or run, but what makes its testing autonomous is.
+- **Move into a `JTKitUITestSupport` product:** Jamf Deployer's UI-test helpers (`UITestSupport.swift`: launching the Debug build, finding fields and elements, the screen dump on failure) and a runner script template from its `Scripts/run-*-ui-tests.sh` (credentials from the login Keychain into environment variables, never into files or logs; cleanup on every exit).
+- **One release check per app** (`Scripts/release-check.sh`), run by Claude unattended, in this order, stopping at the first failure:
+  1. Build from the app's **own project** against the **published** JTKit version it names (not the workspace).
+  2. Unit tests.
+  3. **UI smoke tests in demo mode:** launch, About, Settings tabs, connections editor, activity log and the app's main task. Minutes, not hours.
+  4. **Live checks against sandbox tenants (required, decided by Jordy):** the same main task against real sandbox tenants (Jamf, Intune, Apple Business/School Manager, whichever the app uses), creating only objects with a recognisable prefix and removing them afterwards, also when a step fails. The tenants come from a local allow-list file outside git (no tenant names in the public repos); the check refuses to run against any tenant not on it. Credentials come from the login Keychain.
+  5. A short report: what ran, what passed, what was cleaned up.
+- **First app:** Jamf Deployer (where the helpers come from). **Then:** every other app.
+- **Check by hand:** the release check passes unattended for each app; a deliberately broken build or a failing live step stops it and leaves no test objects behind.
+
+### Step 12: Independent review of JTKit (decided by Jordy on 2026-10-26)
+- A full code review of JTKit by Claude Fable, run separately from the conversations that built it, against these rules: secrets never logged or exported, retries and "never repeat a write", confirmation rules for irreversible commands, the standards above, and the public API before it's frozen.
+- Jordy decides which findings are fixed; fixes are released as 0.12.x, and apps take them up in one round.
+
 ### 1.0.0
-When every app has adopted steps 1–9 and the public API has stopped changing.
+When every app has adopted steps 1–11, the step 12 findings Jordy chose are fixed, and the public API has stopped changing.
+
+### Release gate for every app (standing rule, decided by Jordy on 2026-10-26)
+Before any app is released or updated, in this order:
+1. Its **release check** (step 11) passes, including the live sandbox checks.
+2. A **full apple-design review** of the whole app. Accessibility findings are fixed; Jordy decides on the rest.
+3. An **independent code review** of the whole app (Claude Fable, run separately), after which Jordy decides what gets fixed.
+4. **Jordy's check by hand**, then tag and release.
+Until step 11 exists, 1 means build, unit tests and the live checks Jordy asks for.
+
+### After 1.0.0
+- A "new JTKit app" skill for Xcode's Claude (in `ClaudeAgentConfig/skills/`): creates a new app in `~/Developer` set up to the standards (About, Settings, updater, connections, activity log, demo mode, release check, CLAUDE.md, LICENSE, .gitignore, build-number script) and adds it to `Apps.xcworkspace`.
 
 ## Not shared
 

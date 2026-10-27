@@ -43,7 +43,13 @@ Only change an app when Jordy asks for that app.
 
 ## Testing
 
-Decided by Jordy on 2026-10-25: build, unit tests and Jordy's check by hand are enough. Never run the full UI test suites or the `run-*-ui-tests.sh` scripts of Jamf Deployer and AppSettings2Blueprint: they take too long and don't test the right things. Run a single UI test only when Jordy asks for it by name. "Run its tests" in a prompt or in `ROADMAP.md` means the unit tests.
+Never run the full UI test suites or the `run-*-ui-tests.sh` scripts of Jamf Deployer and AppSettings2Blueprint: they take too long and don't test the right things (decided by Jordy on 2026-10-25). Run a single UI test only when Jordy asks for it by name. "Run its tests" in a prompt or in `ROADMAP.md` means the unit tests.
+
+From step 11 on, each app has a release check (`Scripts/release-check.sh`, see ROADMAP step 11): build from its own project against the published JTKit, unit tests, short UI smoke tests in demo mode, and **required live checks against sandbox tenants** (decided by Jordy on 2026-10-26: they replace most of his hand checks). Live checks only run against tenants on the local allow-list outside git, create only prefixed objects and always clean up. Never name a real tenant in a repo.
+
+## Releasing an app
+
+Follow the release gate in ROADMAP.md: release check passes (including live sandbox checks), a full apple-design review of the app, an independent code review of the app, then Jordy's check by hand. Only then tag and release. Build the release from the app's own project, so it uses the published JTKit version.
 
 ## Releasing JTKit
 
