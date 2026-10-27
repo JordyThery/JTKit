@@ -137,6 +137,15 @@ public final class DemoMode {
         }
     }
 
+    /// Microsoft's interactive sign-in for "Contoso Intune (Demo)", for an app
+    /// that signs in with MSAL (Intune Deployer): a fixed token the demo
+    /// tenant accepts, its account and the demo network's session. No
+    /// sign-in window, and MSAL, its Keychain cache and the real signed-in
+    /// accounts are never used.
+    public func microsoftSignIn() -> DemoMicrosoftSignIn {
+        DemoMicrosoftSignIn(session: services().network.session)
+    }
+
     /// The server behind `jamfPlatform()`, e.g. to add sample data.
     public var jamfPlatformServer: DemoJamfPlatformServer { services().platform }
     /// The servers behind the other demo connections; they hold `DemoWorld`.
@@ -217,6 +226,20 @@ public nonisolated struct DemoSource: Sendable {
     }
 }
 
+/// Demo mode's stand-in for Microsoft's interactive sign-in (MSAL): the demo
+/// tenant's account and a fixed token, used in place of a signed-in account.
+public nonisolated struct DemoMicrosoftSignIn: Sendable {
+    /// The demo tenant, "Contoso Intune (Demo)".
+    public let connection = Connection.demoIntune
+    /// Fixed and obviously fake; only the demo tenant accepts it.
+    public let accessToken = DemoIntuneServer.delegatedToken
+    /// The demo tenant's signed-in person, e.g. for "Signed in as …".
+    public let username = DemoGraphStore.username
+    public let displayName = DemoGraphStore.userDisplayName
+    /// The demo network's session: nothing it sends leaves the app.
+    public let session: URLSession
+}
+
 extension Connection {
     /// Demo mode's Jamf Platform API connection. Never saved.
     public static let demoJamfPlatform = Connection(
@@ -229,10 +252,13 @@ extension Connection {
         clientID: "contoso-demo-client"
     )
 
-    /// A demo connection: an ID in the reserved fake range or an address on
-    /// `.demo.invalid`. `ConnectionStore` refuses to save one.
+    /// A demo connection: an ID, a tenant ID or a client ID in the reserved
+    /// fake range, or an address on `.demo.invalid`. `ConnectionStore`
+    /// refuses to save one. The tenant and client IDs count too, so an
+    /// exported demo profile imported under a new ID is still a demo one.
     public var isDemo: Bool {
-        if DemoSamples.isDemoID(id.uuidString) { return true }
+        let ids = [id.uuidString, tenantID, clientID].map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+        if ids.contains(where: DemoSamples.isDemoID) { return true }
         let suffix = "." + DemoNetwork.reservedDomain
         let hosts = [hostOverride, serverURL].map { text -> String in
             let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()

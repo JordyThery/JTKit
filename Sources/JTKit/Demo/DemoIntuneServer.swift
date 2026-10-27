@@ -1,15 +1,30 @@
 import Foundation
 
-/// An in-memory Intune tenant holding `DemoWorld`'s Intune devices: Entra's
-/// client-credentials sign-in (on `login.microsoftonline.com`) and Graph v1.0
-/// `managedDevices` (on `graph.microsoft.com`): the list with paging, device
-/// actions (answered 204, accepted, as Graph does) and deleting a record.
-/// Register it for both hosts (`DemoIntuneServer.hosts`); the demo network
+/// An in-memory Intune tenant, "Contoso Intune (Demo)", holding `DemoWorld`'s
+/// Intune devices: Entra's client-credentials sign-in (on
+/// `login.microsoftonline.com`) and Graph v1.0 `managedDevices` (on
+/// `graph.microsoft.com`): the list with paging, device actions (answered
+/// 204, accepted, as Graph does) and deleting a record.
+///
+/// The rest of Graph is a general store of the tenant's objects (Settings
+/// Catalog, configurations, compliance, scripts, filters, apps, groups and
+/// more; `DemoGraphStore`), with app uploads to a fake storage host
+/// (`storageHost`). It answers the demo sign-in's token
+/// (`DemoMode.microsoftSignIn()`, in place of Microsoft's interactive
+/// sign-in) as well as the tokens it issued itself.
+///
+/// Register it for every host in `DemoIntuneServer.hosts`; the demo network
 /// answers them inside the app, so nothing reaches Microsoft.
 public nonisolated final class DemoIntuneServer: DemoServer, @unchecked Sendable {
     public static let signInHost = "login.microsoftonline.com"
     public static let graphHost = "graph.microsoft.com"
-    public static let hosts = [signInHost, graphHost]
+    /// Where app content is uploaded in demo mode, in place of Azure Storage.
+    public static let storageHost = "contoso-storage.\(DemoNetwork.reservedDomain)"
+    public static let hosts = [signInHost, graphHost, storageHost]
+
+    /// The demo sign-in's access token: fixed, obviously fake, accepted by
+    /// this server only. Never a token from Microsoft.
+    public static let delegatedToken = "demo-graph-delegated-token"
 
     struct Record {
         let device: DemoWorld.Device
@@ -23,6 +38,7 @@ public nonisolated final class DemoIntuneServer: DemoServer, @unchecked Sendable
     private let scenario: DemoScenario?
     private let now: Date
     private let pageSize: Int
+    private let store: DemoGraphStore
 
     /// Actions received: `retire`, `rebootNow`, … and the managed device ID.
     public var actions: [(action: String, id: String)] { lock.withLock { actionsValue } }
@@ -32,6 +48,7 @@ public nonisolated final class DemoIntuneServer: DemoServer, @unchecked Sendable
         self.scenario = scenario
         self.now = now
         self.pageSize = max(pageSize, 1)
+        store = DemoGraphStore(scenario: scenario, now: now, pageSize: max(pageSize, 1))
         for device in DemoWorld.devices(managedBy: .intune) {
             records[device.intuneID] = Record(device: device)
         }
@@ -42,11 +59,45 @@ public nonisolated final class DemoIntuneServer: DemoServer, @unchecked Sendable
         lock.withLock { records.values.contains { $0.device.serial == serial.uppercased() } }
     }
 
+    // MARK: The tenant's objects
+
+    /// Adds an app's own sample objects to a list of the tenant, e.g.
+    /// `deviceManagement/deviceConfigurations` (the path without the
+    /// version). An object with an ID already there replaces it; one without
+    /// gets an ID in the fake range.
+    public func add(_ objects: [Data], to path: String) {
+        let parsed = objects.compactMap(DemoJSON.object)
+        lock.withLock { store.add(parsed, to: path) }
+    }
+
+    /// The tenant's objects in a list (the path without the version), as
+    /// stored, as JSON.
+    public func objects(at path: String) -> [Data] {
+        lock.withLock {
+            store.objects(at: path).compactMap { try? JSONSerialization.data(withJSONObject: $0, options: [.sortedKeys]) }
+        }
+    }
+
+    /// Adds Settings Catalog definitions to the tenant's catalog, e.g. the
+    /// ones an app's baseline uses. Contoso's catalog has only what its own
+    /// policy uses.
+    public func add(definitions: [DemoSettingDefinition]) {
+        lock.withLock { store.add(definitions) }
+    }
+
+    /// The bytes of every upload completed on the storage host.
+    public var uploadedBytes: Int { lock.withLock { store.uploadedBytes } }
+
+    /// Requests answered by the general store and the storage host (not the
+    /// sign-in or `managedDevices`).
+    public var storeRequestCount: Int { lock.withLock { store.requestCount } }
+
     public func respond(to request: DemoRequest) -> DemoResponse {
         lock.withLock {
             switch request.url.host()?.lowercased() {
             case Self.signInHost: signIn(request)
             case Self.graphHost: graph(request)
+            case Self.storageHost: store.storage(request)
             default: Self.error(404, "ResourceNotFound", "No such host in demo mode.")
             }
         }
@@ -70,12 +121,12 @@ public nonisolated final class DemoIntuneServer: DemoServer, @unchecked Sendable
     }
 
     private func graph(_ request: DemoRequest) -> DemoResponse {
-        guard let token = DemoJSON.bearer(request), tokens.contains(token) else {
+        guard let token = DemoJSON.bearer(request), tokens.contains(token) || token == Self.delegatedToken else {
             return Self.error(401, "InvalidAuthenticationToken", "Access token is empty.")
         }
         let path = request.pathSegments
         guard path.count >= 3, path[0] == "v1.0", path[1] == "deviceManagement", path[2] == "managedDevices" else {
-            return Self.error(404, "ResourceNotFound", "No such resource in demo mode.")
+            return store.graph(request)
         }
         if scenario == .missingPermission {
             return Self.error(403, "Forbidden", "Application is not authorized to perform this operation.")
@@ -139,7 +190,6 @@ public nonisolated final class DemoIntuneServer: DemoServer, @unchecked Sendable
     }
 
     private static func error(_ status: Int, _ code: String, _ message: String) -> DemoResponse {
-        DemoJSON.response(status, ["error": ["code": code, "message": message,
-                                             "innerError": ["request-id": DemoSamples.uuid(0xeeee), "date": "2026-10-27T10:00:00"]]])
+        DemoGraphStore.error(status, code, message)
     }
 }
