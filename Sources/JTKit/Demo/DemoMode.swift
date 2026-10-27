@@ -1,4 +1,5 @@
 import AppKit
+import CryptoKit
 import Foundation
 import Observation
 
@@ -54,7 +55,7 @@ public final class DemoMode {
     @ObservationIgnored private let key: String
     @ObservationIgnored private let defaults: UserDefaults
     @ObservationIgnored private let savesChoice: Bool
-    @ObservationIgnored private var platform: (server: DemoJamfPlatformServer, network: DemoNetwork)?
+    @ObservationIgnored private var servicesValue: DemoServices?
     @ObservationIgnored private var scratch: URL?
 
     /// - Parameters:
@@ -78,18 +79,42 @@ public final class DemoMode {
     /// `jamfPlatformServer` inside the app. The same server for the whole
     /// launch, so what's done in demo mode stays until the app quits.
     public func jamfPlatform() -> DemoSource {
-        let network = platformNetwork().network
-        return DemoSource(connection: .demoJamfPlatform, session: network.session)
+        source(for: .demoJamfPlatform) ?? DemoSource(connection: .demoJamfPlatform, session: services().network.session)
+    }
+
+    /// What a client needs for one of the demo connections
+    /// (`Connection.demoConnections`): the connection, its fake secret and the
+    /// demo network's session. Nil for any other connection, so a real one
+    /// can never be sent to the demo network, nor a demo one to a tenant.
+    ///
+    /// Apple Business and School Manager sign in with a private key made for
+    /// this launch: it lives only in memory, in this `DemoMode`, and is never
+    /// written anywhere, the Keychain included.
+    public func source(for connection: Connection) -> DemoSource? {
+        guard let demo = Connection.demoConnections.first(where: { $0.id == connection.id }) else { return nil }
+        let services = services()
+        switch demo.service {
+        case .appleBusinessManager, .appleSchoolManager:
+            let pem = services.applePrivateKeyPEM
+            return DemoSource(connection: demo, session: services.network.session, secret: { pem })
+        default:
+            return DemoSource(connection: demo, session: services.network.session)
+        }
     }
 
     /// The server behind `jamfPlatform()`, e.g. to add sample data.
-    public var jamfPlatformServer: DemoJamfPlatformServer { platformNetwork().server }
+    public var jamfPlatformServer: DemoJamfPlatformServer { services().platform }
+    /// The servers behind the other demo connections; they hold `DemoWorld`.
+    public var jamfProServer: DemoJamfProServer { services().jamfPro }
+    public var jamfSchoolServer: DemoJamfSchoolServer { services().jamfSchool }
+    public var intuneServer: DemoIntuneServer { services().intune }
+    public var appleBusinessServer: DemoAppleBusinessServer { services().appleBusiness }
+    public var appleSchoolServer: DemoAppleBusinessServer { services().appleSchool }
 
-    private func platformNetwork() -> (server: DemoJamfPlatformServer, network: DemoNetwork) {
-        if let platform { return platform }
-        let server = DemoJamfPlatformServer(scenario: scenario)
-        let created = (server, DemoNetwork(servers: [DemoSamples.platformHost: server]))
-        platform = created
+    private func services() -> DemoServices {
+        if let services = servicesValue { return services }
+        let created = DemoServices(scenario: scenario)
+        servicesValue = created
         return created
     }
 
@@ -149,11 +174,11 @@ public nonisolated struct DemoSource: Sendable {
     /// The demo network's session: nothing it sends leaves the app.
     public let session: URLSession
 
-    init(connection: Connection, session: URLSession) {
+    init(connection: Connection, session: URLSession, secret: (@Sendable () throws -> String)? = nil) {
         self.connection = connection
         self.session = session
         let account = connection.id.uuidString
-        secret = { DemoSecretStore().secret(for: account) ?? "" }
+        self.secret = secret ?? { DemoSecretStore().secret(for: account) ?? "" }
     }
 }
 
@@ -179,6 +204,43 @@ extension Connection {
             return URL(string: trimmed)?.host() ?? trimmed.split(separator: "/").first.map(String.init) ?? ""
         }
         return hosts.contains { $0.hasSuffix(suffix) || $0 == DemoNetwork.reservedDomain }
+    }
+}
+
+/// Every demo server of a launch, on one private network.
+nonisolated final class DemoServices: Sendable {
+    let platform: DemoJamfPlatformServer
+    let jamfPro: DemoJamfProServer
+    let jamfSchool: DemoJamfSchoolServer
+    let intune: DemoIntuneServer
+    let appleBusiness: DemoAppleBusinessServer
+    let appleSchool: DemoAppleBusinessServer
+    let network: DemoNetwork
+    /// Apple's sign-in key for the demo organizations: made for this launch,
+    /// kept in memory only, never saved.
+    let applePrivateKeyPEM: String
+
+    init(scenario: DemoScenario?) {
+        let key = P256.Signing.PrivateKey()
+        applePrivateKeyPEM = key.pemRepresentation
+        platform = DemoJamfPlatformServer(scenario: scenario == .jamfSchool ? .jamfSchool : nil)
+        jamfPro = DemoJamfProServer(scenario: scenario)
+        jamfSchool = DemoJamfSchoolServer(scenario: scenario)
+        intune = DemoIntuneServer(scenario: scenario)
+        appleBusiness = DemoAppleBusinessServer(organization: .contoso, scenario: scenario)
+        appleSchool = DemoAppleBusinessServer(organization: .academy, scenario: scenario)
+        let signIn = DemoAppleSignInServer(keys: [Connection.demoAppleBusiness.clientID: key.publicKey,
+                                                  Connection.demoAppleSchool.clientID: key.publicKey])
+        var servers: [String: any DemoServer] = [
+            DemoSamples.platformHost: platform,
+            DemoWorld.jamfProHost: jamfPro,
+            DemoWorld.jamfSchoolHost: jamfSchool,
+            DemoAppleSignInServer.host: signIn,
+            ABM.Service.business.host: appleBusiness,
+            ABM.Service.school.host: appleSchool,
+        ]
+        for host in DemoIntuneServer.hosts { servers[host] = intune }
+        network = DemoNetwork(servers: servers)
     }
 }
 

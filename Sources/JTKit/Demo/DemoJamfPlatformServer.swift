@@ -6,6 +6,10 @@ public nonisolated enum DemoScenario: String, Sendable, CaseIterable {
     /// A Jamf School environment: the device-group list answers 404
     /// `TENANT_NOT_FOUND`, and Blueprints are scoped to numeric group IDs.
     case jamfSchool
+    /// Jamf Pro, Jamf School, Intune and Apple Business/School Manager refuse
+    /// device reads and commands with 403, as when the API client or app
+    /// registration lacks the permission.
+    case missingPermission
 }
 
 /// An in-memory Jamf Platform API: sign-in, device groups, environments and
