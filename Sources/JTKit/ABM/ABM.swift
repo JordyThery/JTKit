@@ -10,6 +10,14 @@ public nonisolated enum ABM {
     /// against a live organization).
     public static let rateLimit = RateLimit(requests: 18, per: 60,
                                             explanation: "Apple allows about 20 requests a minute for each organization")
+
+    /// The limit for a connection: Apple's for every real organization, none
+    /// for a demo one (`Connection.isDemo`), whose requests never reach Apple.
+    /// Decided by the connection, never by the demo switch, so a real
+    /// organization keeps the limit while demo mode is on.
+    public static func rateLimit(for connection: Connection) -> RateLimit? {
+        connection.isDemo ? nil : rateLimit
+    }
     /// More pages than any real list has; reaching it is an error.
     public static let maxPages = 1_000
     /// Apple rejects a migration deadline further out than this.

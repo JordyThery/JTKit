@@ -21,6 +21,8 @@ extension ABM {
         public let service: Service
         /// The app's own hints, added to every error.
         public let hints: [String]
+        /// Apple's limit on this client's requests; nil only for a demo organization.
+        public let rateLimit: RateLimit?
         private let http: HTTPClient
         private let poller: JamfPlatform.Poller
         private let now: @Sendable () -> Date
@@ -31,6 +33,9 @@ extension ABM {
         /// - Parameters:
         ///   - tokens: usually `ABM.TokenProvider`.
         ///   - recorder: usually `ABM.recorder(_:session:log:connection:)`.
+        ///   - rateLimit: Apple's limit per organization; pass
+        ///     `ABM.rateLimit(for:)` of the connection, so only a demo
+        ///     connection goes without it.
         ///   - sleep, random, now: injectable for tests; the activity watch
         ///     uses them too.
         public init(
@@ -38,6 +43,7 @@ extension ABM {
             tokens: any BearerTokenSource,
             recorder: RequestRecorder,
             hints: [String] = [],
+            rateLimit: RateLimit? = ABM.rateLimit,
             sleep: @escaping @Sendable (Duration) async throws -> Void = { try await Task.sleep(for: $0) },
             random: @escaping @Sendable () -> Double = { Double.random(in: 0...1) },
             now: @escaping @Sendable () -> Date = { Date() }
@@ -45,8 +51,9 @@ extension ABM {
             self.service = service
             self.hints = hints
             self.now = now
+            self.rateLimit = rateLimit
             http = HTTPClient(baseURL: service.baseURL, tokens: tokens, recorder: recorder,
-                              redirects: .sameHostHTTPSOnly, rateLimit: ABM.rateLimit, rules: .appleBusiness,
+                              redirects: .sameHostHTTPSOnly, rateLimit: rateLimit, rules: .appleBusiness,
                               sleep: sleep, random: random, now: now)
             let start = ContinuousClock.now
             let startDate = now()
@@ -65,7 +72,8 @@ extension ABM {
             let recorder = ABM.recorder(service, session: session, log: log, connection: connection.name)
             let tokens = ABM.TokenProvider(service: service, clientID: connection.clientID, keyID: connection.keyID,
                                            privateKey: privateKey, recorder: recorder)
-            self.init(service: service, tokens: tokens, recorder: recorder, hints: hints)
+            self.init(service: service, tokens: tokens, recorder: recorder, hints: hints,
+                      rateLimit: ABM.rateLimit(for: connection))
         }
 
         // MARK: - Devices

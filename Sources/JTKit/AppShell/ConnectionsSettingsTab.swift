@@ -16,6 +16,9 @@ public struct ConnectionRole {
     public let services: Set<ConnectionService>?
     /// The role's "All" choice, e.g. "All Organizations"; nil when it has none.
     public let all: AllConnectionsChoice?
+    /// The role's demo connections, chosen instead of the saved ones while
+    /// demo mode is on; nil for an app without demo mode.
+    public let demo: DemoConnectionChoice?
     /// How VoiceOver names the toolbar picker.
     let accessibilityName: String
 
@@ -26,19 +29,23 @@ public struct ConnectionRole {
     ///   - services: only connections of these services can have the role,
     ///     e.g. Checkpoint's Apple role; every service by default.
     ///   - all: offers "All" for this role (see `AllConnectionsChoice`).
+    ///   - demo: the role's demo connections (see `DemoConnectionChoice`).
     public init(_ title: String, useTitle: String? = nil, selection: Binding<UUID?>,
-                services: Set<ConnectionService>? = nil, all: AllConnectionsChoice? = nil) {
+                services: Set<ConnectionService>? = nil, all: AllConnectionsChoice? = nil,
+                demo: DemoConnectionChoice? = nil) {
         self.init(title, useTitle: useTitle, selection: selection, services: services, all: all,
-                  accessibilityName: title)
+                  demo: demo, accessibilityName: title)
     }
 
     private init(_ title: String, useTitle: String?, selection: Binding<UUID?>,
-                 services: Set<ConnectionService>?, all: AllConnectionsChoice?, accessibilityName: String) {
+                 services: Set<ConnectionService>?, all: AllConnectionsChoice?, demo: DemoConnectionChoice? = nil,
+                 accessibilityName: String) {
         self.title = title
         self.useTitle = useTitle ?? "Use as \(title)"
         self.selection = selection
         self.services = services
         self.all = all
+        self.demo = demo
         self.accessibilityName = accessibilityName
     }
 
@@ -60,11 +67,16 @@ public struct ConnectionRole {
         all?.isInEffect(connectionCount: connectionCount) ?? false
     }
 
-    /// Gives a single connection the role, which ends "All".
+    /// Whether the role uses its demo connections now (demo mode is on).
+    @MainActor
+    public var usesDemo: Bool { demo?.isActive ?? false }
+
+    /// Gives a single connection the role, which ends "All" and leaves demo mode.
     @MainActor
     func use(_ id: UUID?) {
         all?.isChosen = false
         selection.wrappedValue = id
+        if let demo, demo.isActive { demo.mode.isOn = false }
     }
 
     /// The menu's choice: a connection, or "All".
@@ -72,12 +84,15 @@ public struct ConnectionRole {
     func menuChoice(connectionCount: Int) -> Binding<ConnectionMenuChoice?> {
         Binding(
             get: {
+                if usesDemo { return nil }
                 if usesAll(connectionCount: connectionCount) { return .all }
                 return selection.wrappedValue.map(ConnectionMenuChoice.connection)
             },
             set: { choice in
                 switch choice {
-                case .all: all?.isChosen = true
+                case .all:
+                    all?.isChosen = true
+                    if let demo, demo.isActive { demo.mode.isOn = false }
                 case .connection(let id): use(id)
                 case nil: break
                 }

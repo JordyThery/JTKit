@@ -58,13 +58,15 @@ public struct ConnectionMenuItems<Record: ConnectionRecord, Extra: View>: View {
     }
 
     public var body: some View {
-        if store.records.isEmpty {
+        if store.records.isEmpty && !roles.contains(where: \.usesDemo) {
             Text(ConnectionMenuText.noConnections)
         } else if roles.count == 1 {
+            demoChoice(for: roles[0])
             choice(for: roles[0])
         } else {
             ForEach(roles.indices, id: \.self) { index in
                 Section(roles[index].title) {
+                    demoChoice(for: roles[index])
                     choice(for: roles[index])
                 }
             }
@@ -79,10 +81,22 @@ public struct ConnectionMenuItems<Record: ConnectionRecord, Extra: View>: View {
         }
     }
 
+    /// While demo mode is on: the role's demo connections and "All", above
+    /// the saved ones (which stay, so you can switch back).
+    @ViewBuilder
+    private func demoChoice(for role: ConnectionRole) -> some View {
+        if let demo = role.demo, demo.isActive {
+            DemoConnectionPicker(choice: demo, allTitle: role.all?.title)
+            Divider()
+        }
+    }
+
     @ViewBuilder
     private func choice(for role: ConnectionRole) -> some View {
         let records = store.records.filter { role.accepts($0.connection) }
-        if records.isEmpty {
+        if records.isEmpty, role.usesDemo {
+            EmptyView()
+        } else if records.isEmpty {
             Text(ConnectionMenuText.noConnections)
         } else {
             Picker(role.title, selection: role.menuChoice(connectionCount: records.count)) {
@@ -212,6 +226,9 @@ public struct ConnectionPicker<Record: ConnectionRecord, Extra: View>: View {
             .help("Add a connection in Settings › Connections")
         } else {
             let records = store.records.filter { role.accepts($0.connection) }
+            let demoLabel = role.demo.flatMap { $0.isActive ? $0.label(allTitle: role.all?.title, roleName: role.accessibilityName) : nil }
+            let label = demoLabel ?? self.label
+            let help = role.usesDemo ? DemoMode.helpText : self.help
             let usesAll = role.usesAll(connectionCount: records.count)
             let current = usesAll ? nil : role.selection.wrappedValue.flatMap { id in records.first { $0.id == id } }
             let title = label?.title

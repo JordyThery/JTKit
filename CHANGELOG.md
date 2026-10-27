@@ -1,5 +1,45 @@
 # Changelog
 
+## 0.11.1 (2026-10-27)
+Step 10, second part: demo mode for Checkpoint. Additions; no app has to change.
+- `DemoWorld`: one shared set of 41 sample devices, the same in Apple
+  Business and School Manager, Jamf Pro, Jamf School and Intune: Contoso
+  (Apple Business Manager, Jamf Pro and Intune) and Contoso Academy (Apple
+  School Manager, Jamf School), with the gaps a real fleet has, each checked
+  by a test: three iPhones missing from Intune, expired AppleCare, an
+  unassigned iPad, a Mac released by Apple but still in Jamf Pro, a Mac not
+  heard from in months, a Mac in no Apple organization.
+- Demo servers on the same private network, each run by JTKit's real
+  clients in its tests:
+  - `DemoJamfProServer`: API client sign-in, version, inventory by serial
+    (batched filters), ADE instances with Apple's server IDs, PreStages and
+    their scope, sites, departments, buildings, Classic groups, DDM status,
+    commands, asset tag and site, unmanage, delete; FileVault, Recovery Lock,
+    PIN and LAPS read back obviously fake values.
+  - `DemoJamfSchoolServer`: fleet, groups, locations, ADE placeholders,
+    commands, asset tag, move, trash; errors in the body as the service does.
+  - `DemoIntuneServer`: Entra sign-in and Graph `managedDevices` (paging,
+    actions, delete), answered on Microsoft's addresses inside the app.
+  - `DemoAppleSignInServer` and `DemoAppleBusinessServer`: Apple's signed
+    sign-in, checked against the public key; devices, organization read, MDM
+    servers, AppleCare, Activation Lock, assigned server, audit events, and
+    the writes as activities (in progress, then completed).
+- `DemoMode.source(for:)`: what a client needs for a demo connection
+  (`Connection.demoConnections`: Contoso and Contoso Academy in Apple
+  Business and School Manager, Contoso Jamf Pro, Contoso Intune, Contoso
+  Academy on Jamf School); nil for any other connection. Apple's sign-in key
+  is made for each launch and kept in memory only, never saved.
+- `DemoConnectionChoice` and `ConnectionRole(…, demo:)`: while demo mode is
+  on, a role's picker and the Connection menu list its demo connections and
+  "All" above the saved ones, the picker reads e.g. "Contoso (Demo)" with a
+  test tube, no saved connection is checked, and choosing one leaves demo
+  mode. Session only, never saved.
+- `ABM.rateLimit(for:)` and `ABM.Client(…, rateLimit:)`: Apple's limit is off
+  for a demo organization only, decided by the connection, never by the demo
+  switch; every real organization keeps it (the default).
+- `DemoScenario.missingPermission`: Jamf Pro, Jamf School, Intune and Apple
+  refuse device reads and commands with 403.
+
 ## 0.11.0 (2026-10-27)
 Step 10, first part: demo mode, for AppSettings2Blueprint. Additions, and one
 safeguard for every app.
