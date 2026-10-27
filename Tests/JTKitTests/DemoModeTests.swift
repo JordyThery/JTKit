@@ -13,6 +13,26 @@ private func demoClient(_ server: DemoJamfPlatformServer = DemoJamfPlatformServe
     return (client, network)
 }
 
+/// An app's own demo service, as a route sees it: one fixed answer, and the requests it got.
+private final class RecordingDemoServer: DemoServer, @unchecked Sendable {
+    private let lock = NSLock()
+    private var received: [DemoRequest] = []
+    private let status: Int
+    private let body: String
+
+    init(status: Int, body: String) {
+        self.status = status
+        self.body = body
+    }
+
+    var requests: [DemoRequest] { lock.withLock { received } }
+
+    func respond(to request: DemoRequest) -> DemoResponse {
+        lock.withLock { received.append(request) }
+        return DemoResponse(status: status, body: Data(body.utf8))
+    }
+}
+
 @Suite("Demo Jamf Platform server")
 struct DemoJamfPlatformServerTests {
     @Test("Signs in and lists Contoso's device groups and Blueprints, newest first")
@@ -109,6 +129,50 @@ struct DemoJamfPlatformServerTests {
         try await blueprints.patchSteps(id: id, steps: steps)
         #expect(server.blueprint(id: id)?["steps"]?.serialized() == steps.serialized(), "byte for byte, 1.0 included")
         #expect(String(decoding: steps.serialized(), as: UTF8.self).contains(#""Ratio":1.0"#))
+    }
+
+    @Test("An app's own device groups come after Contoso's; the same ID replaces one in place")
+    func addedGroups() async throws {
+        let server = DemoJamfPlatformServer()
+        let extra = JamfPlatform.DeviceGroup(id: DemoSamples.uuid(0xd6f1), name: "Design Macs", description: "Static",
+                                             deviceType: .computer, groupType: .static, memberCount: 3)
+        var renamed = DemoSamples.platformGroups[0]
+        renamed.name = "Every Mac"
+        server.add(groups: [extra, renamed])
+        server.add(groups: [extra])
+
+        let (client, _) = try demoClient(server)
+        let groups = try await client.deviceGroups()
+        #expect(groups.count == DemoSamples.platformGroups.count + 1)
+        #expect(groups.first?.name == "Every Mac")
+        #expect(groups.last == extra)
+        #expect(groups.filter { $0.name == "Design Macs" }.count == 2)
+    }
+
+    @Test("A route hands an app's own paths to its server through the real client; other paths stay the server's")
+    func routes() async throws {
+        let server = DemoJamfPlatformServer()
+        let classic = RecordingDemoServer(status: 200, body: #"{"os_x_configuration_profiles":[]}"#)
+        let deeper = RecordingDemoServer(status: 201, body: "{}")
+        server.route("proclassic", to: classic)
+        server.route("/proclassic/mobiledeviceconfigurationprofiles/", to: deeper)
+
+        let (client, _) = try demoClient(server)
+        let list = try await client.send(HTTPRequest(path: "proclassic/osxconfigurationprofiles", accept: "application/json"))
+        #expect(String(decoding: list.data, as: UTF8.self).contains("os_x_configuration_profiles"))
+        #expect(classic.requests.map(\.pathSegments) == [["proclassic", "osxconfigurationprofiles"]])
+        #expect(classic.requests.first?.headers["X-Environment-Id"] == DemoSamples.platformEnvironmentID,
+                "sent as to a tenant, scope header included")
+
+        _ = try await client.send(HTTPRequest(method: "PUT", path: "proclassic/mobiledeviceconfigurationprofiles/id/1",
+                                              body: Data("<x/>".utf8), contentType: "application/xml"))
+        #expect(deeper.requests.map(\.method) == ["PUT"], "the longest path wins")
+        #expect(classic.requests.count == 1)
+
+        #expect(try await client.deviceGroups().count == DemoSamples.platformGroups.count, "other paths unchanged")
+        await #expect(throws: JamfPlatformError.self) {
+            _ = try await client.send(HTTPRequest(path: "proclassicx/1"))
+        }
     }
 
     @Test("Changing a deployed Blueprint makes it Out of Date")
