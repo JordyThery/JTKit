@@ -13,3 +13,4 @@
 xcuserdata/
 DerivedData/
 *.xcuserstate
+/Package.resolved
