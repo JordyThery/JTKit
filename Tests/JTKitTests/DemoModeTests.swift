@@ -1,5 +1,6 @@
 import Foundation
 import Testing
+import AppKit
 @testable import JTKit
 import JTKitTestSupport
 
@@ -436,6 +437,24 @@ struct DemoModeSwitchTests {
         #expect(DemoMode.windowTitle("AppSettings2Blueprint — Demo", isOn: false) == "AppSettings2Blueprint")
         #expect(DemoMode.windowTitle("Connections", isOn: false) == "Connections")
         #expect(DemoMode.windowTitle("", isOn: true) == "")
+    }
+
+    @Test("A title set after the window was seen gets “— Demo” back (the Settings tab)")
+    @MainActor func laterTitleChange() {
+        let keeper = DemoWindowTitles.shared
+        let wasOn = keeper.isOn
+        defer { keeper.update(isOn: wasOn) }
+        keeper.update(isOn: true)
+        let window = NSWindow(contentRect: .init(x: 0, y: 0, width: 100, height: 100), styleMask: [.titled], backing: .buffered, defer: true)
+        window.isReleasedWhenClosed = false
+        window.title = "Settings"
+        keeper.apply(to: window)
+        #expect(window.title == "Settings — Demo")
+        window.title = "General"
+        #expect(window.title == "General — Demo")
+        keeper.update(isOn: false)
+        keeper.apply(to: window)
+        #expect(window.title == "General")
     }
 }
 

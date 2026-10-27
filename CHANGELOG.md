@@ -1,5 +1,37 @@
 # Changelog
 
+## 0.12.0 (2026-10-27)
+Step 11, for Jamf Deployer: autonomous testing and the release check. Additions; no app has to change.
+- `JTKitUITestSupport` (new product, UI test targets only): `JTKitUITestCase`
+  with Jamf Deployer's general helpers (launching the Debug build, `field`,
+  `any`, `anyContaining`, `element(identifier:)`, `dialogButton`, `tap`,
+  `type`, `paste`, `scrollIntoView`, `waitUntilGone`, `openSidebar`,
+  `saveInChosenFolder`, `goToFolder`, `relaunch`, a folder per test, the
+  failure dump plus a screenshot) and the shared demo checks
+  `launchInDemo(scenario:)`, `checkAbout()`, `checkSettingsTabs(_:)`,
+  `checkConnectionsEditor(service:)`, `checkConnectionsEditorOpens()`,
+  `checkActivityLog()` and `checkDemoTitles()`. Its launch arguments are
+  checked against `DemoMode`'s by a test.
+- `JTKitLiveCheck` (new product, apps' unit test targets only, never
+  shipped): the allow-list (`AllowList`, a private file outside every git work
+  tree), `LiveCheckPolicy` (deny by default; read-only tenants GET only plus
+  sign-in and sign-out; Apple activities never; creates only with the run's
+  `JTKTEST` prefix; changes and deletes only of objects in the run's ledger;
+  device commands never; the Graph token's tenant checked; every tenant read
+  only until stage 4), `Ledger` (on disk after every change),
+  `LiveCheckNetwork` (a session for the app's `RequestRecorder` that decides
+  each request before it's sent and never follows a redirect) and
+  `LiveCheckRun` (the run's settings, credentials, engine check, sweep,
+  report lines, and the `--fault` points that test the check itself).
+- `Scripts/release-check-lib.sh` and `release-check-setup.sh`: the
+  five-stage release check each app's `Scripts/release-check.sh` loads (build
+  and sign in, unit tests, UI smoke tests in demo mode, live checks with
+  cleanup on every exit, a report with the before-and-after fingerprint of
+  the app's connections and Keychain item names); `--local-jtkit`,
+  `--tenants`, `--include-production`, `--stop-before-live`, `--fault`.
+- Demo mode: a window whose title is set after JTKit has seen it (the
+  Settings window names its tab) gets "— Demo" back straight away.
+
 ## 0.11.7 (2026-10-27)
 Step 10, for Jamf Deployer. Additions; no app has to change.
 - The Platform demo server answers the gateway's `/pro/…` (Jamf Pro API) and
