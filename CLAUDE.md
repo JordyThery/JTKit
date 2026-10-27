@@ -12,6 +12,7 @@ One library product, `JTKit` (macOS 14+ only, Swift 6 language mode). Organise `
 - `Jamf/`: token providers (OAuth client credentials, basic auth), Jamf Pro API, Classic API, Platform API (Blueprints, device groups), Jamf School
 - `Intune/`: Entra ID / Microsoft Graph auth and Intune device endpoints
 - `ABM/`: Apple Business / School Manager API
+- `Demo/`: demo mode (switch, private network, fake servers, Contoso sample data)
 
 Test helpers (MockURLProtocol, fixtures) go in a separate library product `JTKitTestSupport` when first needed, never in `JTKit` itself.
 

@@ -90,6 +90,10 @@ public final class ConnectionStore<Record: ConnectionRecord> {
 
     /// Adds the record, or replaces the saved one with the same id.
     public func save(_ record: Record) throws {
+        // Demo connections live in memory only.
+        guard !record.connection.isDemo else {
+            throw ConnectionStoreError.couldNotSave("“\(record.connection.name)” is a demo connection, which is never saved.")
+        }
         var updated = records
         if let index = updated.firstIndex(where: { $0.id == record.id }) {
             updated[index] = record
@@ -124,6 +128,7 @@ public final class ConnectionStore<Record: ConnectionRecord> {
     // MARK: Secrets
 
     public func secret(_ kind: ConnectionSecretKind = .main, for connection: Connection) -> String? {
+        guard !connection.isDemo else { return nil }
         guard let location = secretLocations[kind] else { return nil }
         return location.store.secret(for: location.account(connection))
     }
@@ -131,6 +136,8 @@ public final class ConnectionStore<Record: ConnectionRecord> {
     /// Passing nil deletes the secret. Returns false when the write failed.
     @discardableResult
     public func setSecret(_ secret: String?, _ kind: ConnectionSecretKind = .main, for connection: Connection) -> Bool {
+        // Demo connections never touch the Keychain.
+        guard !connection.isDemo else { return false }
         guard let location = secretLocations[kind] else { return secret == nil }
         return location.store.setSecret(secret, for: location.account(connection))
     }
