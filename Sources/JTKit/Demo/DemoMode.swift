@@ -362,14 +362,18 @@ public final class InMemoryConnectionStorage<Record>: ConnectionStorage {
 
 /// Adds "— Demo" to the title of every window while demo mode is on, and
 /// takes it off again when it's turned off, so a screenshot can't be taken
-/// for real data. Windows whose title changes (a Settings tab) get it back on
-/// the next update.
+/// for real data. A window whose title changes later (a Settings tab) gets it
+/// back straight away.
 @MainActor
 final class DemoWindowTitles {
     static let shared = DemoWindowTitles()
 
     private var observer: (any NSObjectProtocol)?
-    private var isOn = false
+    /// One title watch per window seen: SwiftUI can set a title after the
+    /// window's last update (the Settings window names its tab), so the
+    /// suffix is put back whenever a title changes.
+    private var titleWatches: [ObjectIdentifier: NSKeyValueObservation] = [:]
+    private(set) var isOn = false
 
     func update(isOn: Bool) {
         self.isOn = isOn
@@ -388,8 +392,21 @@ final class DemoWindowTitles {
         for window in app.windows { apply(to: window) }
     }
 
-    private func apply(to window: NSWindow?) {
+    func apply(to window: NSWindow?) {
         guard let window, !(window is NSPanel) else { return }
+        let id = ObjectIdentifier(window)
+        if titleWatches[id] == nil {
+            titleWatches[id] = window.observe(\.title, options: [.new]) { window, _ in
+                MainActor.assumeIsolated { DemoWindowTitles.shared.retitle(window) }
+            }
+            NotificationCenter.default.addObserver(forName: NSWindow.willCloseNotification, object: window, queue: .main) { _ in
+                MainActor.assumeIsolated { _ = DemoWindowTitles.shared.titleWatches.removeValue(forKey: id) }
+            }
+        }
+        retitle(window)
+    }
+
+    private func retitle(_ window: NSWindow) {
         let title = DemoMode.windowTitle(window.title, isOn: isOn)
         if title != window.title { window.title = title }
     }

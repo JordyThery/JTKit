@@ -14,7 +14,7 @@ One library product, `JTKit` (macOS 14+ only, Swift 6 language mode). Organise `
 - `ABM/`: Apple Business / School Manager API
 - `Demo/`: demo mode (switch, private network, fake servers, Contoso sample data)
 
-Test helpers (MockURLProtocol, fixtures) go in a separate library product `JTKitTestSupport` when first needed, never in `JTKit` itself.
+Test helpers (MockURLProtocol, fixtures) go in a separate library product `JTKitTestSupport` when first needed, never in `JTKit` itself. From 0.12.0 (ROADMAP step 11): `JTKitUITestSupport` (UI test targets only, XCTest, doesn't link JTKit; Swift 5 language mode), `JTKitLiveCheck` (apps' unit test targets only, never shipped; the allow-list, rules, ledger and guarded network of the live checks) and `Scripts/release-check-lib.sh` with `release-check-setup.sh` (the release-check template each app's `Scripts/release-check.sh` loads).
 
 ## Rules for shared code
 
