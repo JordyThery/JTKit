@@ -1,5 +1,34 @@
 # Changelog
 
+## 0.11.0 (2026-10-27)
+Step 10, first part: demo mode, for AppSettings2Blueprint. Additions, and one
+safeguard for every app.
+- `DemoMode` (`Demo/`): the shared "Demo Mode" switch, saved under the app's
+  key. Launch arguments for UI tests: `-JTKitDemo YES` (on for this run, not
+  saved), `-JTKitSandbox YES` (in-memory connections and secrets via
+  `sandboxDefaults()` and `SandboxSecretStore`, no public lookups),
+  `-JTKitDemoScenario jamfSchool`. `scratchDirectory`: a temporary folder per
+  launch for what an app saves in demo mode. `jamfPlatform()` gives a
+  `DemoSource` (connection, secret, session) in place of a saved connection.
+- "— Demo" is added to every window's title while demo mode is on.
+- `DemoNetwork`: a private session that answers every request inside the
+  app; a host without a demo server fails, so nothing reaches the network.
+- `DemoJamfPlatformServer` (from Profile2Blueprint's `DemoBlueprintServer`):
+  sign-in, device groups, environments, Blueprints (paged list with search
+  and sort, detail, create, merge-patch, deploy, report) with the behaviour
+  seen live: no steps without a scope (400 NotBlank `scopeId`), division
+  lock (409), Out of Date after a change, deployments that finish over a few
+  reads, configuration-profile payloads stored as the service stores them.
+- `DemoSamples`: Contoso's device groups and six Blueprints; IDs only in the
+  reserved fake range, invented identifiers, checked by a test.
+- `DemoModeToggle`, `ConnectionPickerLabel.demo`, and a note above Settings ›
+  Connections ("These are your real connections") when the app passes its
+  `DemoMode` into the environment.
+- `DemoSecretStore` (never writes), `InMemoryConnectionStorage`.
+- **Every app:** `ConnectionStore` refuses to save a demo connection (an ID in
+  the fake range or an address on `.demo.invalid`) or to read or write its
+  secret (`Connection.isDemo`).
+
 ## 0.10.0 (2026-10-26)
 Step 9: Apple Business Manager and Apple School Manager, for Checkpoint (the
 only app that uses them). Additions, and three safeguards for every app.

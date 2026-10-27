@@ -294,6 +294,8 @@ public struct ConnectionsSettingsTab<Record: ConnectionRecord, AppSection: View>
     let environments: ConnectionEnvironmentLoader<Record>?
     let appSection: (Binding<Record>) -> AppSection
 
+    /// The app's demo mode, when it passes one in (`.environment(demo)`).
+    @Environment(DemoMode.self) private var demo: DemoMode?
     @State private var editingID: UUID?
     @State private var editorHasChanges = false
     @State private var pendingSelection: UUID??
@@ -386,6 +388,10 @@ public struct ConnectionsSettingsTab<Record: ConnectionRecord, AppSection: View>
                     .textSelection(.enabled)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(10)
+                Divider()
+            }
+            if demo?.isOn == true {
+                DemoModeConnectionsNote()
                 Divider()
             }
             HStack(spacing: 0) {
