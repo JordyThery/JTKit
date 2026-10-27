@@ -1,5 +1,35 @@
 # Changelog
 
+## 0.11.5 (2026-10-27)
+Step 10, for Intune Deployer. Additions; no app has to change.
+- `DemoIntuneServer` holds a general Graph store for "Contoso Intune (Demo)":
+  the Intune lists Intune Deployer uses (Settings Catalog, configurations,
+  compliance, shell scripts, custom attributes, filters, apps), groups, `me`,
+  the organization with its MDM authority, APNs certificate and ADE token, and
+  the Settings Catalog. Lists with paging (`@odata.nextLink`), `$filter`
+  (`eq`), `$select` and `$expand`; create, PATCH, PUT, DELETE, `/assign`,
+  `scheduleActionsForRules`. Graph's own behaviour is kept: beta-only lists
+  refuse v1.0, script lists leave out `scriptContent`, a policy's settings
+  are their own list, compliance rules only with `$expand`. Checkpoint's
+  `managedDevices` is unchanged.
+- App uploads: content versions and files whose states move on when read
+  (nothing waits), commit, `renewUpload`, publishing; the content goes to a
+  fake storage host, `DemoIntuneServer.storageHost` (`*.demo.invalid`), on
+  the same demo network. A commit without the uploaded blocks fails, as
+  Graph's does; the encryption key in the commit isn't kept.
+- `DemoMode.microsoftSignIn()` (`DemoMicrosoftSignIn`): in place of MSAL's
+  interactive sign-in, a fixed token the demo tenant accepts
+  (`DemoIntuneServer.delegatedToken`), its account
+  (`demo.sample@contoso.example`) and the demo network's session.
+- `DemoIntuneServer.add(_:to:)`, `objects(at:)`, `add(definitions:)`
+  (`DemoSettingDefinition`), `uploadedBytes`, `storeRequestCount`.
+- `-JTKitDemoScenario missingPermission` now also refuses every write to the
+  demo tenant with Graph's real 403 (Intune's "Forbidden" naming the scope;
+  Entra's `Authorization_RequestDenied` for groups); reads still work.
+- `Connection.isDemo` is also true for a tenant ID or client ID in the fake
+  range, so an exported demo tenant imported under a new ID is still refused
+  by `ConnectionStore`.
+
 ## 0.11.4 (2026-10-27)
 Step 10, for Serial Number Reader. Additions; no app has to change.
 - `DemoWorld` device 42: `ZZDEMOP42RX`, Contoso's iPhone 16 (asset tag
