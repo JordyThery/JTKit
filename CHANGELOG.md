@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.11.4 (2026-10-27)
+Step 10, for Serial Number Reader. Additions; no app has to change.
+- `DemoWorld` device 42: `ZZDEMOP42RX`, Contoso's iPhone 16 (asset tag
+  CT-1042), sent by Apple Business Manager to "Contoso Jamf Pro" and in the
+  demo Jamf Pro, so an app can show an iPhone Jamf Pro knows. Devices 1–41
+  are unchanged; Contoso now has 31 devices (an app that counts them, e.g.
+  Checkpoint's demo test, sees 42 in all).
+- `ConnectionRole.active(selection:demo:)`: the single-connection role can
+  offer demo connections (`DemoConnectionChoice`), as `ConnectionRole(…, demo:)` does.
+
 ## 0.11.3 (2026-10-27)
 Step 10, for Profile2Blueprint. Additions; no app has to change.
 - `DemoJamfPlatformServer.add(groups:)`: an app adds its own sample device
