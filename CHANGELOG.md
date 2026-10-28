@@ -1,5 +1,28 @@
 # Changelog
 
+## 0.12.2 (2026-10-28)
+Step 11, for Profile2Blueprint, the first sandboxed app. An addition; no app has to change.
+- `Scripts/release-check-lib.sh`: `TEST_HOST_CONTAINER="<bundle ID>"` for an
+  app whose test host runs in the App Sandbox and so can't reach the
+  allow-list or the run folder. The live folder (a copy of the allow-list, the
+  ledger and the results) is then a folder of the run's inside the app's
+  container, readable by you only (checked), copied back to the run folder
+  for the report. At the end the allow-list copy must be unchanged, or the run
+  fails. A folder an earlier run left (a crash, or a cleanup that didn't
+  finish) is read at the start: its outstanding objects join this run's
+  ledger (only `JTKTEST` names; anything else stops the run), and the folder
+  is deleted only once this run has removed them.
+- One release check per Mac at a time, for every app: a lock in `state/`
+  beside the allow-list (the running check's process). A second check stops
+  before it reads a credential or reaches a tenant; a lock whose process has
+  ended (a killed run) is taken over. Closes the step 12 item about two checks
+  on one tenant removing each other's `JTKTEST` objects.
+- Stage 3 fails when the smoke-test file is missing or has no tests (it
+  passed with none before).
+- A live-check test for Classic macOS configuration profiles and computer
+  groups through the Platform gateway (creates need the prefix in the first
+  `<name>`; scope changes and deletes need the ledger).
+
 ## 0.12.1 (2026-10-28)
 Step 11, for AppSettings2Blueprint. An addition; no app has to change.
 - `Scripts/release-check-lib.sh`: `FINGERPRINT_DEFAULTS=("<domain> <key>" …)`

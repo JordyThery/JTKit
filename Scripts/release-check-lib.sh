@@ -12,6 +12,12 @@
 #   FINGERPRINT_DEFAULTS=("<domain> <key>" …)   optional (0.12.1): single
 #     UserDefaults values, for apps whose connections share a preferences file
 #     with window frames and other state macOS changes during a UI test
+#   TEST_HOST_CONTAINER="<bundle ID>"   optional (0.12.2), for a sandboxed app:
+#     its test host can only reach its own container, so the live folder (the
+#     allow-list copy, ledger and results) lives there, readable by you only
+#
+# One release check per Mac at a time (0.12.2): a lock in state/ beside the
+# allow-list; a second check stops before it reads or changes anything.
 #
 # Stages, stopping at the first failure (cleanup and the report run either way):
 #   1 build from the app's own project and sign in to its allow-listed tenants
@@ -177,10 +183,10 @@ rc_tests_in() {
 
 rc_live_environment() {
     export TEST_RUNNER_JTKIT_LIVE=1
-    export TEST_RUNNER_JTKIT_LIVE_RUN_DIR="$RC_RUN/live"
+    export TEST_RUNNER_JTKIT_LIVE_RUN_DIR="$RC_LIVE_DIR"
     export TEST_RUNNER_JTKIT_LIVE_PREFIX="$RC_PREFIX"
     export TEST_RUNNER_JTKIT_LIVE_ROLES="${(j:,:)RC_ROLES}"
-    export TEST_RUNNER_JTKIT_LIVE_ALLOWLIST="$RC_ALLOWLIST"
+    export TEST_RUNNER_JTKIT_LIVE_ALLOWLIST="$RC_LIVE_ALLOWLIST"
     (( RC_PRODUCTION )) && export TEST_RUNNER_JTKIT_LIVE_INCLUDE_PRODUCTION=1
     if [[ -n "$RC_FAULT" ]]; then export TEST_RUNNER_JTKIT_LIVE_FAULT="$RC_FAULT"; else unset TEST_RUNNER_JTKIT_LIVE_FAULT; fi
     # Writes (and so the sweep) only in stage 4; earlier stages read.
@@ -210,7 +216,7 @@ rc_interrupt_live() {
     while (( waited < 900 )); do
         local count=$("$RC_PY" -c 'import json,sys
 try: print(len(json.load(open(sys.argv[1]))))
-except Exception: print(0)' "$RC_RUN/live/ledger.json")
+except Exception: print(0)' "$RC_LIVE_DIR/ledger.json")
         (( count >= 2 )) && break
         kill -0 $xb 2>/dev/null || break
         sleep 2; (( waited += 2 ))
@@ -222,6 +228,139 @@ except Exception: print(0)' "$RC_RUN/live/ledger.json")
     RC_CLEANUP_STATUS="skipped (interrupted on purpose)"
     RC_LIVE_STARTED=0
     rc_fail "Interrupted on purpose in stage 4 with test objects created; cleanup skipped, as after a crash"
+}
+
+# MARK: One release check per Mac (0.12.2)
+
+# Every release check sweeps its tenants for JTKTEST objects and adopts an
+# earlier run's live folder, so two at once (of any apps) could remove each
+# other's objects. The lock beside the allow-list holds the running check's
+# process ID; a lock whose process has ended is stale and taken over.
+RC_LOCK="$RC_BASE/state/release-check.lock"
+rc_lock() {
+    mkdir -p "$RC_BASE/state" && chmod 700 "$RC_BASE/state"
+    local attempt holder
+    for attempt in 1 2; do
+        if ( set -o noclobber; print -r -- "$$ $APP_NAME" > "$RC_LOCK" ) 2>/dev/null; then
+            RC_LOCKED=1
+            return 0
+        fi
+        holder="$(cat "$RC_LOCK" 2>/dev/null)"
+        if [[ -n "$holder" ]] && kill -0 "${holder%% *}" 2>/dev/null; then
+            rc_fail "Another release check is running on this Mac (${holder#* }, process ${holder%% *}); one at a time"
+        fi
+        rc_log "Removing a stale lock (${holder:-empty})"
+        rm -f "$RC_LOCK"
+    done
+    rc_fail "Can't take the release-check lock at $RC_LOCK"
+}
+
+rc_unlock() {
+    (( ${RC_LOCKED:-0} )) || return 0
+    [[ "$(cat "$RC_LOCK" 2>/dev/null)" == "$$ $APP_NAME" ]] && rm -f "$RC_LOCK"
+    RC_LOCKED=0
+}
+
+# MARK: Live folder (0.12.2)
+
+# Where the test host reads the allow-list and writes the ledger and results:
+# $RC_RUN/live, or for a sandboxed test host (TEST_HOST_CONTAINER) a folder of
+# this run's in the app's container, readable by you only, with a copy of the
+# allow-list. What the tests write there is copied back to $RC_RUN/live for
+# the report. A folder an earlier run left (it crashed, or its cleanup didn't
+# finish) is kept until this run has read its ledger and removed its objects.
+rc_live_setup() {
+    RC_LIVE_DIR="$RC_RUN/live" RC_LIVE_ALLOWLIST="$RC_ALLOWLIST" RC_LIVE_PARENT=""
+    [[ -n "${TEST_HOST_CONTAINER:-}" ]] || return 0
+    local data="$HOME/Library/Containers/$TEST_HOST_CONTAINER/Data"
+    [[ -d "$data/tmp" ]] || rc_fail "No container for $TEST_HOST_CONTAINER at $data (open the app once)"
+    RC_LIVE_PARENT="$data/tmp/JTKitReleaseCheck"
+    mkdir -p "$RC_LIVE_PARENT" && chmod 700 "$RC_LIVE_PARENT" || rc_fail "Can't make $RC_LIVE_PARENT"
+    RC_LIVE_DIR="$RC_LIVE_PARENT/${RC_RUN:t}"
+    mkdir -m 700 "$RC_LIVE_DIR" || rc_fail "Can't make the live folder $RC_LIVE_DIR"
+    local mode
+    for dir in "$RC_LIVE_PARENT" "$RC_LIVE_DIR"; do
+        mode=$(stat -f %Lp "$dir")
+        [[ "$mode" == 700 && "$(stat -f %u "$dir")" == "$(id -u)" ]] || rc_fail "$dir must be yours and readable by you only (700); it is $mode"
+    done
+    RC_LIVE_ALLOWLIST="$RC_LIVE_DIR/allowlist.json"
+    ( umask 077; cp "$RC_ALLOWLIST" "$RC_LIVE_ALLOWLIST" ) && chmod 600 "$RC_LIVE_ALLOWLIST" || rc_fail "Can't copy the allow-list"
+    RC_ALLOWLIST_HASH="$(shasum -a 256 < "$RC_ALLOWLIST" | cut -d' ' -f1)"
+    [[ "$(shasum -a 256 < "$RC_LIVE_ALLOWLIST" | cut -d' ' -f1)" == "$RC_ALLOWLIST_HASH" ]] || rc_fail "The allow-list copy differs from the allow-list"
+    rc_log "Live folder (in the app's container, 700): ${RC_LIVE_DIR:t}"
+    # Earlier runs' outstanding objects join this run's ledger, so this run's
+    # cleanup removes them; their folders are listed for rc_live_finish.
+    "$RC_PY" - "$RC_LIVE_PARENT" "$RC_LIVE_DIR" "$RC_RUN/earlier-ledgers.json" <<'EOF' || rc_fail "An earlier run's ledger can't be used (see run.log)"
+import json, os, sys
+parent, current, out = sys.argv[1:4]
+ledger_path = os.path.join(current, "ledger.json")
+merged, earlier = [], []
+key = lambda i: (i["target"], i["resource"], i["id"])
+for name in sorted(os.listdir(parent)):
+    folder = os.path.join(parent, name)
+    if folder == current or not os.path.isdir(folder): continue
+    try:
+        with open(os.path.join(folder, "ledger.json")) as f: items = json.load(f)
+    except FileNotFoundError: items = []
+    except Exception as error:
+        print(f"Unreadable ledger in {name}: {error}"); sys.exit(1)
+    left = [i for i in items if not i.get("removed")]
+    for i in left:
+        if not i.get("name", "").startswith("JTKTEST "):
+            print(f"{name}'s ledger lists “{i.get('name')}”, which isn't named as a test object"); sys.exit(1)
+    earlier.append({"folder": name, "items": [list(key(i)) for i in left]})
+    for i in left:
+        if key(i) not in {key(m) for m in merged}:
+            merged.append(dict(i, removed=False, fromSweep=True))
+    print(f"Earlier live folder {name}: {len(left)} objects still to remove")
+if merged:
+    with open(ledger_path, "w") as f: json.dump(merged, f, indent=2, sort_keys=True)
+with open(out, "w") as f: json.dump(earlier, f, indent=2)
+EOF
+}
+
+# Copies what the tests wrote into the run folder (sandboxed test hosts only).
+rc_live_sync() {
+    [[ -n "${RC_LIVE_PARENT:-}" && -d "$RC_LIVE_DIR" ]] || return 0
+    local file
+    for file in ledger.json results.jsonl refusals.json; do
+        [[ -f "$RC_LIVE_DIR/$file" ]] && cp "$RC_LIVE_DIR/$file" "$RC_RUN/live/$file"
+    done
+    return 0
+}
+
+# Checks the allow-list copy, then removes the live folders whose objects are
+# all gone: this run's, and each earlier one whose objects this run removed.
+rc_live_finish() {
+    [[ -n "${RC_LIVE_PARENT:-}" ]] || return 0
+    if [[ ! -f "$RC_LIVE_ALLOWLIST" ]]; then
+        RC_ALLOWLIST_COPY="FAILED: the allow-list copy is missing"
+    elif [[ "$(shasum -a 256 < "$RC_LIVE_ALLOWLIST" | cut -d' ' -f1)" != "$RC_ALLOWLIST_HASH" ]]; then
+        RC_ALLOWLIST_COPY="FAILED: the allow-list copy changed during the run"
+    else
+        RC_ALLOWLIST_COPY="unchanged"
+    fi
+    local folder
+    for folder in $("$RC_PY" - "$RC_LIVE_DIR" "$RC_RUN/earlier-ledgers.json" <<'EOF'
+import json, os, sys
+current, earlier_path = sys.argv[1:3]
+try:
+    with open(os.path.join(current, "ledger.json")) as f: items = json.load(f)
+except Exception: items = []
+removed = {(i["target"], i["resource"], i["id"]) for i in items if i.get("removed")}
+if all(i.get("removed") for i in items): print(os.path.basename(current))
+try:
+    with open(earlier_path) as f: earlier = json.load(f)
+except Exception: earlier = []
+for e in earlier:
+    if all(tuple(k) in removed for k in e["items"]): print(e["folder"])
+EOF
+    ); do
+        [[ -n "$folder" && "$folder" != */* && "$folder" != .* && -d "$RC_LIVE_PARENT/$folder" ]] || continue
+        rm -rf "$RC_LIVE_PARENT/$folder" && rc_log "Live folder removed: $folder"
+    done
+    [[ -d "$RC_LIVE_DIR" ]] && rc_log "Live folder kept, objects still to remove: ${RC_LIVE_DIR:t}"
+    return 0
 }
 
 # MARK: Cleanup and report
@@ -244,9 +383,12 @@ rc_cleanup() {
     rc_live_off
     rc_forget_credentials
     [[ -n "${RC_CAFFEINATE:-}" ]] && kill "$RC_CAFFEINATE" 2>/dev/null
+    rc_live_sync
+    rc_live_finish
     rc_fingerprint "$RC_RUN/fingerprint.after"
     rc_report
     rm -rf "$RC_WORK"
+    rc_unlock
 }
 
 rc_report() {
@@ -254,9 +396,11 @@ rc_report() {
     [[ -n "${RC_FAILED:-}" ]] && result="FAILED: $RC_FAILED"
     [[ "$(cat "$RC_RUN/fingerprint.before" 2>/dev/null)" != "$(cat "$RC_RUN/fingerprint.after" 2>/dev/null)" ]] && result="FAILED: saved connections or Keychain item names changed"
     [[ "${RC_CLEANUP_STATUS:-}" == FAILED* ]] && result="FAILED: cleanup"
+    [[ "${RC_ALLOWLIST_COPY:-}" == FAILED* ]] && result="$RC_ALLOWLIST_COPY"
     if [[ -n "$RC_FAULT" && "$result" == "passed" ]]; then
         result="FAILED: the injected fault ($RC_FAULT) didn't stop the check"
     fi
+    RC_LIVE_IN_CONTAINER="${TEST_HOST_CONTAINER:-}" RC_ALLOWLIST_COPY="${RC_ALLOWLIST_COPY:-}" \
     "$RC_PY" - "$RC_RUN" "$APP_NAME" "$result" "$RC_KIND" "$RC_JTKIT" "${RC_CLEANUP_STATUS:-not needed}" \
         "${(j:|:)RC_STAGE_NAMES}" "${(j:|:)RC_STAGE_STATUS}" <<'EOF'
 import json, os, sys
@@ -292,6 +436,13 @@ lines += ["", "## Test objects", "",
           f"- Created by this run: {len(created)}, removed: {sum(1 for i in created if i.get('removed'))}",
           f"- Left-overs found by the sweep: {len(swept)}, removed: {sum(1 for i in swept if i.get('removed'))}",
           f"- Cleanup: {cleanup}"]
+earlier = load("earlier-ledgers.json", [])
+if earlier:
+    keys = {(i["target"], i["resource"], i["id"]) for i in ledger if i.get("removed")}
+    items = [tuple(k) for e in earlier for k in e["items"]]
+    lines.append(f"- From earlier runs' live folders ({len(earlier)}): {len(items)} objects, removed: {sum(1 for k in items if k in keys)}")
+if os.environ.get("RC_LIVE_IN_CONTAINER"):
+    lines.append(f"- Live folder in the app's container (readable by you only); allow-list copy: {os.environ.get('RC_ALLOWLIST_COPY') or 'not checked'}")
 for i in left:
     lines.append(f"- **Not removed:** {i['resource']} {i['id']} “{i['name']}”")
 lines += ["", "## Refused requests", ""]
@@ -337,8 +488,10 @@ release_check_main() {
     RC_WORKSPACE="${JTKIT_WORKSPACE:-$HOME/Developer/Apps.xcworkspace}"
     RC_ROLES=("${ROLES[@]}")
     RC_STAGE_NAMES=() RC_STAGE_STATUS=() RC_SECRET_VARS=() RC_CLEANED=0 RC_LIVE_STARTED=0 RC_FAILED=""
+    RC_LIVE_DIR="$RC_RUN/live" RC_LIVE_ALLOWLIST="$RC_ALLOWLIST" RC_LIVE_PARENT="" RC_ALLOWLIST_COPY=""
     mkdir -p "$RC_RUN/logs" "$RC_RUN/results" "$RC_RUN/live" && chmod 700 "$RC_BASE" "$RC_RUN"
-    RC_READY=1
+    RC_READY=1 RC_LOCKED=0
+    rc_lock
 
     if (( RC_LOCAL )); then
         RC_KIND="pre-release (local JTKit in Apps.xcworkspace, not the published version)"
@@ -354,6 +507,7 @@ release_check_main() {
 
     # Stage 1: build and sign in
     rc_check_allowlist
+    rc_live_setup
     if (( RC_ALL_TENANTS )); then
         RC_ROLES=($("$RC_PY" -c 'import json,sys; print(" ".join(sorted({t["role"] for t in json.load(open(sys.argv[1]))["tenants"] if sys.argv[2]=="1" or not t.get("production")})))' "$RC_ALLOWLIST" "$RC_PRODUCTION"))
     fi
@@ -385,8 +539,13 @@ release_check_main() {
 
     # Stage 3: UI smoke tests in demo mode, one test at a time
     caffeinate -dimsu & RC_CAFFEINATE=$!
-    local test failed=()
-    for test in $(rc_tests_in "$SMOKE_FILE"); do
+    local test failed=() smoke=()
+    [[ -f "$SMOKE_FILE" ]] && smoke=($(rc_tests_in "$SMOKE_FILE"))
+    if (( ! ${#smoke} )); then
+        rc_stage "3 UI smoke tests" "FAILED: no smoke tests in $SMOKE_FILE"
+        rc_fail "No smoke tests found in $SMOKE_FILE"
+    fi
+    for test in "${smoke[@]}"; do
         rc_log "  smoke: $test"
         rc_test "$UI_TESTS/$SMOKE_CLASS/$test" || failed+=("$test")
     done

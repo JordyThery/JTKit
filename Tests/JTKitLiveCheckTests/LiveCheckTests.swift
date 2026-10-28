@@ -178,6 +178,32 @@ struct TestObjectRuleTests {
                                       body: "<category><name>\(prefix) – C</name></category>")).isAllowed)
     }
 
+    /// Profile2Blueprint's live check (0.12.2): a Classic macOS configuration
+    /// profile and a static computer group through the Platform gateway.
+    @Test func classicProfilesAndGroupsThroughTheGateway() throws {
+        let policy = makePolicy()
+        let headers = ["X-Environment-Id": platformA]
+        let profiles = "https://eu.api.jamfcloud.com/proclassic/osxconfigurationprofiles"
+        let good = "<os_x_configuration_profile><general><name>\(prefix) – Profile</name><payloads>&lt;plist/&gt;</payloads></general><scope><all_computers>false</all_computers></scope></os_x_configuration_profile>"
+        #expect(policy.decide(request("POST", "\(profiles)/id/0", headers: headers, body: good)).kind == .create(name: "\(prefix) – Profile"))
+        #expect(!policy.decide(request("POST", "\(profiles)/id/0", headers: headers,
+                                       body: "<os_x_configuration_profile><general><name>Wi-Fi</name></general></os_x_configuration_profile>")).isAllowed)
+        // The first <name> counts: a category named before the profile is refused.
+        #expect(!policy.decide(request("POST", "\(profiles)/id/0", headers: headers,
+                                       body: "<os_x_configuration_profile><category><name>Security</name></category><general><name>\(prefix) – P</name></general></os_x_configuration_profile>")).isAllowed)
+        let group = "<computer_group><name>\(prefix) – Classic Group</name><is_smart>false</is_smart></computer_group>"
+        #expect(policy.decide(request("POST", "https://eu.api.jamfcloud.com/proclassic/computergroups/id/0", headers: headers, body: group)).isAllowed)
+
+        // A scope change and a delete only on this run's profile.
+        let scope = "<os_x_configuration_profile><scope><computer_groups/></scope></os_x_configuration_profile>"
+        #expect(!policy.decide(request("PUT", "\(profiles)/id/21", headers: headers, body: scope)).isAllowed)
+        try policy.ledger.add(.init(target: "platform:\(platformA)", resource: "osxconfigurationprofiles", id: "21", name: "\(prefix) – Profile"),
+                              testPrefixes: [prefix])
+        #expect(policy.decide(request("PUT", "\(profiles)/id/21", headers: headers, body: scope)).kind == .change)
+        #expect(policy.decide(request("DELETE", "\(profiles)/id/21", headers: headers)).kind == .delete)
+        #expect(!policy.decide(request("PUT", "\(profiles)/id/22", headers: headers, body: scope)).isAllowed)
+    }
+
     @Test func graphCreatesUseDisplayName() {
         let policy = makePolicy()
         let auth = ["Authorization": "Bearer \(jwt(tid: entraTest))"]
