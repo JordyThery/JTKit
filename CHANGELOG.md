@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.12.1 (2026-10-28)
+Step 11, for AppSettings2Blueprint. An addition; no app has to change.
+- `Scripts/release-check-lib.sh`: `FINGERPRINT_DEFAULTS=("<domain> <key>" …)`
+  fingerprints single UserDefaults values (a hash of each, never the value),
+  for apps whose saved connections share a preferences file with window
+  frames and other state macOS changes while the UI smoke tests run.
+- `JTKitUITestSupport`: `checkConnectionsEditor(service:fill:)` also finds an
+  unlabelled name field (by the new connection's name), and `fill` lets an app
+  fill in made-up values its editor needs before Save is enabled.
+
 ## 0.12.0 (2026-10-27)
 Step 11, for Jamf Deployer: autonomous testing and the release check. Additions; no app has to change.
 - `JTKitUITestSupport` (new product, UI test targets only): `JTKitUITestCase`

@@ -9,6 +9,9 @@
 #   CREDENTIALS=("role:service:item" …)   read from the Keychain the allow-list names
 #   LEGACY_PREFIXES="UIT - |…"           swept once, on the first live run
 #   FINGERPRINT_PATHS=(…) KEYCHAIN_PREFIXES=(…)
+#   FINGERPRINT_DEFAULTS=("<domain> <key>" …)   optional (0.12.1): single
+#     UserDefaults values, for apps whose connections share a preferences file
+#     with window frames and other state macOS changes during a UI test
 #
 # Stages, stopping at the first failure (cleanup and the report run either way):
 #   1 build from the app's own project and sign in to its allow-listed tenants
@@ -109,6 +112,17 @@ rc_fingerprint() {
             print -r -- "absent $item" >> "$out.names"
         fi
     done
+    # Single settings: only a hash of each value is kept, never the value.
+    local pair domain key value
+    for pair in "${FINGERPRINT_DEFAULTS[@]}"; do
+        domain="${pair%% *}"; key="${pair#* }"
+        if value="$(/usr/bin/defaults read "$domain" "$key" 2>/dev/null)"; then
+            print -r -- "defaults $domain $key $(print -rn -- "$value" | shasum -a 256 | cut -c1-16)" >> "$out.names"
+        else
+            print -r -- "defaults $domain $key absent" >> "$out.names"
+        fi
+    done
+    unset value
     # Keychain item names only: service and account attributes, never data.
     local prefix
     for prefix in "${KEYCHAIN_PREFIXES[@]}"; do
