@@ -650,6 +650,9 @@ Replaces the 2026-10-25 "not planned" note: Jamf Deployer's long suites still ar
 ### Step 12: Independent review of JTKit (decided by Jordy on 2026-10-26)
 - A full code review of JTKit by Claude Fable, run separately from the conversations that built it, against these rules: secrets never logged or exported, retries and "never repeat a write", confirmation rules for irreversible commands, the standards above, and the public API before it's frozen.
 - Jordy decides which findings are fixed; fixes are released as 0.12.x, and apps take them up in one round.
+- Also to look at (added by Jordy on 2026-10-28, found during step 11 in Blueprint Managed Preferences Editor):
+  - `BlueprintDetail.isUnchanged(in:)` compares only `overview.updated`, so two missing "updated" dates count as unchanged and a change on the server would go unnoticed.
+  - The `JTKTEST` sweep removes every prefixed object on the tenant, so two release checks running at the same time on one tenant can remove each other's objects. Add a lock (per tenant, beside the allow-list) so a second run waits until the first has finished.
 
 ### 1.0.0
 When every app has adopted steps 1–11, the step 12 findings Jordy chose are fixed, and the public API has stopped changing.
