@@ -35,20 +35,31 @@ extension JTKitUITestCase {
     /// Settings › Connections: adds a throwaway connection to the sandbox's
     /// in-memory list, saves it, then deletes it again.
     ///
-    /// - Parameter service: the + menu item to add, when the + button is a menu.
-    public func checkConnectionsEditor(service: String? = nil, file: StaticString = #filePath, line: UInt = #line) {
+    /// - Parameters:
+    ///   - service: the + menu item to add, when the + button is a menu.
+    ///   - fill: fills the fields the editor needs before Save is enabled,
+    ///     with made-up values (e.g. an Environment ID and a client ID); gets
+    ///     the Settings window.
+    public func checkConnectionsEditor(service: String? = nil, fill: ((XCUIElement) -> Void)? = nil,
+                                       file: StaticString = #filePath, line: UInt = #line) {
         let tab = openConnectionsTab(file: file, line: line)
         let name = "JTKTEST Throwaway \(Int.random(in: 1000...9999))"
         let add = tab.buttons["Add Connection"].exists ? tab.buttons["Add Connection"] : tab.menuButtons["Add Connection"]
         tap(add, file: file, line: line)
         if let service { tap(app.menuItems[service], file: file, line: line) }
-        let nameField = tab.textFields["Name"].firstMatch
+        // The name field by its label, or (unlabelled) by the new connection's name.
+        let labelled = tab.textFields["Name"].firstMatch
+        let nameField = labelled.waitForExistence(timeout: 2)
+            ? labelled
+            : tab.textFields.matching(NSPredicate(format: "value BEGINSWITH 'New '")).firstMatch
         XCTAssertTrue(nameField.waitForExistence(timeout: 5), "The new connection's editor did not open", file: file, line: line)
         nameField.click()
         nameField.typeKey("a", modifierFlags: .command)
         nameField.typeText(name)
+        fill?(tab)
         tap(tab.buttons["Save"], file: file, line: line)
-        let row = tab.staticTexts[name].firstMatch
+        // A row may read "Name, service · address" as one text.
+        let row = tab.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@ OR value BEGINSWITH %@", name, name)).firstMatch
         XCTAssertTrue(row.waitForExistence(timeout: 5), "The throwaway connection is not listed", file: file, line: line)
 
         row.click()
