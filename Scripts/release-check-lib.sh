@@ -15,6 +15,13 @@
 #   TEST_HOST_CONTAINER="<bundle ID>"   optional (0.12.2), for a sandboxed app:
 #     its test host can only reach its own container, so the live folder (the
 #     allow-list copy, ledger and results) lives there, readable by you only
+#   SMOKE_FILE="<path of the smoke-test class's file>"   its test1…testN run in order
+#   APP_FAULTS=(…)   optional (0.12.3): the app's own --fault cases, handled by
+#     its tests through JTKIT_LIVE_FAULT; the report says FAULT TEST as for the others
+#
+# Production roles in ROLES (marked production on the allow-list) take part
+# only with --include-production (0.12.3): otherwise they are left out, and
+# their CREDENTIALS aren't read.
 #
 # One release check per Mac at a time (0.12.2): a lock in state/ beside the
 # allow-list; a second check stops before it reads or changes anything.
@@ -30,6 +37,7 @@
 # "passed"): break-build (a compile error in the test target), fail-live-step
 # (a live step fails after creating objects), interrupt-live (stage 4 is killed
 # without cleanup once objects exist; the next run must find and remove them).
+# Apps may add their own cases (APP_FAULTS).
 # Without --fault no fault can be on: inherited fault variables are cleared.
 #
 # Secrets: read from the login Keychain into TEST_RUNNER_* variables only,
@@ -84,6 +92,8 @@ rc_read_credentials() {
     local spec role service item kc account var value
     for spec in "${CREDENTIALS[@]}"; do
         role="${spec%%:*}"; service="${${spec#*:}%%:*}"; item="${spec##*:}"
+        # A role left out of this run (production without --include-production): not read.
+        (( ${RC_ROLES[(Ie)$role]} )) || continue
         kc="$(rc_keychain_service "$role" "$service")"
         [[ -n "$kc" ]] || rc_fail "The allow-list names no Keychain service for $role ($service)"
         account="$item"
@@ -323,7 +333,7 @@ EOF
 rc_live_sync() {
     [[ -n "${RC_LIVE_PARENT:-}" && -d "$RC_LIVE_DIR" ]] || return 0
     local file
-    for file in ledger.json results.jsonl refusals.json; do
+    for file in ledger.json results.jsonl refusals.jsonl; do
         [[ -f "$RC_LIVE_DIR/$file" ]] && cp "$RC_LIVE_DIR/$file" "$RC_RUN/live/$file"
     done
     return 0
@@ -395,7 +405,32 @@ rc_report() {
     local result="passed"
     [[ -n "${RC_FAILED:-}" ]] && result="FAILED: $RC_FAILED"
     [[ "$(cat "$RC_RUN/fingerprint.before" 2>/dev/null)" != "$(cat "$RC_RUN/fingerprint.after" 2>/dev/null)" ]] && result="FAILED: saved connections or Keychain item names changed"
-    [[ "${RC_CLEANUP_STATUS:-}" == FAILED* ]] && result="FAILED: cleanup"
+    if [[ "${RC_CLEANUP_STATUS:-}" == FAILED* ]]; then
+        # The cleanup test can fail on a check of its own after removing
+        # everything (an app's last "nothing attempted under tests" step,
+        # 0.12.3): then the report names that check, not the cleanup.
+        local after_cleanup
+        after_cleanup="$("$RC_PY" -c '
+import json, os, sys
+live = sys.argv[1]
+try:
+    steps = [json.loads(l) for l in open(os.path.join(live, "results.jsonl")) if l.strip()]
+    path = os.path.join(live, "ledger.json")
+    ledger = json.load(open(path)) if os.path.exists(path) else []
+except Exception:
+    sys.exit(0)
+last = max((i for i, s in enumerate(steps) if s.get("step") == "cleanup"), default=None)
+if last is None or not steps[last].get("passed") or any(not i.get("removed") for i in ledger):
+    sys.exit(0)
+print("; ".join(dict.fromkeys(s["step"] for s in steps[last + 1:] if not s.get("passed"))))
+' "$RC_RUN/live")"
+        if [[ -n "$after_cleanup" ]]; then
+            RC_CLEANUP_STATUS="passed (every test object removed); the cleanup test then failed on: $after_cleanup"
+            [[ "$result" == passed ]] && result="FAILED: $after_cleanup"
+        else
+            result="FAILED: cleanup"
+        fi
+    fi
     [[ "${RC_ALLOWLIST_COPY:-}" == FAILED* ]] && result="$RC_ALLOWLIST_COPY"
     if [[ -n "$RC_FAULT" && "$result" == "passed" ]]; then
         result="FAILED: the injected fault ($RC_FAULT) didn't stop the check"
@@ -415,7 +450,12 @@ try:
         results = [json.loads(l) for l in f if l.strip()]
 except Exception: pass
 ledger = load("live/ledger.json", [])
-refusals = load("live/refusals.json", [])
+# Each test process appends its refusals to refusals.jsonl as they happen (0.12.3).
+refusals = []
+try:
+    with open(os.path.join(run, "live", "refusals.jsonl")) as f:
+        refusals = [json.loads(l) for l in f if l.strip()]
+except Exception: pass
 before = open(os.path.join(run, "fingerprint.before")).read().strip() if os.path.exists(os.path.join(run, "fingerprint.before")) else "?"
 after = open(os.path.join(run, "fingerprint.after")).read().strip() if os.path.exists(os.path.join(run, "fingerprint.after")) else "?"
 lines = [f"# Release check: {app}", "", f"- Result: **{status}**", f"- Kind: {kind}", f"- JTKit: {jtkit}", ""]
@@ -445,7 +485,7 @@ if os.environ.get("RC_LIVE_IN_CONTAINER"):
     lines.append(f"- Live folder in the app's container (readable by you only); allow-list copy: {os.environ.get('RC_ALLOWLIST_COPY') or 'not checked'}")
 for i in left:
     lines.append(f"- **Not removed:** {i['resource']} {i['id']} “{i['name']}”")
-lines += ["", "## Refused requests", ""]
+lines += ["", f"## Refused requests ({len(refusals)})", ""]
 lines += [f"- {r['method']} {r['location']}: {r['reason']}" for r in refusals] or ["None."]
 lines += ["", "## Saved connections and Keychain item names", "",
           f"- Fingerprint before: {before}", f"- Fingerprint after: {after}",
@@ -469,10 +509,11 @@ release_check_main() {
             --stop-before-live) RC_STOP_BEFORE_LIVE=1 ;;
             --fault)
                 shift
-                case "${1:-}" in
-                    break-build|fail-live-step|interrupt-live) RC_FAULT="$1" ;;
-                    *) print -u2 "--fault needs break-build, fail-live-step or interrupt-live"; return 2 ;;
-                esac ;;
+                if [[ "${1:-}" == (break-build|fail-live-step|interrupt-live) ]] || (( ${APP_FAULTS[(Ie)${1:-}]} )); then
+                    RC_FAULT="$1"
+                else
+                    print -u2 "--fault needs one of: break-build fail-live-step interrupt-live ${APP_FAULTS[*]}"; return 2
+                fi ;;
             *) print -u2 "Unknown option $1"; return 2 ;;
         esac
         shift
@@ -510,6 +551,12 @@ release_check_main() {
     rc_live_setup
     if (( RC_ALL_TENANTS )); then
         RC_ROLES=($("$RC_PY" -c 'import json,sys; print(" ".join(sorted({t["role"] for t in json.load(open(sys.argv[1]))["tenants"] if sys.argv[2]=="1" or not t.get("production")})))' "$RC_ALLOWLIST" "$RC_PRODUCTION"))
+    elif (( ! RC_PRODUCTION )); then
+        # The app's production roles take part only with --include-production.
+        RC_ROLES=($("$RC_PY" -c 'import json,sys; prod={t["role"] for t in json.load(open(sys.argv[1]))["tenants"] if t.get("production")}; print(" ".join(r for r in sys.argv[2:] if r not in prod))' "$RC_ALLOWLIST" "${ROLES[@]}"))
+        local left_out=() role
+        for role in "${ROLES[@]}"; do (( ${RC_ROLES[(Ie)$role]} )) || left_out+=("$role"); done
+        (( ${#left_out} )) && rc_log "Left out (production, no --include-production): ${(j:, :)left_out}"
     fi
     rc_fingerprint "$RC_RUN/fingerprint.before"
     rc_log "Building for testing ($SCHEME)"

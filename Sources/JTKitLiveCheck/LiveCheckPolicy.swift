@@ -246,8 +246,12 @@ public nonisolated final class LiveCheckPolicy: @unchecked Sendable {
     }
 
     static func isDeviceCommand(_ path: String, method: String) -> Bool {
+        // Also refused on a device the run created (0.12.3): erase, unmanage
+        // and remove-MDM-profile are actions on a device record, not changes
+        // to a test object, and Platform device actions likewise.
         let markers = ["mdm-commands", "mdmcommands", "computercommands", "mobiledevicecommands",
-                       "/commands", "remote-lock", "erase-device", "redeploy", "managed-software-updates/plans"]
+                       "/commands", "remote-lock", "erase-device", "redeploy", "managed-software-updates/plans",
+                       "/erase", "/unmanage", "remove-mdm-profile", "device-actions/"]
         if markers.contains(where: path.contains) { return true }
         // Graph device actions: POST …/managedDevices/{id}/<action>
         return method == "POST" && path.contains("manageddevices/")

@@ -98,7 +98,9 @@ public nonisolated final class LiveCheckRun: @unchecked Sendable {
                                      includeProduction: environment["JTKIT_LIVE_INCLUDE_PRODUCTION"] == "1",
                                      prefix: prefix, ledger: ledger, writesAllowed: writesAllowed)
         self.policy = policy
-        network = upstream.map { LiveCheckNetwork(policy: policy, upstream: $0) } ?? LiveCheckNetwork(policy: policy)
+        let refusalsFile = runFolder.appending(path: "refusals.jsonl")
+        network = upstream.map { LiveCheckNetwork(policy: policy, upstream: $0, refusalsFile: refusalsFile) }
+            ?? LiveCheckNetwork(policy: policy, refusalsFile: refusalsFile)
     }
 
     // MARK: Tenants and credentials
@@ -200,8 +202,10 @@ public nonisolated final class LiveCheckRun: @unchecked Sendable {
         public var note: String?
     }
 
-    /// Appends a step's result to `results.jsonl`, and the refusals so far
-    /// to `refusals.json`, for the stage 5 report.
+    /// Appends a step's result to `results.jsonl` for the stage 5 report.
+    /// Refusals don't wait for this: the network appends each one to
+    /// `refusals.jsonl` when it happens (0.12.3; before, each test process
+    /// overwrote `refusals.json` with its own).
     public func record(step: String, passed: Bool, note: String? = nil) {
         lock.withLock {
             try? FileManager.default.createDirectory(at: runFolder, withIntermediateDirectories: true)
@@ -214,10 +218,12 @@ public nonisolated final class LiveCheckRun: @unchecked Sendable {
             } else {
                 try? (line + Data("\n".utf8)).write(to: results)
             }
-            let encoder = JSONEncoder()
-            encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-            try? encoder.encode(network.refusals).write(to: runFolder.appending(path: "refusals.json"), options: .atomic)
         }
+    }
+
+    /// Every refusal of the run so far, from all its test processes.
+    public var runRefusals: [LiveRefusal] {
+        LiveCheckNetwork.refusals(in: runFolder.appending(path: "refusals.jsonl"))
     }
 
     /// `JTKTEST JD 1027-1432` for app code `JD` at 27 October, 14:32.

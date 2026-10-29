@@ -26,14 +26,22 @@ public nonisolated final class LiveCheckNetwork: @unchecked Sendable {
     public let session: URLSession
     let upstream: URLSession
 
+    /// Where each refusal is appended the moment it happens (0.12.3), one
+    /// JSON line each: every test of a release check runs in its own process,
+    /// so a file shared by the run keeps them all for the report.
+    let refusalsFile: URL?
+
     private let lock = NSLock()
     private var refusedStorage: [LiveRefusal] = []
 
-    /// - Parameter upstream: where allowed requests go; a fresh ephemeral
-    ///   session by default (tests pass a mock).
-    public init(policy: LiveCheckPolicy, upstream: URLSession = LiveCheckNetwork.makeUpstream()) {
+    /// - Parameters:
+    ///   - upstream: where allowed requests go; a fresh ephemeral session by
+    ///     default (tests pass a mock).
+    ///   - refusalsFile: the run's `refusals.jsonl` (`LiveCheckRun` passes it).
+    public init(policy: LiveCheckPolicy, upstream: URLSession = LiveCheckNetwork.makeUpstream(), refusalsFile: URL? = nil) {
         self.policy = policy
         self.upstream = upstream
+        self.refusalsFile = refusalsFile
         let id = UUID().uuidString
         let configuration = URLSessionConfiguration.ephemeral
         configuration.protocolClasses = [LiveCheckURLProtocol.self]
@@ -62,8 +70,28 @@ public nonisolated final class LiveCheckNetwork: @unchecked Sendable {
         let refusal = LiveRefusal(method: request.method,
                                   location: "\(request.url.host() ?? "")\(request.url.path(percentEncoded: false))",
                                   reason: reason)
-        lock.withLock { refusedStorage.append(refusal) }
+        lock.withLock {
+            refusedStorage.append(refusal)
+            if let refusalsFile { Self.append(refusal, to: refusalsFile) }
+        }
         return LiveCheckRefused(refusal: refusal)
+    }
+
+    /// Appends one line; `O_APPEND` keeps lines whole when two processes write.
+    static func append(_ refusal: LiveRefusal, to file: URL) {
+        guard let line = try? JSONEncoder().encode(refusal) else { return }
+        try? FileManager.default.createDirectory(at: file.deletingLastPathComponent(), withIntermediateDirectories: true)
+        let descriptor = open(file.path, O_WRONLY | O_CREAT | O_APPEND, 0o600)
+        guard descriptor >= 0 else { return }
+        defer { close(descriptor) }
+        let data = line + Data("\n".utf8)
+        _ = data.withUnsafeBytes { write(descriptor, $0.baseAddress, $0.count) }
+    }
+
+    /// Every refusal the run's file holds, from every test process so far.
+    public static func refusals(in file: URL) -> [LiveRefusal] {
+        guard let text = try? String(contentsOf: file, encoding: .utf8) else { return [] }
+        return text.split(separator: "\n").compactMap { try? JSONDecoder().decode(LiveRefusal.self, from: Data($0.utf8)) }
     }
 
     /// After an allowed request answered: records creates, removals and Apple tokens.

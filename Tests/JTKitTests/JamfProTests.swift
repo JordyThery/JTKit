@@ -179,6 +179,31 @@ struct JamfProLookupTests {
         #expect(bySerial.userAndLocation?.email == "cart3@school.example")
     }
 
+    /// A record that never enrolled: Jamf's list has no general section for
+    /// it (device type "Unknown"), so the lookup reads the record by ID once
+    /// more for its name and asset tag (0.12.3; seen on Jamf Pro 11.33).
+    @Test("A mobile device that never enrolled gets its name and asset tag from its own record")
+    func unenrolledMobileDevice() async throws {
+        let listed = #"{"totalCount":1,"results":[{"mobileDeviceId":"9","deviceType":"Unknown","hardware":{"serialNumber":"JTKTEST0001"}}]}"#
+        let single = #"{"id":"9","name":"Test iPad","assetTag":"TAG-1","udid":"00000000-0000000000000001","managed":false,"osVersion":"","site":{"id":"-1","name":"None"},"ios":{"supervised":false}}"#
+        let server = MockServer { request in
+            request.path.hasSuffix("/9/detail") ? .json(200, single) : .json(200, listed)
+        }
+        let record = try #require(try await proClient(server).mobileDevice(serial: "JTKTEST0001").record)
+        #expect(server.requests.map(\.path) == ["/api/v2/mobile-devices/detail", "/api/v2/mobile-devices/9/detail"])
+        #expect(record.general?.displayName == "Test iPad")
+        #expect(record.general?.assetTag == "TAG-1")
+        #expect(record.general?.managed == false)
+        #expect(record.general?.siteID == nil, "-1 is none")
+        #expect(record.udid == "00000000-0000000000000001")
+        #expect(record.serialNumber == "JTKTEST0001")
+
+        // An enrolled record already has its general section: no second read.
+        let enrolled = MockServer { _ in .json(200, #"{"totalCount":1,"results":[\#(mobileJSON())]}"#) }
+        _ = try await proClient(enrolled).mobileDevice(serial: "F9FXK2Q3HGMN")
+        #expect(enrolled.requests.count == 1)
+    }
+
     @Test("Odd values never lose a record; an unreadable result is skipped, not fatal")
     func tolerant() async throws {
         let odd = #"{"id":12,"udid":null,"general":{"managed":"yes","remoteManagement":"oops","name":7},"hardware":{"serialNumber":"C02XK1JHJG5H"},"newSection":{"x":1}}"#

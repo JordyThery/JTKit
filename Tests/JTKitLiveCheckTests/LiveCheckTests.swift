@@ -257,6 +257,34 @@ struct TestObjectRuleTests {
         #expect(!makePolicy().decide(request("POST", url, json: ["name": "\(prefix) – C"])).isAllowed)
     }
 
+    /// A device record the run created may have its asset tag changed and be
+    /// deleted, but no device action is ever sent to it.
+    @Test(arguments: [
+        "https://test-a.jamf.example/api/v2/mobile-devices/5/erase",
+        "https://test-a.jamf.example/api/v2/mobile-devices/5/unmanage",
+        "https://test-a.jamf.example/api/v4/computers-inventory/5/erase",
+        "https://test-a.jamf.example/api/v4/computers-inventory/5/remove-mdm-profile",
+    ])
+    func deviceActionsOnALedgerDeviceAreRefused(url: String) throws {
+        let policy = makePolicy()
+        for resource in ["mobiledevices", "computersinventory"] {
+            try policy.ledger.add(.init(target: "test-a.jamf.example", resource: resource, id: "5", name: "\(prefix) – iPad"),
+                                  testPrefixes: [prefix])
+        }
+        #expect(!policy.decide(request("POST", url)).isAllowed)
+        #expect(policy.decide(request("PATCH", "https://test-a.jamf.example/api/v2/mobile-devices/5", json: ["assetTag": "x"])).kind == .change)
+        #expect(policy.decide(request("DELETE", "https://test-a.jamf.example/JSSResource/mobiledevices/id/5")).kind == .delete)
+    }
+
+    @Test func platformDeviceActionsAreRefused() throws {
+        let policy = makePolicy()
+        let id = "00000000-0000-4000-8000-0000000000c5"
+        try policy.ledger.add(.init(target: "platform:\(platformA)", resource: "devices", id: id, name: "\(prefix) – iPad"),
+                              testPrefixes: [prefix])
+        let url = "https://eu.api.jamfcloud.com/device-actions/v1/devices/\(id)/restart"
+        #expect(!policy.decide(request("POST", url, headers: ["X-Environment-Id": platformA])).isAllowed)
+    }
+
     @Test func graphDeviceActionsAreRefused() {
         let auth = ["Authorization": "Bearer \(jwt(tid: entraTest))"]
         let url = "https://graph.microsoft.com/beta/deviceManagement/managedDevices/00000000-0000-4000-8000-0000000000d1/retire"
@@ -481,14 +509,33 @@ struct LiveCheckRunTests {
         }
     }
 
-    @Test func recordsResultsAndRefusals() throws {
+    @Test func recordsResults() throws {
         let run = try LiveCheckRun(environment: try environment())
-        _ = run.policy.decide(request("GET", "https://x.example/"))
         run.record(step: "sign in", passed: true)
         run.record(step: "deploy", passed: false, note: "boom")
         let lines = try String(contentsOf: run.runFolder.appending(path: "results.jsonl"), encoding: .utf8).split(separator: "\n")
         #expect(lines.count == 2)
-        #expect(FileManager.default.fileExists(atPath: run.runFolder.appending(path: "refusals.json").path))
+    }
+
+    /// Each test of a release check runs in its own process: a refusal in
+    /// one must still be in the report after the next (before 0.12.3 the
+    /// last process to record a step overwrote the others').
+    @Test func refusalsOfEveryTestProcessAreKept() async throws {
+        let env = try environment()
+        let server = MockServer { _ in .json(200, "{}") }
+        var first = URLRequest(url: URL(string: "https://x.example/api/v1/categories")!)
+        first.httpMethod = "POST"
+        var second = URLRequest(url: URL(string: "https://y.example/api/v1/scripts")!)
+        second.httpMethod = "DELETE"
+        // Two runs on the same folder stand for two test processes.
+        let one = try LiveCheckRun(environment: env, upstream: server.session)
+        _ = try? await one.network.session.data(for: first)
+        one.record(step: "first test", passed: true)
+        let two = try LiveCheckRun(environment: env, upstream: server.session)
+        _ = try? await two.network.session.data(for: second)
+        // A test that never records a step still leaves its refusal.
+        #expect(two.runRefusals.map(\.location) == ["x.example/api/v1/categories", "y.example/api/v1/scripts"])
+        #expect(server.requests.isEmpty)
     }
 }
 

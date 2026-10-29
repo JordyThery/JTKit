@@ -286,6 +286,27 @@ extension JamfPro {
 // MARK: - Results
 
 extension JamfPro {
+    /// `v2/mobile-devices/{id}/detail`: one record, its general values at the
+    /// top level (`name`, `assetTag`, …; `ios.supervised`, `site.id`).
+    struct MobileDeviceDetail: Decodable {
+        var general: MobileDevice.General
+
+        init(from decoder: any Decoder) throws {
+            let c = try decoder.container(keyedBy: AnyKey.self)
+            let ios = try? c.nestedContainer(keyedBy: AnyKey.self, forKey: "ios")
+            let site = try? c.nestedContainer(keyedBy: AnyKey.self, forKey: "site")
+            general = MobileDevice.General(
+                displayName: c.text("name"), udid: c.text("udid"), assetTag: c.text("assetTag"),
+                osVersion: c.text("osVersion"), osBuild: c.text("osBuild"), managed: c.flag("managed"),
+                supervised: ios?.flag("supervised"), managementID: c.text("managementId"),
+                lastInventoryUpdateDate: c.date("lastInventoryUpdateTimestamp"),
+                lastContactDate: c.date("lastContactTimestamp"), lastEnrolledDate: c.date("lastEnrollmentTimestamp"),
+                mdmProfileExpirationDate: c.date("mdmProfileExpirationTimestamp"),
+                siteID: JamfPro.reference(site?.text("id")),
+                enrollmentPreStageID: nil, enrollmentPreStageName: nil)
+        }
+    }
+
     /// The result of looking up one device.
     public enum Match<Record: Sendable & Hashable>: Sendable, Hashable {
         /// No record has this serial number or UDID.
@@ -405,7 +426,7 @@ extension JamfPlatform.Client {
         let safe = try JamfPro.validatedIdentifier(serial)
         let records: [JamfPro.MobileDevice] = try await inventory(.mobileDevices, filter: "serialNumber==\"\(safe)\"",
                                                                   sections: sections, recording: recording)
-        return Self.match(records, safe) { $0.serialNumber }
+        return try await completingGeneral(Self.match(records, safe) { $0.serialNumber }, sections: sections)
     }
 
     /// The mobile device with this UDID. Needs “Read Mobile Devices”.
@@ -414,7 +435,21 @@ extension JamfPlatform.Client {
         let safe = try JamfPro.validatedIdentifier(udid)
         let records: [JamfPro.MobileDevice] = try await inventory(.mobileDevices, filter: "udid==\"\(safe)\"",
                                                                   sections: sections, recording: recording)
-        return Self.match(records, safe) { $0.udid }
+        return try await completingGeneral(Self.match(records, safe) { $0.udid }, sections: sections)
+    }
+
+    /// A record that never enrolled has device type "Unknown", and Jamf's
+    /// device list leaves out its whole general section (name, asset tag, …);
+    /// the single-record view still has them (seen on Jamf Pro 11.33, 0.12.3).
+    /// So a lookup that found one such record reads it once more by ID.
+    private func completingGeneral(_ match: JamfPro.Match<JamfPro.MobileDevice>,
+                                   sections: [JamfPro.InventorySection]) async throws -> JamfPro.Match<JamfPro.MobileDevice> {
+        guard sections.contains(.general), case .one(var record) = match, record.general == nil, let id = record.id else { return match }
+        let response = try await send(HTTPRequest(path: "pro/v2/mobile-devices/\(JamfPlatform.pathSegment(id))/detail"),
+                                      privilege: .readMobileDevices)
+        guard let detail = try? JSONDecoder().decode(JamfPro.MobileDeviceDetail.self, from: response.data) else { return match }
+        record.general = detail.general
+        return .one(record)
     }
 
     /// Computers by serial number, many at once: 50 serials per request,

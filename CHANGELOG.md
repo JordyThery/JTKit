@@ -1,5 +1,34 @@
 # Changelog
 
+## 0.12.3 (2026-10-29)
+Step 11, for Serial Number Reader, the first app with read-only tenants and a device record. Additions and fixes in the live-check tools and one lookup fix; no app has to change.
+- `JamfPlatform.Client.mobileDevice(serial:)` and `mobileDevice(udid:)`: a
+  record that never enrolled (device type "Unknown") now has its name, asset
+  tag and other general values. Jamf's device list leaves out its whole
+  general section, so the lookup reads that one record by ID once more
+  (`v2/mobile-devices/{id}/detail`). Found by Serial Number Reader's live
+  check on Jamf Pro 11.33; enrolled records are read once, as before.
+- `JTKitLiveCheck`: erase, unmanage and remove-MDM-profile (`…/erase`,
+  `…/unmanage`, `…/remove-mdm-profile`) and Jamf Platform device actions
+  (`device-actions/…`) are refused like every other device command, also on a
+  device record the run created itself. Before, they counted as a change to a
+  ledger object and were let through.
+- Refused requests are kept for the whole run: the guarded network appends
+  each one to the run's `refusals.jsonl` the moment it happens. Before, each
+  test process overwrote `refusals.json` with its own when it recorded a step,
+  so the report could miss refusals from earlier tests (or from a test that
+  recorded none). `LiveCheckRun.runRefusals` reads them all; the report shows
+  the count. A `LiveCheckNetwork` an app makes itself passes `refusalsFile:` to
+  join in.
+- `Scripts/release-check-lib.sh`: an app's production roles take part only
+  with `--include-production`; otherwise they are left out (named in the log)
+  and their Keychain items aren't read. `APP_FAULTS=(…)` adds an app's own
+  `--fault` cases. `SMOKE_FILE` is in the header comment.
+- The report no longer says "cleanup failed" when the cleanup test removed
+  every test object and then failed on a check of its own (an app's last
+  "nothing attempted under tests" step): the cleanup line says everything was
+  removed and names that check, and so does the result when nothing else failed.
+
 ## 0.12.2 (2026-10-28)
 Step 11, for Profile2Blueprint, the first sandboxed app. An addition; no app has to change.
 - `Scripts/release-check-lib.sh`: `TEST_HOST_CONTAINER="<bundle ID>"` for an
