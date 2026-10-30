@@ -204,6 +204,36 @@ struct JamfProLookupTests {
         #expect(enrolled.requests.count == 1)
     }
 
+    /// The same for the lookup of many serials at once (0.12.4; found by
+    /// Checkpoint's live check, which showed such a record without a name).
+    @Test("Many serials at once: a mobile device that never enrolled gets its name; an enrolled one isn't read again")
+    func unenrolledMobileDevicesInABatch() async throws {
+        let listed = #"{"totalCount":2,"results":[{"mobileDeviceId":"9","deviceType":"Unknown","hardware":{"serialNumber":"JTKTEST0001"}},\#(mobileJSON())]}"#
+        let single = #"{"id":"9","name":"Test iPad","assetTag":"TAG-1","udid":"00000000-0000000000000001","managed":false,"site":{"id":"-1","name":"None"},"ios":{"supervised":false}}"#
+        let server = MockServer { request in
+            request.path.hasSuffix("/9/detail") ? .json(200, single) : .json(200, listed)
+        }
+        let batch = try await proClient(server).mobileDevices(serials: ["JTKTEST0001", "F9FXK2Q3HGMN"])
+        #expect(batch.records["JTKTEST0001"]?.general?.displayName == "Test iPad")
+        #expect(batch.records["JTKTEST0001"]?.general?.assetTag == "TAG-1")
+        #expect(batch.records["F9FXK2Q3HGMN"]?.general != nil)
+        #expect(server.requests.map(\.path) == ["/api/v2/mobile-devices/detail", "/api/v2/mobile-devices/9/detail"])
+
+        // A detail that can't be read leaves the record found, without a name.
+        let failing = MockServer { request in
+            request.path.hasSuffix("/9/detail") ? .json(500, "{}") : .json(200, listed)
+        }
+        let partial = try await proClient(failing).mobileDevices(serials: ["JTKTEST0001"])
+        #expect(partial.records["JTKTEST0001"] != nil)
+        #expect(partial.records["JTKTEST0001"]?.general == nil)
+        #expect(partial.failures.isEmpty)
+
+        // Without the general section asked for, nothing more is read.
+        let lean = MockServer { _ in .json(200, listed) }
+        _ = try await proClient(lean).mobileDevices(serials: ["JTKTEST0001"], sections: [.hardware])
+        #expect(lean.requests.count == 1)
+    }
+
     @Test("Odd values never lose a record; an unreadable result is skipped, not fatal")
     func tolerant() async throws {
         let odd = #"{"id":12,"udid":null,"general":{"managed":"yes","remoteManagement":"oops","name":7},"hardware":{"serialNumber":"C02XK1JHJG5H"},"newSection":{"x":1}}"#

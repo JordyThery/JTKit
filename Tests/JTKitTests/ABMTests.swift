@@ -595,6 +595,20 @@ struct ABMReadTests {
         #expect(warning.note == "Couldn’t read the devices of “Locked” (HTTP 403); devices that may be on it show an unknown assignment.")
     }
 
+    @Test("First devices: one request with the limit, no next page, records without a serial left out")
+    func firstDevices() async throws {
+        let rig = AppleRig(Apple.server { request in
+            request.path == "/v1/orgDevices"
+                ? .json(200, #"{"data":[{"attributes":\#(Apple.device("C1"))},{"attributes":{"status":"ASSIGNED"}},{"attributes":\#(Apple.device("C2"))}],"links":{"next":"https://api-business.apple.com/v1/orgDevices?cursor=2"}}"#)
+                : nil
+        })
+        let devices = try await rig.client.firstDevices(limit: 5)
+        #expect(devices.map(\.serialNumber) == ["C1", "C2"])
+        #expect(rig.api.count == 1)
+        #expect(rig.api.first?.queryValue("limit") == "5")
+        #expect(rig.api.first?.queryValue("cursor") == nil)
+    }
+
     @Test("Snapshot: no answer at all fails the read")
     func snapshotFails() async {
         let rig = AppleRig(MockServer { request in

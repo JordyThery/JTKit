@@ -151,6 +151,19 @@ extension ABM {
             try await mdmServers().count
         }
 
+        /// The first `limit` devices of the organization, in Apple's order, in
+        /// one request: no further page is read (0.12.4). For a small sample,
+        /// where `organizationSnapshot` would read the whole organization.
+        public func firstDevices(limit: Int) async throws -> [OrgDevice] {
+            let limit = min(max(limit, 1), 1000)
+            guard let data = try await get("v1/orgDevices", query: [
+                URLQueryItem(name: "limit", value: String(limit)),
+                URLQueryItem(name: "fields[orgDevices]", value: OrgDevice.fields.joined(separator: ",")),
+            ], recordsBodies: true) else { return [] }
+            return try decode(List<Attributes<OrgDevice>>.self, from: data).data
+                .map(\.attributes).filter { !$0.serialNumber.isEmpty }
+        }
+
         /// Reads the whole organization: every device, then each service's
         /// devices. A service whose list can't be read (an error answer) is
         /// skipped with a warning, and the devices Apple reports as assigned

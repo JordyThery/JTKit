@@ -11,7 +11,8 @@ import Foundation
 ///   `JTKIT_LIVE_INCLUDE_PRODUCTION=1`, `JTKIT_LIVE_LEGACY_PREFIXES`
 ///   (`|`-separated, for the one-time sweep of older test objects),
 ///   `JTKIT_LIVE_WRITES=1` (stage 4 only; otherwise every tenant is read only),
-///   `JTKIT_LIVE_FAULT` (only with the script's `--fault`, to test the check itself).
+///   `JTKIT_LIVE_FAULT` (only with the script's `--fault`, to test the check itself),
+///   `JTKIT_LIVE_READ_ONLY_ROLES` (comma-separated roles kept read only for this app).
 /// - Credentials as `JTKIT_LIVE_<ROLE>_<ITEM>`, e.g. `JTKIT_LIVE_JAMF_TEST_A_CLIENT_SECRET`,
 ///   read from the login Keychain; never written to a file or log.
 public nonisolated final class LiveCheckRun: @unchecked Sendable {
@@ -32,6 +33,9 @@ public nonisolated final class LiveCheckRun: @unchecked Sendable {
     /// release check's `--fault`, which marks the whole run as a fault test.
     /// Nil in every normal run.
     public let fault: String?
+    /// Roles this run treats as read only whatever the allow-list grants
+    /// (`JTKIT_LIVE_READ_ONLY_ROLES`, from the app's `READ_ONLY_ROLES`; 0.12.4).
+    public let readOnlyRoles: Set<String>
     private let environment: [String: String]
     private let lock = NSLock()
 
@@ -82,12 +86,22 @@ public nonisolated final class LiveCheckRun: @unchecked Sendable {
         let roles = Set(try setting("JTKIT_LIVE_ROLES").split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) })
         self.roles = roles
         let listURL = environment["JTKIT_LIVE_ALLOWLIST"].map { URL(filePath: $0) } ?? AllowList.defaultURL
-        let allowList = try AllowList.load(from: listURL)
-        self.allowList = allowList
-        let missing = roles.filter { role in !allowList.tenants.contains { $0.role == role } }
+        let loaded = try AllowList.load(from: listURL)
+        let missing = roles.filter { role in !loaded.tenants.contains { $0.role == role } }
         guard missing.isEmpty else {
             throw RunError.notAllowed("Not on the allow-list: \(missing.sorted().joined(separator: ", "))")
         }
+        // Roles the app's check keeps read only, whatever the allow-list
+        // grants (0.12.4); every rule below sees the stricter access.
+        let readOnlyRoles = Set((environment["JTKIT_LIVE_READ_ONLY_ROLES"] ?? "").split(separator: ",")
+            .map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty })
+        let unknown = readOnlyRoles.subtracting(roles)
+        guard unknown.isEmpty else {
+            throw RunError.notAllowed("Read-only roles not in this run: \(unknown.sorted().joined(separator: ", "))")
+        }
+        self.readOnlyRoles = readOnlyRoles
+        let allowList = loaded.readingOnly(readOnlyRoles)
+        self.allowList = allowList
         legacyPrefixes = (environment["JTKIT_LIVE_LEGACY_PREFIXES"] ?? "").split(separator: "|").map(String.init).filter { !$0.isEmpty }
         fault = environment["JTKIT_LIVE_FAULT"].flatMap { $0.isEmpty ? nil : $0 }
         let writesAllowed = environment["JTKIT_LIVE_WRITES"] == "1"
@@ -99,8 +113,17 @@ public nonisolated final class LiveCheckRun: @unchecked Sendable {
                                      prefix: prefix, ledger: ledger, writesAllowed: writesAllowed)
         self.policy = policy
         let refusalsFile = runFolder.appending(path: "refusals.jsonl")
-        network = upstream.map { LiveCheckNetwork(policy: policy, upstream: $0, refusalsFile: refusalsFile) }
-            ?? LiveCheckNetwork(policy: policy, refusalsFile: refusalsFile)
+        let appleFile = runFolder.appending(path: Self.appleRequestsFileName)
+        network = upstream.map { LiveCheckNetwork(policy: policy, upstream: $0, refusalsFile: refusalsFile, appleRequestsFile: appleFile) }
+            ?? LiveCheckNetwork(policy: policy, refusalsFile: refusalsFile, appleRequestsFile: appleFile)
+    }
+
+    /// Every Apple request of the run, from all its test processes (0.12.4).
+    public static let appleRequestsFileName = "apple-requests.jsonl"
+
+    /// Apple requests so far in this run, per role.
+    public var appleRequestCounts: [String: Int] {
+        AppleRequestBudget.counts(in: runFolder.appending(path: Self.appleRequestsFileName))
     }
 
     // MARK: Tenants and credentials

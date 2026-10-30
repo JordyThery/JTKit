@@ -18,6 +18,13 @@
 #   SMOKE_FILE="<path of the smoke-test class's file>"   its test1…testN run in order
 #   APP_FAULTS=(…)   optional (0.12.3): the app's own --fault cases, handled by
 #     its tests through JTKIT_LIVE_FAULT; the report says FAULT TEST as for the others
+#   READ_ONLY_ROLES=(…)   optional (0.12.4): roles this app keeps read only,
+#     whatever access the allow-list grants (stricter only, never looser)
+#
+# Apple Business / School Manager (0.12.4): every request to an organisation,
+# sign-in included, is paced to 9 a minute and capped at 40 a run (all test
+# processes together, counted in the live folder's apple-requests.jsonl); the
+# report shows the count per role.
 #
 # Production roles in ROLES (marked production on the allow-list) take part
 # only with --include-production (0.12.3): otherwise they are left out, and
@@ -201,6 +208,10 @@ rc_live_environment() {
     if [[ -n "$RC_FAULT" ]]; then export TEST_RUNNER_JTKIT_LIVE_FAULT="$RC_FAULT"; else unset TEST_RUNNER_JTKIT_LIVE_FAULT; fi
     # Writes (and so the sweep) only in stage 4; earlier stages read.
     export TEST_RUNNER_JTKIT_LIVE_WRITES="${1:-0}"
+    # Only roles of this run: a production role left out isn't named.
+    local strict=() role
+    for role in "${READ_ONLY_ROLES[@]}"; do (( ${RC_ROLES[(Ie)$role]} )) && strict+=("$role"); done
+    if (( ${#strict} )); then export TEST_RUNNER_JTKIT_LIVE_READ_ONLY_ROLES="${(j:,:)strict}"; else unset TEST_RUNNER_JTKIT_LIVE_READ_ONLY_ROLES; fi
     if [[ ! -e "$RC_BASE/state/$APP_CODE.legacy-swept" ]]; then
         export TEST_RUNNER_JTKIT_LIVE_LEGACY_PREFIXES="$LEGACY_PREFIXES"
     else
@@ -211,7 +222,7 @@ rc_live_environment() {
 rc_live_off() {
     unset TEST_RUNNER_JTKIT_LIVE TEST_RUNNER_JTKIT_LIVE_RUN_DIR TEST_RUNNER_JTKIT_LIVE_PREFIX TEST_RUNNER_JTKIT_LIVE_ROLES \
           TEST_RUNNER_JTKIT_LIVE_ALLOWLIST TEST_RUNNER_JTKIT_LIVE_INCLUDE_PRODUCTION TEST_RUNNER_JTKIT_LIVE_WRITES \
-          TEST_RUNNER_JTKIT_LIVE_LEGACY_PREFIXES TEST_RUNNER_JTKIT_LIVE_FAULT
+          TEST_RUNNER_JTKIT_LIVE_LEGACY_PREFIXES TEST_RUNNER_JTKIT_LIVE_FAULT TEST_RUNNER_JTKIT_LIVE_READ_ONLY_ROLES
 }
 
 # --fault interrupt-live: runs the first live test, and once the ledger holds
@@ -333,7 +344,7 @@ EOF
 rc_live_sync() {
     [[ -n "${RC_LIVE_PARENT:-}" && -d "$RC_LIVE_DIR" ]] || return 0
     local file
-    for file in ledger.json results.jsonl refusals.jsonl; do
+    for file in ledger.json results.jsonl refusals.jsonl apple-requests.jsonl; do
         [[ -f "$RC_LIVE_DIR/$file" ]] && cp "$RC_LIVE_DIR/$file" "$RC_RUN/live/$file"
     done
     return 0
@@ -436,6 +447,7 @@ print("; ".join(dict.fromkeys(s["step"] for s in steps[last + 1:] if not s.get("
         result="FAILED: the injected fault ($RC_FAULT) didn't stop the check"
     fi
     RC_LIVE_IN_CONTAINER="${TEST_HOST_CONTAINER:-}" RC_ALLOWLIST_COPY="${RC_ALLOWLIST_COPY:-}" \
+    RC_READ_ONLY_ROLES="${(j:, :)READ_ONLY_ROLES}" \
     "$RC_PY" - "$RC_RUN" "$APP_NAME" "$result" "$RC_KIND" "$RC_JTKIT" "${RC_CLEANUP_STATUS:-not needed}" \
         "${(j:|:)RC_STAGE_NAMES}" "${(j:|:)RC_STAGE_STATUS}" <<'EOF'
 import json, os, sys
@@ -485,6 +497,18 @@ if os.environ.get("RC_LIVE_IN_CONTAINER"):
     lines.append(f"- Live folder in the app's container (readable by you only); allow-list copy: {os.environ.get('RC_ALLOWLIST_COPY') or 'not checked'}")
 for i in left:
     lines.append(f"- **Not removed:** {i['resource']} {i['id']} “{i['name']}”")
+if os.environ.get("RC_READ_ONLY_ROLES"):
+    lines.append(f"- Kept read only for this app: {os.environ['RC_READ_ONLY_ROLES']}")
+# Apple requests per organisation (0.12.4): role and time only.
+apple = {}
+try:
+    with open(os.path.join(run, "live", "apple-requests.jsonl")) as f:
+        for l in f:
+            if l.strip(): apple[json.loads(l)["role"]] = apple.get(json.loads(l)["role"], 0) + 1
+except Exception: pass
+if apple:
+    lines += ["", "## Apple requests (paced to 9 a minute, at most 40 a run per organisation)", ""]
+    lines += [f"- {role}: {count}" for role, count in sorted(apple.items())]
 lines += ["", f"## Refused requests ({len(refusals)})", ""]
 lines += [f"- {r['method']} {r['location']}: {r['reason']}" for r in refusals] or ["None."]
 lines += ["", "## Saved connections and Keychain item names", "",

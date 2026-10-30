@@ -1,5 +1,39 @@
 # Changelog
 
+## 0.12.4 (2026-10-30)
+Step 11, for Checkpoint, the first app reading Apple Business and Apple School Manager in a live check. Additions and stricter rules in the live-check tools, and a lookup fix; no app has to change.
+- `JamfPro` `mobileDevices(serials:)` (many serials at once): a record that
+  never enrolled (device type "Unknown") now has its name, asset tag and
+  other general values, read once more by ID as `mobileDevice(serial:)` does
+  since 0.12.3. A detail that can't be read leaves the record found without
+  them. Found by Checkpoint's live check, which showed such a record without
+  a name.
+- `ABM.Client.firstDevices(limit:)`: the first devices of an organization in
+  one request (no further page), for a small sample where
+  `organizationSnapshot` would read the whole organization.
+- `JTKitLiveCheck`: every request to an Apple organization, sign-in
+  included, waits until fewer than 9 were sent in the last minute (Apple
+  allows about 18), and once 40 were sent in a run the next is refused
+  (`AppleRequestBudget`). The count is shared by the run's test processes in
+  its `apple-requests.jsonl` (role and time only); `LiveCheckRun.appleRequestCounts`
+  and the report show it per role.
+- `JTKitLiveCheck`: device secrets are refused on every tenant, for every
+  app: the FileVault key, Recovery Lock password, lock PIN and local admin
+  password (Jamf Pro rotates one once viewed), and Graph's FileVault key,
+  BitLocker keys and Windows LAPS. The LAPS settings and account list stay
+  readable.
+- `JTKitLiveCheck`: device commands named that were refused only because they
+  named no test object: Jamf Pro blank push, Renew MDM Profile and DDM sync,
+  Jamf School's refresh, restart, wipe and unenroll, and any change to an
+  Intune managed device (its actions and Delete Record). Also on a device
+  record the run created.
+- `Scripts/release-check-lib.sh`: `READ_ONLY_ROLES=(…)` keeps roles read only
+  for one app's run, whatever the allow-list grants (stricter only, never
+  looser); `LiveCheckRun.readOnlyRoles`, `AllowList.readingOnly(_:)`. The
+  report names them and lists the Apple requests per role.
+- `AllowList.Entry.hosts` is public, so an app's tests can match a saved
+  connection to its role.
+
 ## 0.12.3 (2026-10-29)
 Step 11, for Serial Number Reader, the first app with read-only tenants and a device record. Additions and fixes in the live-check tools and one lookup fix; no app has to change.
 - `JamfPlatform.Client.mobileDevice(serial:)` and `mobileDevice(udid:)`: a

@@ -290,6 +290,129 @@ struct TestObjectRuleTests {
         let url = "https://graph.microsoft.com/beta/deviceManagement/managedDevices/00000000-0000-4000-8000-0000000000d1/retire"
         #expect(!makePolicy().decide(request("POST", url, headers: auth)).isAllowed)
     }
+
+    /// Named in 0.12.4: refused also on a device record the run created.
+    @Test(arguments: [
+        ("POST", "https://test-a.jamf.example/api/v2/mdm/blank-push"),
+        ("POST", "https://test-a.jamf.example/api/v1/mdm/renew-profile"),
+        ("POST", "https://test-a.jamf.example/api/v1/ddm/5/sync"),
+    ])
+    func moreJamfProCommandsAreRefused(method: String, url: String) throws {
+        let policy = makePolicy()
+        try policy.ledger.add(.init(target: "test-a.jamf.example", resource: "ddm", id: "5", name: "\(prefix) – iPad"), testPrefixes: [prefix])
+        let decision = policy.decide(request(method, url, json: ["name": "\(prefix) – C", "clientManagementIds": ["5"]]))
+        #expect(decision == .refuse("Device commands are never sent in a live check"))
+    }
+
+    @Test func graphDeleteOrChangeOfAManagedDeviceIsRefused() throws {
+        let policy = makePolicy()
+        let id = "00000000-0000-4000-8000-0000000000d1"
+        try policy.ledger.add(.init(target: "intune:\(entraTest)", resource: "manageddevices", id: id, name: "\(prefix) – Mac"),
+                              testPrefixes: [prefix])
+        let auth = ["Authorization": "Bearer \(jwt(tid: entraTest))"]
+        let url = "https://graph.microsoft.com/v1.0/deviceManagement/managedDevices/\(id)"
+        #expect(policy.decide(request("DELETE", url, headers: auth)) == .refuse("Device commands are never sent in a live check"))
+        #expect(policy.decide(request("PATCH", url, headers: auth, json: ["notes": "x"])) == .refuse("Device commands are never sent in a live check"))
+        #expect(policy.decide(request("GET", url, headers: auth)).kind == .read)
+    }
+
+    @Test(arguments: ["refresh", "restart", "wipe", "unenroll"])
+    func jamfSchoolCommandsAreNamed(action: String) {
+        #expect(LiveCheckPolicy.isDeviceCommand("/api/devices/00008030-001a2b3c4d5e6f70/\(action)", method: "POST"))
+        #expect(LiveCheckPolicy.isDeviceCommand("/api/devices/c02aaa/\(action)", method: "POST"))
+        #expect(!LiveCheckPolicy.isDeviceCommand("/api/devices/c02aaa/details", method: "POST"))
+    }
+}
+
+// MARK: Secrets (0.12.4)
+
+@Suite("Live check: device secrets are never read")
+struct SecretReadRuleTests {
+    @Test(arguments: [
+        "https://read.jamf.example/api/v4/computers-inventory/5/filevault",
+        "https://read.jamf.example/api/v1/computers-inventory/filevault",
+        "https://test-a.jamf.example/api/v4/computers-inventory/5/view-recovery-lock-password",
+        "https://test-a.jamf.example/api/v4/computers-inventory/5/view-device-lock-pin",
+        "https://test-a.jamf.example/api/v2/local-admin-password/00000000-0000-4000-8000-0000000000c1/account/admin/password",
+        "https://test-a.jamf.example/api/v2/local-admin-password/00000000-0000-4000-8000-0000000000c1/account/admin/00000000-0000-4000-8000-0000000000c2/password",
+    ])
+    func secretReadsAreRefusedOnEveryTenant(url: String) throws {
+        let policy = makePolicy()
+        try policy.ledger.add(.init(target: "test-a.jamf.example", resource: "computersinventory", id: "5", name: "\(prefix) – Mac"),
+                              testPrefixes: [prefix])
+        let decision = policy.decide(request("GET", url))
+        #expect(!decision.isAllowed)
+        if case .refuse(let reason) = decision { #expect(reason.contains("never read")) }
+    }
+
+    @Test func graphSecretsAreRefused() {
+        let auth = ["Authorization": "Bearer \(jwt(tid: entraTest))"]
+        for path in ["deviceManagement/managedDevices/00000000-0000-4000-8000-0000000000d1/getFileVaultKey",
+                     "informationProtection/bitlocker/recoveryKeys/00000000-0000-4000-8000-0000000000d2",
+                     "directory/deviceLocalCredentials/00000000-0000-4000-8000-0000000000d3"] {
+            #expect(!makePolicy().decide(request("GET", "https://graph.microsoft.com/v1.0/\(path)", headers: auth)).isAllowed)
+        }
+    }
+
+    @Test func lapsSettingsAndAccountsStayReadable() {
+        let policy = makePolicy()
+        #expect(policy.decide(request("GET", "https://read.jamf.example/api/v2/local-admin-password/settings")).kind == .read)
+        #expect(policy.decide(request("GET", "https://read.jamf.example/api/v2/local-admin-password/00000000-0000-4000-8000-0000000000c1/accounts")).kind == .read)
+        #expect(policy.decide(request("GET", "https://read.jamf.example/api/v4/computers-inventory/5?section=FILEVAULT")).kind == .read)
+    }
+}
+
+// MARK: Apple budget (0.12.4)
+
+@Suite("Live check: Apple request budget")
+struct AppleBudgetTests {
+    @Test func pacesPerMinuteAndCapsPerRun() {
+        let budget = AppleRequestBudget(perMinute: 2, perRun: 3, window: 60)
+        let start = Date(timeIntervalSince1970: 1_000)
+        #expect(budget.claim(role: "apple-business", now: start) == .go)
+        #expect(budget.claim(role: "apple-business", now: start.addingTimeInterval(1)) == .go)
+        // The third waits until the first has left the minute.
+        #expect(budget.claim(role: "apple-business", now: start.addingTimeInterval(2)) == .wait(58))
+        // Another organisation has its own budget.
+        #expect(budget.claim(role: "apple-school", now: start.addingTimeInterval(2)) == .go)
+        #expect(budget.claim(role: "apple-business", now: start.addingTimeInterval(61)) == .go)
+        guard case .refuse(let reason) = budget.claim(role: "apple-business", now: start.addingTimeInterval(500)) else {
+            Issue.record("the fourth request of the run wasn't refused"); return
+        }
+        #expect(reason.contains("3 requests"))
+    }
+
+    @Test func theRunsFileIsSharedByItsProcesses() {
+        let file = tempFolder().appending(path: "apple-requests.jsonl")
+        let first = AppleRequestBudget(perMinute: 9, perRun: 2, file: file)
+        let second = AppleRequestBudget(perMinute: 9, perRun: 2, file: file)
+        #expect(first.claim(role: "apple-business") == .go)
+        #expect(second.claim(role: "apple-business") == .go)
+        guard case .refuse = first.claim(role: "apple-business") else { Issue.record("the shared cap wasn't kept"); return }
+        #expect(AppleRequestBudget.counts(in: file) == ["apple-business": 2])
+        #expect(!((try? String(contentsOf: file, encoding: .utf8)) ?? "").contains("BUSINESSAPI"))
+    }
+
+    @Test func theNetworkWaitsAndRefusesBeyondTheCap() async throws {
+        let server = MockServer { request in
+            request.url.host() == "account.apple.com" ? .json(200, #"{"access_token":"tok","expires_in":3600}"#) : .json(200, #"{"data":[]}"#)
+        }
+        let network = LiveCheckNetwork(policy: makePolicy(), upstream: server.session,
+                                       appleBudget: AppleRequestBudget(perMinute: 2, perRun: 3, window: 0.5))
+        var signIn = URLRequest(url: URL(string: "https://account.apple.com/auth/oauth2/v2/token")!)
+        signIn.httpMethod = "POST"
+        signIn.httpBody = Data("grant_type=client_credentials&client_id=BUSINESSAPI.test".utf8)
+        _ = try await network.session.data(for: signIn)
+        var devices = URLRequest(url: URL(string: "https://api-business.apple.com/v1/orgDevices")!)
+        devices.setValue("Bearer tok", forHTTPHeaderField: "Authorization")
+        let started = Date()
+        _ = try await network.session.data(for: devices)
+        _ = try await network.session.data(for: devices)   // the third in half a second: waits
+        #expect(Date().timeIntervalSince(started) >= 0.3)
+        await #expect(throws: (any Error).self) { _ = try await network.session.data(for: devices) }
+        #expect(server.requests.count == 3)
+        #expect(network.refusals.first?.reason.contains("budget") == true)
+    }
 }
 
 // MARK: Rule 4: Graph token tenant
@@ -423,6 +546,27 @@ struct LiveCheckRunTests {
         return ["JTKIT_LIVE": "1", "JTKIT_LIVE_PREFIX": prefix, "JTKIT_LIVE_RUN_DIR": folder.appending(path: "run").path,
                 "JTKIT_LIVE_ROLES": roles, "JTKIT_LIVE_ALLOWLIST": list.path,
                 "JTKIT_LIVE_JAMF_TEST_A_CLIENT_ID": "id-a", "JTKIT_LIVE_LEGACY_PREFIXES": "UIT - ", "JTKIT_LIVE_WRITES": "1"]
+    }
+
+    @Test("READ_ONLY_ROLES makes a role read only for the run, and only roles of the run")
+    func readOnlyRoles() throws {
+        var env = try environment()
+        let createGroup = request("POST", "https://graph.microsoft.com/v1.0/groups",
+                                  headers: ["Authorization": "Bearer \(jwt(tid: entraTest))"], json: ["displayName": "\(prefix) – G"])
+        #expect(try LiveCheckRun(environment: env).policy.decide(createGroup).kind == .create(name: "\(prefix) – G"))
+
+        env["JTKIT_LIVE_READ_ONLY_ROLES"] = "intune-test"
+        let run = try LiveCheckRun(environment: env)
+        #expect(run.readOnlyRoles == ["intune-test"])
+        #expect(try run.entry(role: "intune-test", service: .intune).access == .readOnly)
+        #expect(!run.policy.decide(createGroup).isAllowed)
+        #expect(run.policy.decide(request("GET", "https://graph.microsoft.com/v1.0/deviceManagement/managedDevices",
+                                          headers: ["Authorization": "Bearer \(jwt(tid: entraTest))"])).kind == .read)
+        // The other roles keep their access.
+        #expect(run.policy.decide(request("POST", "https://test-a.jamf.example/api/v1/categories", json: ["name": "\(prefix) – C"])).isAllowed)
+
+        env["JTKIT_LIVE_READ_ONLY_ROLES"] = "jamfpro-readonly"
+        #expect(throws: LiveCheckRun.RunError.self) { try LiveCheckRun(environment: env) }
     }
 
     @Test func offUnlessTheReleaseCheckSwitchesItOn() throws {

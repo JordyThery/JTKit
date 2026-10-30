@@ -31,6 +31,9 @@ public nonisolated final class LiveCheckNetwork: @unchecked Sendable {
     /// so a file shared by the run keeps them all for the report.
     let refusalsFile: URL?
 
+    /// Paces every Apple request and caps them per run (0.12.4).
+    public let appleBudget: AppleRequestBudget
+
     private let lock = NSLock()
     private var refusedStorage: [LiveRefusal] = []
 
@@ -38,10 +41,16 @@ public nonisolated final class LiveCheckNetwork: @unchecked Sendable {
     ///   - upstream: where allowed requests go; a fresh ephemeral session by
     ///     default (tests pass a mock).
     ///   - refusalsFile: the run's `refusals.jsonl` (`LiveCheckRun` passes it).
-    public init(policy: LiveCheckPolicy, upstream: URLSession = LiveCheckNetwork.makeUpstream(), refusalsFile: URL? = nil) {
+    ///   - appleRequestsFile: the run's `apple-requests.jsonl`, so the Apple
+    ///     budget is shared by the run's test processes (`LiveCheckRun` passes it).
+    ///   - appleBudget: replaces the standard budget (9 a minute, 40 a run per
+    ///     organisation); JTKit's own tests use a small one.
+    public init(policy: LiveCheckPolicy, upstream: URLSession = LiveCheckNetwork.makeUpstream(), refusalsFile: URL? = nil,
+                appleRequestsFile: URL? = nil, appleBudget: AppleRequestBudget? = nil) {
         self.policy = policy
         self.upstream = upstream
         self.refusalsFile = refusalsFile
+        self.appleBudget = appleBudget ?? AppleRequestBudget(file: appleRequestsFile)
         let id = UUID().uuidString
         let configuration = URLSessionConfiguration.ephemeral
         configuration.protocolClasses = [LiveCheckURLProtocol.self]
@@ -126,7 +135,10 @@ nonisolated final class LiveCheckURLProtocol: URLProtocol, @unchecked Sendable {
         lock.withLock { networks[id] = network }
     }
 
+    private let stateLock = NSLock()
     private var upstreamTask: URLSessionDataTask?
+    private var stopped = false
+    private static let appleQueue = DispatchQueue(label: "JTKitLiveCheck.apple-budget", attributes: .concurrent)
 
     override class func canInit(with request: URLRequest) -> Bool { true }
 
@@ -148,27 +160,56 @@ nonisolated final class LiveCheckURLProtocol: URLProtocol, @unchecked Sendable {
         switch network.policy.decide(seen) {
         case .refuse(let reason):
             client?.urlProtocol(self, didFailWithError: network.refuse(seen, reason: reason))
-        case .allow(let allowed):
-            upstreamTask = network.upstream.dataTask(with: outgoing) { [weak self] data, response, error in
-                guard let self else { return }
-                if let error {
-                    self.client?.urlProtocol(self, didFailWithError: error)
-                    return
+        case .allow(let allowed) where allowed.target.hasPrefix("apple:"):
+            // Apple: wait for the budget off the loading thread, then send.
+            Self.appleQueue.async { [self] in
+                while true {
+                    if stateLock.withLock({ stopped }) { return }
+                    switch network.appleBudget.claim(role: allowed.role) {
+                    case .go:
+                        send(outgoing, allowed: allowed, seen: seen, network: network)
+                        return
+                    case .wait(let seconds):
+                        Thread.sleep(forTimeInterval: min(seconds, 1))
+                    case .refuse(let reason):
+                        client?.urlProtocol(self, didFailWithError: network.refuse(seen, reason: reason))
+                        return
+                    }
                 }
-                let data = data ?? Data()
-                if let response = response as? HTTPURLResponse {
-                    network.didAnswer(allowed, request: seen, status: response.statusCode, body: data)
-                    self.client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
-                }
-                self.client?.urlProtocol(self, didLoad: data)
-                self.client?.urlProtocolDidFinishLoading(self)
             }
-            upstreamTask?.resume()
+        case .allow(let allowed):
+            send(outgoing, allowed: allowed, seen: seen, network: network)
         }
     }
 
+    private func send(_ outgoing: URLRequest, allowed: LiveDecision.Allowed, seen: LiveRequest, network: LiveCheckNetwork) {
+        let task = network.upstream.dataTask(with: outgoing) { [weak self] data, response, error in
+            guard let self else { return }
+            if let error {
+                self.client?.urlProtocol(self, didFailWithError: error)
+                return
+            }
+            let data = data ?? Data()
+            if let response = response as? HTTPURLResponse {
+                network.didAnswer(allowed, request: seen, status: response.statusCode, body: data)
+                self.client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+            }
+            self.client?.urlProtocol(self, didLoad: data)
+            self.client?.urlProtocolDidFinishLoading(self)
+        }
+        let cancelled = stateLock.withLock {
+            upstreamTask = task
+            return stopped
+        }
+        if cancelled { task.cancel() } else { task.resume() }
+    }
+
     override func stopLoading() {
-        upstreamTask?.cancel()
+        let task = stateLock.withLock {
+            stopped = true
+            return upstreamTask
+        }
+        task?.cancel()
     }
 
     private static func read(_ stream: InputStream?) -> Data {
