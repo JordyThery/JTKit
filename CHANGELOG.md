@@ -1,5 +1,30 @@
 # Changelog
 
+## 0.12.6 (2026-10-30)
+Live checks: a delete counts only once a read-back confirms the object is gone. No app has to change.
+- `JTKitLiveCheck`: after every delete the guarded network reads the object
+  back (GET on the same address, retried for about a minute: Jamf removes some
+  objects in the background) and marks it removed only when the read-back
+  finds it gone (404 or 410, or Graph's and Jamf's "not found" in a 400 body).
+  The delete's own answer, 200 or 404, never counts; an error answer (422 has
+  dependencies, 5xx) isn't read back, the object stays outstanding. The
+  client hears the delete's answer after the read-back, so the ledger is
+  already up to date. Found on 2026-10-30: jamf-test-a answered 404 to the
+  Platform API's delete of a test device group that it still listed (the
+  ledger counted it removed; a later sweep found and removed it).
+- `JTKitLiveCheck`: a Jamf Platform device group counts as gone only when
+  Jamf's group list (`pro/v2/groups`) no longer has it. If it's still listed,
+  it's deleted once more through the gateway's Jamf Pro (Classic) API, only
+  for a group in this run's ledger, matched by its Platform ID and exact name,
+  then read back again.
+- `ReadBack`, `DeleteOutcome`, `LiveCheckNetwork.deletes` and
+  `deletes(in:)`: every read-back is written to the run's `deletes.jsonl`.
+  `LiveCheckRun.notRemoved` and `requireNothingLeft()` (throws, naming every
+  object a read-back still finds).
+- `Scripts/release-check-lib.sh`: any ledger object not confirmed removed
+  fails the run and the report names it; the report counts the confirmed
+  deletes and the Jamf Pro fallbacks.
+
 ## 0.12.5 (2026-10-30)
 Step 11, for Intune Deployer, the first app writing to Intune in a live check. Additions and stricter rules in the live-check tools and the Microsoft sign-in; no app has to change.
 - `MicrosoftSignIn.silentToken(for:tenantID:scopes:forceRefresh:)`: a token

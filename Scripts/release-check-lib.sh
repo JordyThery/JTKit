@@ -352,7 +352,7 @@ EOF
 rc_live_sync() {
     [[ -n "${RC_LIVE_PARENT:-}" && -d "$RC_LIVE_DIR" ]] || return 0
     local file
-    for file in ledger.json results.jsonl refusals.jsonl apple-requests.jsonl host-keychain.before host-keychain.after; do
+    for file in ledger.json results.jsonl refusals.jsonl apple-requests.jsonl host-keychain.before host-keychain.after deletes.jsonl; do
         [[ -f "$RC_LIVE_DIR/$file" ]] && cp "$RC_LIVE_DIR/$file" "$RC_RUN/live/$file"
     done
     return 0
@@ -458,6 +458,16 @@ print("; ".join(dict.fromkeys(s["step"] for s in steps[last + 1:] if not s.get("
         fi
     fi
     [[ "${RC_ALLOWLIST_COPY:-}" == FAILED* ]] && result="$RC_ALLOWLIST_COPY"
+    # Anything a read-back still finds fails the run, by name (0.12.6): a
+    # delete's own answer never counts as removed.
+    local not_removed
+    not_removed="$("$RC_PY" -c '
+import json, sys
+try: items = json.load(open(sys.argv[1]))
+except Exception: items = []
+print("; ".join(f"{i[\"resource\"]} {i[\"id\"]} “{i[\"name\"]}”" for i in items if not i.get("removed")))
+' "$RC_RUN/live/ledger.json")"
+    [[ -n "$not_removed" ]] && result="FAILED: not removed (a read-back still finds them): $not_removed"
     # The test host's Keychain names (0.12.5): both taken, and equal.
     RC_HOST_KEYCHAIN=""
     if [[ -n "${HOST_KEYCHAIN_TEST:-}" ]] && (( ${RC_BUILT:-0} )); then
@@ -525,6 +535,20 @@ if os.environ.get("RC_LIVE_IN_CONTAINER"):
     lines.append(f"- Live folder in the app's container (readable by you only); allow-list copy: {os.environ.get('RC_ALLOWLIST_COPY') or 'not checked'}")
 for i in left:
     lines.append(f"- **Not removed:** {i['resource']} {i['id']} “{i['name']}”")
+# Every delete is confirmed by a read-back (0.12.6).
+deletes = []
+try:
+    with open(os.path.join(run, "live", "deletes.jsonl")) as f:
+        deletes = [json.loads(l) for l in f if l.strip()]
+except Exception: pass
+if deletes:
+    confirmed = sum(1 for d in deletes if d.get("confirmed"))
+    fallback = sum(1 for d in deletes if d.get("throughJamfPro"))
+    lines.append(f"- Deletes confirmed by a read-back: {confirmed} of {len(deletes)}"
+                 + (f"; {fallback} Platform group(s) deleted again through the Jamf Pro API" if fallback else ""))
+    for d in deletes:
+        if not d.get("confirmed"):
+            lines.append(f"- **Delete not confirmed** (answered {d['status']}): {d['resource']} {d['id']} “{d.get('name', '')}”")
 if os.environ.get("RC_READ_ONLY_ROLES"):
     lines.append(f"- Kept read only for this app: {os.environ['RC_READ_ONLY_ROLES']}")
 # Apple requests per organisation (0.12.4): role and time only.

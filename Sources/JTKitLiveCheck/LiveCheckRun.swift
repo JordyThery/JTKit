@@ -77,7 +77,8 @@ public nonisolated final class LiveCheckRun: @unchecked Sendable {
         try LiveCheckRun(environment: ProcessInfo.processInfo.environment)
     }
 
-    public init(environment: [String: String], upstream: URLSession? = nil) throws {
+    /// - Parameter readBack: tests only; the standard read-back by default.
+    public init(environment: [String: String], upstream: URLSession? = nil, readBack: ReadBack? = nil) throws {
         guard environment["JTKIT_LIVE"] == "1" else { throw RunError.notEnabled }
         func setting(_ name: String) throws -> String {
             guard let value = environment[name], !value.isEmpty else { throw RunError.missingSetting(name) }
@@ -121,8 +122,29 @@ public nonisolated final class LiveCheckRun: @unchecked Sendable {
         self.policy = policy
         let refusalsFile = runFolder.appending(path: "refusals.jsonl")
         let appleFile = runFolder.appending(path: Self.appleRequestsFileName)
-        network = upstream.map { LiveCheckNetwork(policy: policy, upstream: $0, refusalsFile: refusalsFile, appleRequestsFile: appleFile) }
-            ?? LiveCheckNetwork(policy: policy, refusalsFile: refusalsFile, appleRequestsFile: appleFile)
+        let deletesFile = runFolder.appending(path: Self.deletesFileName)
+        network = upstream.map {
+            LiveCheckNetwork(policy: policy, upstream: $0, refusalsFile: refusalsFile, appleRequestsFile: appleFile,
+                             readBack: readBack ?? .standard, deletesFile: deletesFile)
+        } ?? LiveCheckNetwork(policy: policy, refusalsFile: refusalsFile, appleRequestsFile: appleFile,
+                              readBack: readBack ?? .standard, deletesFile: deletesFile)
+    }
+
+    /// Every delete's read-back of the run, from all its test processes (0.12.6).
+    public static let deletesFileName = "deletes.jsonl"
+
+    /// The objects of the run's ledger not confirmed removed, e.g. at the end
+    /// of a cleanup.
+    public var notRemoved: [Ledger.Item] { ledger.outstanding }
+
+    /// Throws, naming every object of the ledger a read-back hasn't found
+    /// gone (0.12.6). A cleanup test calls it last: the run then fails.
+    public func requireNothingLeft() throws {
+        let left = notRemoved
+        guard left.isEmpty else {
+            throw RunError.notAllowed("Not removed (a read-back still finds them): "
+                + left.map { "\($0.resource) \($0.id) “\($0.name)”" }.joined(separator: "; "))
+        }
     }
 
     /// Every Apple request of the run, from all its test processes (0.12.4).

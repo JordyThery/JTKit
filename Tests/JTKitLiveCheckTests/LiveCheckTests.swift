@@ -625,11 +625,16 @@ struct LiveCheckNetworkTests {
     }
 
     @Test func createsAreWrittenToTheLedgerAndDeletesMarked() async throws {
+        let exists = Flag(true)
         let server = MockServer { request in
-            request.method == "POST" ? .json(201, #"{"id":"41","href":"x"}"#) : .json(204, "")
+            switch request.method {
+            case "POST": return .json(201, #"{"id":"41","href":"x"}"#)
+            case "DELETE": exists.set(false); return .json(204, "")
+            default: return exists.value ? .json(200, #"{"id":"41"}"#) : .json(404, "{}")
+            }
         }
         let policy = makePolicy()
-        let network = LiveCheckNetwork(policy: policy, upstream: server.session)
+        let network = LiveCheckNetwork(policy: policy, upstream: server.session, readBack: .init(attempts: 3, interval: 0.01))
         var create = URLRequest(url: URL(string: "https://test-a.jamf.example/api/v1/categories")!)
         create.httpMethod = "POST"
         create.httpBody = Data(#"{"name":"JTKTEST XX 1027-1432 – C"}"#.utf8)
@@ -639,9 +644,10 @@ struct LiveCheckNetworkTests {
         var delete = URLRequest(url: URL(string: "https://test-a.jamf.example/api/v1/categories/41")!)
         delete.httpMethod = "DELETE"
         _ = try await network.session.data(for: delete)
-        #expect(policy.ledger.outstanding.isEmpty)
-        #expect(server.requests.count == 2)
+        #expect(policy.ledger.outstanding.isEmpty, "the read-back found it gone")
+        #expect(server.requests.map(\.method) == ["POST", "DELETE", "GET"])
         #expect(server.requests.allSatisfy { $0.header(LiveCheckURLProtocol.networkHeader) == nil })
+        #expect(network.deletes.map(\.confirmed) == [true])
     }
 
     @Test func appleTokensIssuedHereOpenTheAPI() async throws {
@@ -861,5 +867,143 @@ struct ParsingTests {
         #expect(LiveCheckPolicy.createdID(in: Data(#"{"id":"5","href":"x"}"#.utf8)) == "5")
         #expect(LiveCheckPolicy.createdID(in: Data(#"{"id":17}"#.utf8)) == "17")
         #expect(LiveCheckPolicy.createdID(in: Data("<?xml version=\"1.0\"?><category><id>9</id></category>".utf8)) == "9")
+    }
+}
+
+
+// MARK: - A delete counts once a read-back confirms it (0.12.6)
+
+/// A value the mock servers' handlers share.
+private final class Flag: @unchecked Sendable {
+    private let lock = NSLock()
+    private var stored: Bool
+    init(_ value: Bool) { stored = value }
+    var value: Bool { lock.withLock { stored } }
+    func set(_ value: Bool) { lock.withLock { stored = value } }
+}
+
+@Suite("Live check: deletes are confirmed by a read-back")
+struct DeleteReadBackTests {
+    private let fast = ReadBack(attempts: 3, interval: 0.01)
+
+    private func run(upstream: URLSession) throws -> LiveCheckRun {
+        let folder = tempFolder()
+        let list = folder.appending(path: "allowlist.json")
+        try JSONEncoder().encode(sampleList()).write(to: list)
+        try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: list.path)
+        return try LiveCheckRun(environment: [
+            "JTKIT_LIVE": "1", "JTKIT_LIVE_PREFIX": prefix, "JTKIT_LIVE_RUN_DIR": folder.appending(path: "run").path,
+            "JTKIT_LIVE_ROLES": "jamf-test-a,intune-test", "JTKIT_LIVE_ALLOWLIST": list.path, "JTKIT_LIVE_WRITES": "1",
+        ], upstream: upstream, readBack: fast)
+    }
+
+    private func delete(_ url: String, on run: LiveCheckRun, headers: [String: String] = [:]) async throws {
+        var request = URLRequest(url: URL(string: url)!)
+        request.httpMethod = "DELETE"
+        for (key, value) in headers { request.setValue(value, forHTTPHeaderField: key) }
+        _ = try await run.network.session.data(for: request)
+    }
+
+    @Test("A delete answered 404 while the object still exists: not removed, and the run fails naming it")
+    func notFoundWhileStillThere() async throws {
+        let server = MockServer { request in
+            request.method == "DELETE" ? .json(404, #"{"httpStatus":404,"errors":[{"code":"NOT_FOUND"}]}"#) : .json(200, #"{"id":"41"}"#)
+        }
+        let run = try run(upstream: server.session)
+        try run.ledger.add(.init(target: "test-a.jamf.example", resource: "categories", id: "41", name: "\(prefix) – C"), testPrefixes: [prefix])
+        try await delete("https://test-a.jamf.example/api/v1/categories/41", on: run)
+        #expect(run.notRemoved.map(\.id) == ["41"])
+        #expect(server.requests.filter { $0.method == "GET" }.count == fast.attempts, "read back until it gave up")
+        #expect(run.network.deletes == [DeleteOutcome(resource: "categories", id: "41", name: "\(prefix) – C", status: 404,
+                                                       confirmed: false, throughJamfPro: false)])
+        #expect(LiveCheckNetwork.deletes(in: run.runFolder.appending(path: LiveCheckRun.deletesFileName)).count == 1)
+        do {
+            try run.requireNothingLeft()
+            Issue.record("the run didn't fail")
+        } catch {
+            #expect("\(error)".contains("categories 41 “\(prefix) – C”"))
+        }
+    }
+
+    @Test("A delete answered 204 while the object stays: not removed")
+    func successWhileStillThere() async throws {
+        let server = MockServer { request in request.method == "DELETE" ? .json(204, "") : .json(200, #"{"id":"41"}"#) }
+        let run = try run(upstream: server.session)
+        try run.ledger.add(.init(target: "test-a.jamf.example", resource: "categories", id: "41", name: "\(prefix) – C"), testPrefixes: [prefix])
+        try await delete("https://test-a.jamf.example/api/v1/categories/41", on: run)
+        #expect(run.notRemoved.count == 1)
+        #expect(throws: LiveCheckRun.RunError.self) { try run.requireNothingLeft() }
+    }
+
+    @Test("Graph's 400 ResourceNotFound on the read-back counts as gone; an error answer isn't read back")
+    func graphAndErrorAnswers() async throws {
+        let id = "11111111-2222-4333-8444-555555555555"
+        let server = MockServer { request in
+            switch request.method {
+            case "DELETE": request.path.contains(id) ? .json(204, "") : .json(422, #"{"errors":[{"code":"HAS_DEPENDENCIES"}]}"#)
+            default: .json(400, #"{"error":{"code":"BadRequest","message":"ResourceNotFound: …"}}"#)
+            }
+        }
+        let run = try run(upstream: server.session)
+        let target = "intune:\(entraTest)"
+        try run.ledger.add(.init(target: target, resource: "configurationPolicies", id: id, name: "\(prefix) – P"), testPrefixes: [prefix])
+        try await delete("https://graph.microsoft.com/beta/deviceManagement/configurationPolicies/\(id)", on: run,
+                         headers: ["Authorization": "Bearer \(jwt(tid: entraTest))"])
+        #expect(run.notRemoved.isEmpty)
+
+        try run.ledger.add(.init(target: "test-a.jamf.example", resource: "categories", id: "42", name: "\(prefix) – D"), testPrefixes: [prefix])
+        let before = server.requests.count
+        try await delete("https://test-a.jamf.example/api/v1/categories/42", on: run)
+        #expect(server.requests.count == before + 1, "a 422 deleted nothing: no read-back")
+        #expect(run.notRemoved.map(\.id) == ["42"])
+    }
+
+    @Test("A Platform group Jamf still lists after a 404: deleted again through the Jamf Pro API, then confirmed")
+    func platformGroupFallsBackToJamfPro() async throws {
+        let group = "830636ce-d876-4768-a1df-0be83503e0f1"
+        let listed = Flag(true)
+        let server = MockServer { request in
+            switch (request.method, request.path) {
+            case ("DELETE", "/proclassic/computergroups/id/57"):
+                listed.set(false)
+                return .json(200, "")
+            case ("DELETE", _), ("GET", "/device-groups/v1/device-groups/\(group)"):
+                return .json(404, #"{"httpStatus":404,"errors":[{"code":"NOT_FOUND","field":"groupPlatformId"}]}"#)
+            case ("GET", "/pro/v2/groups"):
+                let entry = #"{"groupPlatformId":"\#(group.uppercased())","groupJamfProId":"57","groupName":"\#(prefix) – Group","groupType":"COMPUTER"}"#
+                return .json(200, #"{"totalCount":1,"results":["# + (listed.value ? entry : "") + "]}")
+            default:
+                return .json(500, "{}")
+            }
+        }
+        let run = try run(upstream: server.session)
+        let target = "platform:\(platformA)"
+        try run.ledger.add(.init(target: target, resource: "device-groups", id: group, name: "\(prefix) – Group"), testPrefixes: [prefix])
+        try await delete("https://eu.api.jamfcloud.com/device-groups/v1/device-groups/\(group)", on: run,
+                         headers: ["X-Environment-Id": platformA])
+        #expect(run.notRemoved.isEmpty)
+        #expect(run.network.deletes.first?.throughJamfPro == true)
+        #expect(server.requests.contains { $0.method == "DELETE" && $0.path == "/proclassic/computergroups/id/57"
+                                           && $0.header("X-Environment-Id") == platformA })
+    }
+
+    @Test("The Jamf Pro fallback only for the ledger's group, by its exact name")
+    func fallbackOnlyForTheLedgersGroup() async throws {
+        let group = "830636ce-d876-4768-a1df-0be83503e0f1"
+        let server = MockServer { request in
+            switch (request.method, request.path) {
+            case ("GET", "/pro/v2/groups"):
+                return .json(200, #"{"results":[{"groupPlatformId":"\#(group)","groupJamfProId":"57","groupName":"Finance Macs","groupType":"COMPUTER"}]}"#)
+            default:
+                return .json(404, "{}")
+            }
+        }
+        let run = try run(upstream: server.session)
+        try run.ledger.add(.init(target: "platform:\(platformA)", resource: "device-groups", id: group, name: "\(prefix) – Group"),
+                           testPrefixes: [prefix])
+        try await delete("https://eu.api.jamfcloud.com/device-groups/v1/device-groups/\(group)", on: run,
+                         headers: ["X-Environment-Id": platformA])
+        #expect(!server.requests.contains { $0.path.hasPrefix("/proclassic/") }, "another name: no fallback")
+        #expect(run.notRemoved.count == 1, "still listed: not removed")
     }
 }
