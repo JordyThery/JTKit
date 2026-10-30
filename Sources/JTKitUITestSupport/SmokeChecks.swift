@@ -94,8 +94,13 @@ extension JTKitUITestCase {
         let firstRow = log.cells.firstMatch
         XCTAssertTrue(firstRow.waitForExistence(timeout: 10), "The activity log is empty", file: file, line: line)
         firstRow.click()
+        // The demo's Intune server answers inside the app under Microsoft's
+        // own hosts (DemoIntuneServer.hosts): an app names them (0.12.5).
+        let hosts = ["demo.invalid"] + alsoAllowedHosts
         let demoRequest = log.descendants(matching: .any)
-            .matching(NSPredicate(format: "value CONTAINS 'demo.invalid' OR label CONTAINS 'demo.invalid'")).firstMatch
+            .matching(NSCompoundPredicate(orPredicateWithSubpredicates: hosts.map {
+                NSPredicate(format: "value CONTAINS %@ OR label CONTAINS %@", $0, $0)
+            })).firstMatch
         XCTAssertTrue(demoRequest.waitForExistence(timeout: 10), "The selected request didn't go to a demo server", file: file, line: line)
         let requests = log.descendants(matching: .any)
             .matching(NSPredicate(format: "value CONTAINS 'https://' OR label CONTAINS 'https://'"))

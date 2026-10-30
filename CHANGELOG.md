@@ -1,5 +1,45 @@
 # Changelog
 
+## 0.12.5 (2026-10-30)
+Step 11, for Intune Deployer, the first app writing to Intune in a live check. Additions and stricter rules in the live-check tools and the Microsoft sign-in; no app has to change.
+- `MicrosoftSignIn.silentToken(for:tenantID:scopes:forceRefresh:)`: a token
+  from MSAL's cache (or a silent refresh) only; when MSAL needs its window it
+  throws the new `MicrosoftSignInError.interactionRequired` instead of opening
+  it. For unattended runs, which stop and say to sign in once in the app.
+- `MicrosoftSignIn.account(strictlyFor:identifier:)` and
+  `strictlyCachedAccount(in:tenantID:homeTenant:)`: the one cached account of
+  exactly this tenant ID, without the "only account" fallback of
+  `savedAccount`; a saved identifier counts only when its account is that
+  tenant's.
+- `JTKitLiveCheck`, Graph writes: assignments (`/assign`, any body with an
+  assignment target) only to a group this run created (not one an earlier
+  run left) and only with a filter it created; All devices, All users, any
+  other group and any other target type are refused. A compliance action
+  other than "block" (retire, wipe, lock, notifications) is refused. Graph
+  `$batch` is refused by name (its requests can't be checked one by one).
+- `JTKitLiveCheck`: a permanent delete from Entra's recycle bin
+  (`DELETE …/directory/deletedItems/{id}`) only for a group this run created
+  and has already deleted; nothing else there.
+- `LiveCheckRun.adoptForSweep`: on a create-and-remove tenant only an object
+  with one of the run's legacy prefixes (so only on the first run), never a
+  `JTKTEST` one; `isLegacyTestObject(_:)`. `Ledger.item(target:resource:id:)`
+  (the ID compared without case).
+- `LiveCheckRun.recordHostKeychainNames(services:accessGroups:)`: the
+  Keychain item names of these services, and of the access groups ending in
+  `accessGroups`, as the app's test host sees them, in the login and the
+  data-protection keychain, written as hashes only (`host-keychain.<label>`),
+  never a value. MSAL's cache lives in the data-protection keychain in its own
+  access group (`com.microsoft.identity.universalstorage`, names like
+  `accesstoken-…`, not "Microsoft Credentials"), which `security` can't list.
+- `JTKitUITestSupport` `checkActivityLog(alsoAllowedHosts:)`: the selected
+  entry may also be on one of those hosts (before, only `*.demo.invalid`):
+  demo mode's Intune server answers inside the app under Microsoft's own
+  hosts.
+- `Scripts/release-check-lib.sh`: `HOST_KEYCHAIN_TEST="<selection>"` runs that
+  test after the build and after cleanup (also without stage 4); the two
+  must be equal or the report fails, and it shows the count and a hash. An
+  earlier run's ledger may hold a legacy object its sweep adopted.
+
 ## 0.12.4 (2026-10-30)
 Step 11, for Checkpoint, the first app reading Apple Business and Apple School Manager in a live check. Additions and stricter rules in the live-check tools, and a lookup fix; no app has to change.
 - `JamfPro` `mobileDevices(serials:)` (many serials at once): a record that

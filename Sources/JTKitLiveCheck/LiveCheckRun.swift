@@ -1,4 +1,6 @@
+import CryptoKit
 import Foundation
+import Security
 
 /// One release-check run as an app's live-check tests see it: the
 /// allow-list, the prefix, the ledger, the guarded network and the
@@ -12,7 +14,8 @@ import Foundation
 ///   (`|`-separated, for the one-time sweep of older test objects),
 ///   `JTKIT_LIVE_WRITES=1` (stage 4 only; otherwise every tenant is read only),
 ///   `JTKIT_LIVE_FAULT` (only with the script's `--fault`, to test the check itself),
-///   `JTKIT_LIVE_READ_ONLY_ROLES` (comma-separated roles kept read only for this app).
+///   `JTKIT_LIVE_READ_ONLY_ROLES` (comma-separated roles kept read only for this app),
+///   `JTKIT_LIVE_HOST_KEYCHAIN` (`before`/`after`, for `HOST_KEYCHAIN_TEST`; 0.12.5).
 /// - Credentials as `JTKIT_LIVE_<ROLE>_<ITEM>`, e.g. `JTKIT_LIVE_JAMF_TEST_A_CLIENT_SECRET`,
 ///   read from the login Keychain; never written to a file or log.
 public nonisolated final class LiveCheckRun: @unchecked Sendable {
@@ -36,6 +39,9 @@ public nonisolated final class LiveCheckRun: @unchecked Sendable {
     /// Roles this run treats as read only whatever the allow-list grants
     /// (`JTKIT_LIVE_READ_ONLY_ROLES`, from the app's `READ_ONLY_ROLES`; 0.12.4).
     public let readOnlyRoles: Set<String>
+    /// `before` or `after` while the script runs the app's
+    /// `HOST_KEYCHAIN_TEST` (`JTKIT_LIVE_HOST_KEYCHAIN`, 0.12.5); nil otherwise.
+    public let hostKeychainLabel: String?
     private let environment: [String: String]
     private let lock = NSLock()
 
@@ -104,6 +110,7 @@ public nonisolated final class LiveCheckRun: @unchecked Sendable {
         self.allowList = allowList
         legacyPrefixes = (environment["JTKIT_LIVE_LEGACY_PREFIXES"] ?? "").split(separator: "|").map(String.init).filter { !$0.isEmpty }
         fault = environment["JTKIT_LIVE_FAULT"].flatMap { $0.isEmpty ? nil : $0 }
+        hostKeychainLabel = environment["JTKIT_LIVE_HOST_KEYCHAIN"].flatMap { $0.isEmpty ? nil : $0 }
         let writesAllowed = environment["JTKIT_LIVE_WRITES"] == "1"
         self.writesAllowed = writesAllowed
         let ledger = Ledger(fileURL: runFolder.appending(path: "ledger.json"))
@@ -201,15 +208,106 @@ public nonisolated final class LiveCheckRun: @unchecked Sendable {
     }
 
     /// Adds a left-over test object found by the sweep to the ledger, so the
-    /// sweep may delete it. Full tenants only; the name must start with
-    /// `JTKTEST ` or one of the legacy prefixes.
+    /// sweep may delete it. Full tenants: the name must start with `JTKTEST `
+    /// or one of the legacy prefixes. Create-and-remove tenants (0.12.5): only
+    /// a legacy prefix, so only on the first run (the script passes legacy
+    /// prefixes until a cleanup passed); `JTKTEST` objects there are removed
+    /// from the ledger only.
     public func adoptForSweep(role: String, service: AllowList.Service, resource: String, id: String, name: String) throws {
         let entry = try entry(role: role, service: service)
-        guard entry.access == .full else {
+        let prefixes: [String]
+        switch entry.access {
+        case .full:
+            prefixes = [Self.testPrefix + " "] + legacyPrefixes
+        case .createAndRemove where isLegacyTestObject(name):
+            prefixes = legacyPrefixes
+        default:
             throw RunError.notAllowed("\(role) has no prefix sweep: only the ledger is cleaned up there")
         }
         try ledger.add(.init(target: target(role: role, service: service), resource: resource, id: id, name: name, fromSweep: true),
-                       testPrefixes: [Self.testPrefix + " "] + legacyPrefixes)
+                       testPrefixes: prefixes)
+    }
+
+    /// Whether a name is an older test object (a legacy prefix of this run)
+    /// that the one-time sweep removes (0.12.5).
+    public func isLegacyTestObject(_ name: String) -> Bool {
+        legacyPrefixes.contains { name.hasPrefix($0) }
+    }
+
+    // MARK: Keychain item names, seen from the test host (0.12.5)
+
+    /// Writes this test host's view of the Keychain items of `services` and
+    /// of the access groups ending in `accessGroups` to the run folder as
+    /// `host-keychain.<label>`: one SHA-256 hash (16 characters) per service
+    /// and account name, sorted. Attributes only: no secret is read. Both
+    /// the login keychain and the data-protection keychain are searched.
+    /// MSAL's cache lives in the data-protection keychain, in its own access
+    /// group (`com.microsoft.identity.universalstorage`) that only the app
+    /// and its test host can see, under names like `accesstoken-…`. The
+    /// release check runs it before sign-in (`before`) and after cleanup
+    /// (`after`) and compares the two.
+    @discardableResult
+    public func recordHostKeychainNames(services: [String], accessGroups: [String] = [], label: String) throws -> [String] {
+        guard label.allSatisfy({ $0.isLetter || $0.isNumber || $0 == "-" }), !label.isEmpty else {
+            throw RunError.notAllowed("A fingerprint label is letters, digits and hyphens")
+        }
+        let names = Self.keychainNames(services: services) + Self.keychainNames(accessGroupSuffixes: accessGroups)
+        let lines = Set(names).map { "keychain-host \(Self.shortHash($0))" }.sorted()
+        try FileManager.default.createDirectory(at: runFolder, withIntermediateDirectories: true)
+        try Data((lines.joined(separator: "\n") + "\n").utf8)
+            .write(to: runFolder.appending(path: "host-keychain.\(label)"), options: .atomic)
+        return lines
+    }
+
+    /// The same, labelled as the script asked (`hostKeychainLabel`).
+    @discardableResult
+    public func recordHostKeychainNames(services: [String], accessGroups: [String] = []) throws -> [String] {
+        guard let hostKeychainLabel else { throw RunError.missingSetting("JTKIT_LIVE_HOST_KEYCHAIN") }
+        return try recordHostKeychainNames(services: services, accessGroups: accessGroups, label: hostKeychainLabel)
+    }
+
+    /// `service / account` of every generic-password item of the services.
+    static func keychainNames(services: [String]) -> [String] {
+        var names: Set<String> = []
+        for service in services {
+            for dataProtection in [false, true] {
+                var query: [String: Any] = [kSecClass as String: kSecClassGenericPassword,
+                                            kSecAttrService as String: service,
+                                            kSecMatchLimit as String: kSecMatchLimitAll,
+                                            kSecReturnAttributes as String: true]
+                if dataProtection { query[kSecUseDataProtectionKeychain as String] = true }
+                var result: CFTypeRef?
+                guard SecItemCopyMatching(query as CFDictionary, &result) == errSecSuccess,
+                      let items = result as? [[String: Any]] else { continue }
+                for item in items {
+                    names.insert("\(service) / \(item[kSecAttrAccount as String] as? String ?? "")")
+                }
+            }
+        }
+        return names.sorted()
+    }
+
+    /// `group / service / account` of every generic-password item in the
+    /// data-protection keychain whose access group ends in one of the suffixes
+    /// (the team prefix differs per Mac's signing).
+    static func keychainNames(accessGroupSuffixes: [String]) -> [String] {
+        guard !accessGroupSuffixes.isEmpty else { return [] }
+        let query: [String: Any] = [kSecClass as String: kSecClassGenericPassword,
+                                    kSecUseDataProtectionKeychain as String: true,
+                                    kSecMatchLimit as String: kSecMatchLimitAll,
+                                    kSecReturnAttributes as String: true]
+        var result: CFTypeRef?
+        guard SecItemCopyMatching(query as CFDictionary, &result) == errSecSuccess,
+              let items = result as? [[String: Any]] else { return [] }
+        return items.compactMap { item in
+            guard let group = item[kSecAttrAccessGroup as String] as? String,
+                  let suffix = accessGroupSuffixes.first(where: { group.hasSuffix($0) }) else { return nil }
+            return "\(suffix) / \(item[kSecAttrService as String] as? String ?? "") / \(item[kSecAttrAccount as String] as? String ?? "")"
+        }.sorted()
+    }
+
+    static func shortHash(_ text: String) -> String {
+        SHA256.hash(data: Data(text.utf8)).map { String(format: "%02x", $0) }.joined().prefix(16).description
     }
 
     /// Whether a name is a test object the sweep removes.
