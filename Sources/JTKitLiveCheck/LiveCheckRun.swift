@@ -250,6 +250,21 @@ public nonisolated final class LiveCheckRun: @unchecked Sendable {
                        testPrefixes: prefixes)
     }
 
+    /// Lets this run permanently delete one group an earlier run left in
+    /// Entra's recycle bin (0.12.7): only on an Intune tenant this run may
+    /// write to, only while writes are on, and only a group whose name starts
+    /// with `JTKTEST ` (the caller reads the name from the recycle bin).
+    public func adoptDeletedGroupForPurge(role: String, id: String, name: String) throws {
+        let entry = try entry(role: role, service: .intune)
+        guard entry.access != .readOnly, writesAllowed else {
+            throw RunError.notAllowed("\(role): nothing is purged without writes")
+        }
+        guard name.hasPrefix(Self.testPrefix + " ") else {
+            throw RunError.notAllowed("“\(name)” isn't named as a test object: it isn't purged")
+        }
+        policy.allowPurge(target: try target(role: role, service: .intune), id: id)
+    }
+
     /// Whether a name is an older test object (a legacy prefix of this run)
     /// that the one-time sweep removes (0.12.5).
     public func isLegacyTestObject(_ name: String) -> Bool {

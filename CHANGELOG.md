@@ -1,5 +1,32 @@
 # Changelog
 
+## 0.12.7 (2026-10-30)
+Release check: a check that can't run fails the run, by name; Entra's recycle bin in the live checks. No app has to change.
+- `Scripts/release-check-lib.sh`: 0.12.6's "not removed fails the run" check
+  never ran: its Python line used a backslash inside an f-string, which the
+  Mac's `/usr/bin/python3` (3.9) refuses. (No run's result changed: every
+  ledger was empty, and each app's cleanup test checks it too.) Fixed.
+- `Scripts/release-check-lib.sh`: any check that can't run fails the run and
+  the report names it ("a check couldn't run: …", and its own section):
+  a Python block that fails, an unreadable fingerprint file or folder, a
+  Keychain that can't be listed, the test host's Keychain names after the
+  run, deciding the finished live folders, reading the cleanup's results or
+  the ledger, the roles from the allow-list (stops the run), and the report
+  itself (a short FAILED report is written instead). Only a file that isn't
+  there yet counts as "none"; no Python block catches every error any more.
+  A run stopped before its first fingerprint says so instead of "changed".
+- JTKit test: every Python block in the template (heredocs and `-c`, each
+  call of `$RC_PY` accounted for) compiles with `/usr/bin/python3`; the
+  template is valid zsh; the report fails, naming the check, for a ledger it
+  can't read, and names an object a read-back still finds.
+- `JTKitLiveCheck`: a permanent delete from Entra's recycle bin is read back
+  for up to two minutes (`ReadBack.recycleBinAttempts`); still shown, it is
+  recorded as not confirmed (an app reports it as a note).
+  `LiveCheckRun.adoptDeletedGroupForPurge(role:id:name:)`: the sweep may
+  permanently delete a group an earlier run left in the recycle bin, only on
+  an Intune tenant the run may write to, only with writes on, and only when
+  its name starts with `JTKTEST `.
+
 ## 0.12.6 (2026-10-30)
 Live checks: a delete counts only once a read-back confirms the object is gone. No app has to change.
 - `JTKitLiveCheck`: after every delete the guarded network reads the object
