@@ -1007,3 +1007,63 @@ struct DeleteReadBackTests {
         #expect(run.notRemoved.count == 1, "still listed: not removed")
     }
 }
+
+
+// MARK: - Entra's recycle bin (0.12.7)
+
+@Suite("Live check: Entra's recycle bin")
+struct RecycleBinTests {
+    private func run(upstream: URLSession, writes: Bool = true) throws -> LiveCheckRun {
+        let folder = tempFolder()
+        let list = folder.appending(path: "allowlist.json")
+        try JSONEncoder().encode(sampleList()).write(to: list)
+        try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: list.path)
+        return try LiveCheckRun(environment: [
+            "JTKIT_LIVE": "1", "JTKIT_LIVE_PREFIX": prefix, "JTKIT_LIVE_RUN_DIR": folder.appending(path: "run").path,
+            "JTKIT_LIVE_ROLES": "jamf-test-a,intune-test", "JTKIT_LIVE_ALLOWLIST": list.path, "JTKIT_LIVE_WRITES": writes ? "1" : "0",
+        ], upstream: upstream, readBack: ReadBack(attempts: 2, interval: 0.01, recycleBinAttempts: 5))
+    }
+
+    private let bearer = ["Authorization": "Bearer \(jwt(tid: entraTest))"]
+    private let group = "22222222-2222-4333-8444-555555555555"
+
+    @Test("The sweep may purge an earlier run's JTKTEST group from the recycle bin, nothing else")
+    func sweepPurgesOnlyTestGroups() throws {
+        let run = try run(upstream: LiveCheckNetwork.makeUpstream())
+        let purge = request("DELETE", "https://graph.microsoft.com/v1.0/directory/deletedItems/\(group)", headers: bearer)
+        #expect(!run.policy.decide(purge).isAllowed)
+        #expect(throws: LiveCheckRun.RunError.self) {
+            try run.adoptDeletedGroupForPurge(role: "intune-test", id: group, name: "Finance Macs")
+        }
+        #expect(!run.policy.decide(purge).isAllowed)
+        try run.adoptDeletedGroupForPurge(role: "intune-test", id: group.uppercased(), name: "JTKTEST ID 1030-1200 – Group")
+        #expect(run.policy.decide(purge).kind == .delete)
+        #expect(!run.policy.decide(request("DELETE", "https://graph.microsoft.com/v1.0/directory/deletedItems/33333333-2222-4333-8444-555555555555",
+                                           headers: bearer)).isAllowed, "only that one")
+        #expect(throws: LiveCheckRun.RunError.self) {
+            try run.adoptDeletedGroupForPurge(role: "jamf-test-a", id: group, name: "JTKTEST ID 1030-1200 – Group")
+        }
+    }
+
+    @Test("Without writes nothing is adopted for a purge")
+    func noPurgeWithoutWrites() throws {
+        let run = try run(upstream: LiveCheckNetwork.makeUpstream(), writes: false)
+        #expect(throws: LiveCheckRun.RunError.self) {
+            try run.adoptDeletedGroupForPurge(role: "intune-test", id: group, name: "JTKTEST ID 1030-1200 – Group")
+        }
+    }
+
+    @Test("A purge is read back longer, and recorded as not confirmed while Entra still shows it")
+    func purgeReadBack() async throws {
+        let server = MockServer { request in request.method == "DELETE" ? .json(204, "") : .json(200, #"{"id":"x"}"#) }
+        let run = try run(upstream: server.session)
+        try run.adoptDeletedGroupForPurge(role: "intune-test", id: group, name: "JTKTEST ID 1030-1200 – Group")
+        var purge = URLRequest(url: URL(string: "https://graph.microsoft.com/v1.0/directory/deletedItems/\(group)")!)
+        purge.httpMethod = "DELETE"
+        purge.setValue(bearer["Authorization"], forHTTPHeaderField: "Authorization")
+        _ = try await run.network.session.data(for: purge)
+        #expect(server.requests.filter { $0.method == "GET" }.count == 5, "the recycle bin's longer read-back")
+        #expect(run.network.deletes.first?.confirmed == false)
+        #expect(run.notRemoved.isEmpty, "not a ledger object: a note, never a failure")
+    }
+}

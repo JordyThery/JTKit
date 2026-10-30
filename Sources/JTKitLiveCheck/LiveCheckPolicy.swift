@@ -75,6 +75,9 @@ public nonisolated final class LiveCheckPolicy: @unchecked Sendable {
     public let writesAllowed: Bool
 
     private let lock = NSLock()
+    /// Earlier runs' JTKTEST groups in Entra's recycle bin the sweep may
+    /// purge, by target (0.12.7; `LiveCheckRun.adoptDeletedGroupForPurge`).
+    private var purgeable: [String: Set<String>] = [:]
     /// Apple's access tokens, which carry no organisation, by the client they were issued to.
     private var appleTokens: [String: String] = [:]
 
@@ -88,6 +91,12 @@ public nonisolated final class LiveCheckPolicy: @unchecked Sendable {
         self.includeProduction = includeProduction
         self.prefix = prefix
         self.ledger = ledger
+    }
+
+    /// Allows the permanent delete of one deleted group (named as a test
+    /// object; checked by `LiveCheckRun`).
+    func allowPurge(target: String, id: String) {
+        lock.withLock { purgeable[target.lowercased(), default: []].insert(id.lowercased()) }
     }
 
     /// Remembers an Apple access token issued to an allow-listed client.
@@ -218,8 +227,10 @@ public nonisolated final class LiveCheckPolicy: @unchecked Sendable {
                 // this run created (not one an earlier run left) and already
                 // deleted (0.12.5).
                 guard request.method == "DELETE" else { return .refuse("Only a permanent delete is sent to deleted items") }
-                guard let group = ledger.item(target: target, resource: "groups", id: deleted), !group.fromSweep, group.removed else {
-                    return .refuse("deleted item \(deleted) isn't a group this run created and removed: permanent delete refused")
+                let ownGroup = ledger.item(target: target, resource: "groups", id: deleted).map { !$0.fromSweep && $0.removed } ?? false
+                let adopted = lock.withLock { purgeable[target.lowercased()]?.contains(deleted.lowercased()) == true }
+                guard ownGroup || adopted else {
+                    return .refuse("deleted item \(deleted) isn't a group this run created and removed, nor a JTKTEST group the sweep found: permanent delete refused")
                 }
                 return .allow(.init(kind: .delete, role: role, target: target, resource: "deleteditems", id: deleted))
             }

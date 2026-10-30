@@ -51,6 +51,10 @@
 # (a live step fails after creating objects), interrupt-live (stage 4 is killed
 # without cleanup once objects exist; the next run must find and remove them).
 # Apps may add their own cases (APP_FAULTS).
+#
+# A check that can't run (a Python block or a command that fails, an
+# unreadable file) fails the run and is named in the report (0.12.7); only a
+# file that isn't there yet counts as "none".
 # Without --fault no fault can be on: inherited fault variables are cleared.
 #
 # Secrets: read from the login Keychain into TEST_RUNNER_* variables only,
@@ -67,6 +71,9 @@ RC_RETRY_PATTERN='Test Case .*(passed|failed|skipped)|Test .* (passed|failed|ski
 rc_log() { print -r -- "[$(date +%H:%M:%S)] $*" | tee -a "$RC_RUN/run.log" }
 rc_stage() { RC_STAGE_NAMES+=("$1"); RC_STAGE_STATUS+=("$2"); rc_log "Stage $1: $2" }
 rc_fail() { rc_log "FAILED: $*"; RC_FAILED="$*"; exit 1 }
+# A check that couldn't run (a Python block or command that failed) fails the
+# run, named in the report (0.12.7): never skipped, never taken as passed.
+rc_check_failed() { rc_log "CHECK FAILED: $*"; RC_CHECK_ERRORS+=("$*") }
 
 # MARK: Preflight
 
@@ -107,7 +114,7 @@ rc_read_credentials() {
         role="${spec%%:*}"; service="${${spec#*:}%%:*}"; item="${spec##*:}"
         # A role left out of this run (production without --include-production): not read.
         (( ${RC_ROLES[(Ie)$role]} )) || continue
-        kc="$(rc_keychain_service "$role" "$service")"
+        kc="$(rc_keychain_service "$role" "$service")" || rc_fail "Check failed: reading the allow-list's Keychain service for $role ($service)"
         [[ -n "$kc" ]] || rc_fail "The allow-list names no Keychain service for $role ($service)"
         account="$item"
         [[ "$kc" == "be.jordythery.release-check" ]] && account="$role/$item"
@@ -130,13 +137,17 @@ rc_forget_credentials() {
 # MARK: Fingerprint (no secrets read)
 
 rc_fingerprint() {
-    local out="$1" item
-    : > "$out.names"
+    local out="$1" item hash
+    : > "$out.names" || { rc_check_failed "fingerprint: can't write $out.names"; return 1 }
     for item in "${FINGERPRINT_PATHS[@]}"; do
         if [[ -d "$item" ]]; then
-            print -r -- "dir $item $(cd "$item" && find . -type f -print0 | sort -z | xargs -0 shasum -a 256 2>/dev/null | shasum -a 256 | cut -c1-16)" >> "$out.names"
+            # Every file must be readable: an unreadable one fails the check.
+            hash="$(cd "$item" && find . -type f -print0 | sort -z | xargs -0 shasum -a 256 | shasum -a 256 | cut -c1-16)" \
+                || rc_check_failed "fingerprint of the folder $item"
+            print -r -- "dir $item $hash" >> "$out.names"
         elif [[ -f "$item" ]]; then
-            print -r -- "file $item $(shasum -a 256 < "$item" | cut -c1-16)" >> "$out.names"
+            hash="$(shasum -a 256 < "$item" | cut -c1-16)" || rc_check_failed "fingerprint of the file $item"
+            print -r -- "file $item $hash" >> "$out.names"
         else
             print -r -- "absent $item" >> "$out.names"
         fi
@@ -145,17 +156,20 @@ rc_fingerprint() {
     local pair domain key value
     for pair in "${FINGERPRINT_DEFAULTS[@]}"; do
         domain="${pair%% *}"; key="${pair#* }"
+        # defaults read answers 1 for a missing key: that is "absent".
         if value="$(/usr/bin/defaults read "$domain" "$key" 2>/dev/null)"; then
-            print -r -- "defaults $domain $key $(print -rn -- "$value" | shasum -a 256 | cut -c1-16)" >> "$out.names"
+            hash="$(print -rn -- "$value" | shasum -a 256 | cut -c1-16)" || rc_check_failed "fingerprint of the setting $key"
+            print -r -- "defaults $domain $key $hash" >> "$out.names"
         else
             print -r -- "defaults $domain $key absent" >> "$out.names"
         fi
     done
     unset value
     # Keychain item names only: service and account attributes, never data.
-    local prefix
+    local prefix names
     for prefix in "${KEYCHAIN_PREFIXES[@]}"; do
-        security dump-keychain "$HOME/Library/Keychains/login.keychain-db" 2>/dev/null | "$RC_PY" -c '
+        # A Keychain that can't be listed (locked) fails the check, never "no items".
+        names="$(security dump-keychain "$HOME/Library/Keychains/login.keychain-db" | "$RC_PY" -c '
 import sys, re
 prefix = sys.argv[1]; acct = None; items = []
 for line in sys.stdin:
@@ -165,9 +179,10 @@ for line in sys.stdin:
     m = re.search(r"\"svce\"<blob>=\"(.*)\"", line)
     if m and m.group(1).startswith(prefix): items.append(m.group(1) + " / " + (acct or ""))
 for i in sorted(set(items)): print("keychain " + i)
-' "$prefix" >> "$out.names"
+' "$prefix")" || { rc_check_failed "fingerprint of the Keychain items $prefix…"; continue }
+        [[ -n "$names" ]] && print -r -- "$names" >> "$out.names"
     done
-    shasum -a 256 < "$out.names" | cut -c1-16 > "$out"
+    shasum -a 256 < "$out.names" | cut -c1-16 > "$out" || rc_check_failed "fingerprint: hashing $out.names"
 }
 
 # MARK: Running tests
@@ -239,11 +254,11 @@ rc_interrupt_live() {
     local selection="$1" name="${1//\//-}"
     rc_log "  live (to be interrupted): $selection"
     "${RC_XB[@]}" test-without-building -only-testing:"$selection" > "$RC_RUN/logs/$name.interrupted.log" 2>&1 &
-    local xb=$! waited=0
+    local xb=$! waited=0 count
     while (( waited < 900 )); do
-        local count=$("$RC_PY" -c 'import json,sys
+        count=$("$RC_PY" -c 'import json,sys
 try: print(len(json.load(open(sys.argv[1]))))
-except Exception: print(0)' "$RC_LIVE_DIR/ledger.json")
+except FileNotFoundError: print(0)' "$RC_LIVE_DIR/ledger.json") || { rc_check_failed "counting the ledger while interrupting"; break }
         (( count >= 2 )) && break
         kill -0 $xb 2>/dev/null || break
         sleep 2; (( waited += 2 ))
@@ -329,7 +344,7 @@ for name in sorted(os.listdir(parent)):
     try:
         with open(os.path.join(folder, "ledger.json")) as f: items = json.load(f)
     except FileNotFoundError: items = []
-    except Exception as error:
+    except (OSError, ValueError) as error:
         print(f"Unreadable ledger in {name}: {error}"); sys.exit(1)
     left = [i for i in items if not i.get("removed")]
     # A legacy object an earlier sweep adopted (0.12.5) may be left too.
@@ -369,22 +384,23 @@ rc_live_finish() {
     else
         RC_ALLOWLIST_COPY="unchanged"
     fi
-    local folder
-    for folder in $("$RC_PY" - "$RC_LIVE_DIR" "$RC_RUN/earlier-ledgers.json" <<'EOF'
+    local folder folders
+    folders="$("$RC_PY" - "$RC_LIVE_DIR" "$RC_RUN/earlier-ledgers.json" <<'EOF'
 import json, os, sys
 current, earlier_path = sys.argv[1:3]
 try:
     with open(os.path.join(current, "ledger.json")) as f: items = json.load(f)
-except Exception: items = []
+except FileNotFoundError: items = []
 removed = {(i["target"], i["resource"], i["id"]) for i in items if i.get("removed")}
 if all(i.get("removed") for i in items): print(os.path.basename(current))
 try:
     with open(earlier_path) as f: earlier = json.load(f)
-except Exception: earlier = []
+except FileNotFoundError: earlier = []
 for e in earlier:
     if all(tuple(k) in removed for k in e["items"]): print(e["folder"])
 EOF
-    ); do
+    )" || { rc_check_failed "deciding which live folders are finished"; folders="" }
+    for folder in ${(f)folders}; do
         [[ -n "$folder" && "$folder" != */* && "$folder" != .* && -d "$RC_LIVE_PARENT/$folder" ]] || continue
         rm -rf "$RC_LIVE_PARENT/$folder" && rc_log "Live folder removed: $folder"
     done
@@ -414,7 +430,7 @@ rc_cleanup() {
     if [[ -n "${HOST_KEYCHAIN_TEST:-}" ]] && (( ${RC_BUILT:-0} )); then
         rc_live_environment 0
         export TEST_RUNNER_JTKIT_LIVE_HOST_KEYCHAIN=after
-        rc_test "$HOST_KEYCHAIN_TEST" || rc_log "The test host's Keychain names couldn't be taken after the run"
+        rc_test "$HOST_KEYCHAIN_TEST" || rc_check_failed "the test host's Keychain names after the run (logs/${HOST_KEYCHAIN_TEST//\//-}.*.log)"
         unset TEST_RUNNER_JTKIT_LIVE_HOST_KEYCHAIN
         rc_live_off
     fi
@@ -430,7 +446,12 @@ rc_cleanup() {
 rc_report() {
     local result="passed"
     [[ -n "${RC_FAILED:-}" ]] && result="FAILED: $RC_FAILED"
-    [[ "$(cat "$RC_RUN/fingerprint.before" 2>/dev/null)" != "$(cat "$RC_RUN/fingerprint.after" 2>/dev/null)" ]] && result="FAILED: saved connections or Keychain item names changed"
+    if [[ ! -f "$RC_RUN/fingerprint.before" ]]; then
+        # Stopped before the first fingerprint (e.g. another check held the lock).
+        [[ "$result" == passed ]] && result="FAILED: the fingerprint before the run wasn't taken"
+    elif [[ "$(cat "$RC_RUN/fingerprint.before")" != "$(cat "$RC_RUN/fingerprint.after" 2>/dev/null)" ]]; then
+        result="FAILED: saved connections or Keychain item names changed"
+    fi
     if [[ "${RC_CLEANUP_STATUS:-}" == FAILED* ]]; then
         # The cleanup test can fail on a check of its own after removing
         # everything (an app's last "nothing attempted under tests" step,
@@ -441,15 +462,15 @@ import json, os, sys
 live = sys.argv[1]
 try:
     steps = [json.loads(l) for l in open(os.path.join(live, "results.jsonl")) if l.strip()]
-    path = os.path.join(live, "ledger.json")
-    ledger = json.load(open(path)) if os.path.exists(path) else []
-except Exception:
+except FileNotFoundError:
     sys.exit(0)
+path = os.path.join(live, "ledger.json")
+ledger = json.load(open(path)) if os.path.exists(path) else []
 last = max((i for i, s in enumerate(steps) if s.get("step") == "cleanup"), default=None)
 if last is None or not steps[last].get("passed") or any(not i.get("removed") for i in ledger):
     sys.exit(0)
 print("; ".join(dict.fromkeys(s["step"] for s in steps[last + 1:] if not s.get("passed"))))
-' "$RC_RUN/live")"
+' "$RC_RUN/live")" || rc_check_failed "reading the cleanup's results"
         if [[ -n "$after_cleanup" ]]; then
             RC_CLEANUP_STATUS="passed (every test object removed); the cleanup test then failed on: $after_cleanup"
             [[ "$result" == passed ]] && result="FAILED: $after_cleanup"
@@ -464,9 +485,10 @@ print("; ".join(dict.fromkeys(s["step"] for s in steps[last + 1:] if not s.get("
     not_removed="$("$RC_PY" -c '
 import json, sys
 try: items = json.load(open(sys.argv[1]))
-except Exception: items = []
-print("; ".join(f"{i[\"resource\"]} {i[\"id\"]} “{i[\"name\"]}”" for i in items if not i.get("removed")))
-' "$RC_RUN/live/ledger.json")"
+except FileNotFoundError: items = []
+left = [i for i in items if not i.get("removed")]
+print("; ".join("%s %s “%s”" % (i.get("resource", ""), i.get("id", ""), i.get("name", "")) for i in left))
+' "$RC_RUN/live/ledger.json")" || rc_check_failed "the ledger's not-removed objects"
     [[ -n "$not_removed" ]] && result="FAILED: not removed (a read-back still finds them): $not_removed"
     # The test host's Keychain names (0.12.5): both taken, and equal.
     RC_HOST_KEYCHAIN=""
@@ -474,38 +496,46 @@ print("; ".join(f"{i[\"resource\"]} {i[\"id\"]} “{i[\"name\"]}”" for i in it
         local hb="$RC_RUN/live/host-keychain.before" ha="$RC_RUN/live/host-keychain.after"
         if [[ ! -f "$hb" || ! -f "$ha" ]]; then
             RC_HOST_KEYCHAIN="FAILED: not taken both before and after"
-        elif cmp -s "$hb" "$ha"; then
-            RC_HOST_KEYCHAIN="unchanged ($(grep -c . "$hb") items, $(shasum -a 256 < "$hb" | cut -c1-16))"
         else
-            RC_HOST_KEYCHAIN="CHANGED (before $(shasum -a 256 < "$hb" | cut -c1-16), after $(shasum -a 256 < "$ha" | cut -c1-16))"
+            local hbh hah
+            hbh="$(shasum -a 256 < "$hb" | cut -c1-16)" && hah="$(shasum -a 256 < "$ha" | cut -c1-16)" \
+                || rc_check_failed "comparing the test host's Keychain names"
+            if [[ -n "$hbh" && "$hbh" == "$hah" ]]; then
+                RC_HOST_KEYCHAIN="unchanged ($(grep -c . "$hb") items, $hbh)"
+            else
+                RC_HOST_KEYCHAIN="CHANGED (before $hbh, after $hah)"
+            fi
         fi
         [[ "$RC_HOST_KEYCHAIN" != unchanged* && "$result" == passed ]] && result="FAILED: the test host's Keychain item names: $RC_HOST_KEYCHAIN"
+    fi
+    # A check that couldn't run fails the run, named (0.12.7).
+    if (( ${#RC_CHECK_ERRORS} )); then
+        local checks="a check couldn't run: ${(j:; :)RC_CHECK_ERRORS}"
+        if [[ "$result" == passed ]]; then result="FAILED: $checks"; else result="$result; $checks"; fi
     fi
     if [[ -n "$RC_FAULT" && "$result" == "passed" ]]; then
         result="FAILED: the injected fault ($RC_FAULT) didn't stop the check"
     fi
     RC_LIVE_IN_CONTAINER="${TEST_HOST_CONTAINER:-}" RC_ALLOWLIST_COPY="${RC_ALLOWLIST_COPY:-}" \
     RC_READ_ONLY_ROLES="${(j:, :)READ_ONLY_ROLES}" RC_HOST_KEYCHAIN="${RC_HOST_KEYCHAIN:-}" \
+    RC_CHECK_ERRORS_TEXT="${(j:|:)RC_CHECK_ERRORS}" \
     "$RC_PY" - "$RC_RUN" "$APP_NAME" "$result" "$RC_KIND" "$RC_JTKIT" "${RC_CLEANUP_STATUS:-not needed}" \
         "${(j:|:)RC_STAGE_NAMES}" "${(j:|:)RC_STAGE_STATUS}" <<'EOF'
 import json, os, sys
 run, app, status, kind, jtkit, cleanup, names, statuses = sys.argv[1:9]
+# A file that isn't there is "none"; one that can't be read fails the report.
 def load(path, default):
     try:
         with open(os.path.join(run, path)) as f: return json.load(f)
-    except Exception: return default
-results = []
-try:
-    with open(os.path.join(run, "live", "results.jsonl")) as f:
-        results = [json.loads(l) for l in f if l.strip()]
-except Exception: pass
+    except FileNotFoundError: return default
+def lines_of(path):
+    try:
+        with open(os.path.join(run, path)) as f: return [json.loads(l) for l in f if l.strip()]
+    except FileNotFoundError: return []
+results = lines_of("live/results.jsonl")
 ledger = load("live/ledger.json", [])
 # Each test process appends its refusals to refusals.jsonl as they happen (0.12.3).
-refusals = []
-try:
-    with open(os.path.join(run, "live", "refusals.jsonl")) as f:
-        refusals = [json.loads(l) for l in f if l.strip()]
-except Exception: pass
+refusals = lines_of("live/refusals.jsonl")
 before = open(os.path.join(run, "fingerprint.before")).read().strip() if os.path.exists(os.path.join(run, "fingerprint.before")) else "?"
 after = open(os.path.join(run, "fingerprint.after")).read().strip() if os.path.exists(os.path.join(run, "fingerprint.after")) else "?"
 lines = [f"# Release check: {app}", "", f"- Result: **{status}**", f"- Kind: {kind}", f"- JTKit: {jtkit}", ""]
@@ -536,11 +566,7 @@ if os.environ.get("RC_LIVE_IN_CONTAINER"):
 for i in left:
     lines.append(f"- **Not removed:** {i['resource']} {i['id']} “{i['name']}”")
 # Every delete is confirmed by a read-back (0.12.6).
-deletes = []
-try:
-    with open(os.path.join(run, "live", "deletes.jsonl")) as f:
-        deletes = [json.loads(l) for l in f if l.strip()]
-except Exception: pass
+deletes = lines_of("live/deletes.jsonl")
 if deletes:
     confirmed = sum(1 for d in deletes if d.get("confirmed"))
     fallback = sum(1 for d in deletes if d.get("throughJamfPro"))
@@ -553,14 +579,15 @@ if os.environ.get("RC_READ_ONLY_ROLES"):
     lines.append(f"- Kept read only for this app: {os.environ['RC_READ_ONLY_ROLES']}")
 # Apple requests per organisation (0.12.4): role and time only.
 apple = {}
-try:
-    with open(os.path.join(run, "live", "apple-requests.jsonl")) as f:
-        for l in f:
-            if l.strip(): apple[json.loads(l)["role"]] = apple.get(json.loads(l)["role"], 0) + 1
-except Exception: pass
+for entry in lines_of("live/apple-requests.jsonl"):
+    apple[entry["role"]] = apple.get(entry["role"], 0) + 1
 if apple:
     lines += ["", "## Apple requests (paced to 9 a minute, at most 40 a run per organisation)", ""]
     lines += [f"- {role}: {count}" for role, count in sorted(apple.items())]
+checks = [c for c in os.environ.get("RC_CHECK_ERRORS_TEXT", "").split("|") if c]
+if checks:
+    lines += ["", f"## Checks that couldn't run ({len(checks)})", ""]
+    lines += [f"- **{c}**" for c in checks]
 lines += ["", f"## Refused requests ({len(refusals)})", ""]
 lines += [f"- {r['method']} {r['location']}: {r['reason']}" for r in refusals] or ["None."]
 lines += ["", "## Saved connections and Keychain item names", "",
@@ -571,6 +598,13 @@ if os.environ.get("RC_HOST_KEYCHAIN"):
 open(os.path.join(run, "report.md"), "w").write("\n".join(lines) + "\n")
 print("\n".join(lines))
 EOF
+    if (( $? )); then
+        # The report itself couldn't be written: a short one says so, FAILED.
+        print -r -- "# Release check: $APP_NAME
+
+- Result: **FAILED: the report couldn't be written (see run.log); $result**" | tee "$RC_RUN/report.md"
+        rc_log "CHECK FAILED: writing the report"
+    fi
 }
 
 # MARK: Main
@@ -606,7 +640,7 @@ release_check_main() {
     RC_PACKAGES="$RC_DERIVED/SourcePackages"
     RC_WORKSPACE="${JTKIT_WORKSPACE:-$HOME/Developer/Apps.xcworkspace}"
     RC_ROLES=("${ROLES[@]}")
-    RC_STAGE_NAMES=() RC_STAGE_STATUS=() RC_SECRET_VARS=() RC_CLEANED=0 RC_LIVE_STARTED=0 RC_FAILED="" RC_BUILT=0
+    RC_STAGE_NAMES=() RC_STAGE_STATUS=() RC_SECRET_VARS=() RC_CLEANED=0 RC_LIVE_STARTED=0 RC_FAILED="" RC_BUILT=0 RC_CHECK_ERRORS=()
     RC_LIVE_DIR="$RC_RUN/live" RC_LIVE_ALLOWLIST="$RC_ALLOWLIST" RC_LIVE_PARENT="" RC_ALLOWLIST_COPY=""
     mkdir -p "$RC_RUN/logs" "$RC_RUN/results" "$RC_RUN/live" && chmod 700 "$RC_BASE" "$RC_RUN"
     RC_READY=1 RC_LOCKED=0
@@ -628,10 +662,16 @@ release_check_main() {
     rc_check_allowlist
     rc_live_setup
     if (( RC_ALL_TENANTS )); then
-        RC_ROLES=($("$RC_PY" -c 'import json,sys; print(" ".join(sorted({t["role"] for t in json.load(open(sys.argv[1]))["tenants"] if sys.argv[2]=="1" or not t.get("production")})))' "$RC_ALLOWLIST" "$RC_PRODUCTION"))
+        local all_roles
+        all_roles="$("$RC_PY" -c 'import json,sys; print(" ".join(sorted({t["role"] for t in json.load(open(sys.argv[1]))["tenants"] if sys.argv[2]=="1" or not t.get("production")})))' "$RC_ALLOWLIST" "$RC_PRODUCTION")" \
+            || rc_fail "Check failed: reading the roles from the allow-list"
+        RC_ROLES=(${=all_roles})
     elif (( ! RC_PRODUCTION )); then
         # The app's production roles take part only with --include-production.
-        RC_ROLES=($("$RC_PY" -c 'import json,sys; prod={t["role"] for t in json.load(open(sys.argv[1]))["tenants"] if t.get("production")}; print(" ".join(r for r in sys.argv[2:] if r not in prod))' "$RC_ALLOWLIST" "${ROLES[@]}"))
+        local kept_roles
+        kept_roles="$("$RC_PY" -c 'import json,sys; prod={t["role"] for t in json.load(open(sys.argv[1]))["tenants"] if t.get("production")}; print(" ".join(r for r in sys.argv[2:] if r not in prod))' "$RC_ALLOWLIST" "${ROLES[@]}")" \
+            || rc_fail "Check failed: reading the production roles from the allow-list"
+        RC_ROLES=(${=kept_roles})
         local left_out=() role
         for role in "${ROLES[@]}"; do (( ${RC_ROLES[(Ie)$role]} )) || left_out+=("$role"); done
         (( ${#left_out} )) && rc_log "Left out (production, no --include-production): ${(j:, :)left_out}"

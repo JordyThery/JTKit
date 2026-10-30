@@ -21,14 +21,18 @@ public nonisolated struct LiveCheckRefused: LocalizedError, Sendable {
 public nonisolated struct ReadBack: Sendable {
     public var attempts: Int
     public var interval: TimeInterval
+    /// For a permanent delete from Entra's recycle bin, which Entra can
+    /// keep showing for a while (0.12.7).
+    public var recycleBinAttempts: Int
 
-    public init(attempts: Int, interval: TimeInterval) {
+    public init(attempts: Int, interval: TimeInterval, recycleBinAttempts: Int? = nil) {
         self.attempts = attempts
         self.interval = interval
+        self.recycleBinAttempts = recycleBinAttempts ?? attempts
     }
 
-    /// About a minute.
-    public static let standard = ReadBack(attempts: 12, interval: 5)
+    /// About a minute; two for the recycle bin.
+    public static let standard = ReadBack(attempts: 12, interval: 5, recycleBinAttempts: 24)
 }
 
 /// What a delete's read-back found, one JSON line each in the run's
@@ -178,14 +182,15 @@ extension LiveCheckNetwork {
         // object stays outstanding and the client may try again.
         guard (200..<300).contains(status) || status == 404 || status == 410 else { return }
         let item = policy.ledger.item(target: allowed.target, resource: resource, id: id)
-        var gone = waitUntilGone(request, resource: resource, id: id)
+        let attempts = resource == "deleteditems" ? readBack.recycleBinAttempts : readBack.attempts
+        var gone = waitUntilGone(request, resource: resource, id: id, attempts: attempts)
         var throughJamfPro = false
         // A Platform device group the Platform delete left in place: once
         // more through the Jamf Pro API, only for a group in this run's
         // ledger, matched by its Platform ID and exact name.
         if !gone, let item, !item.removed, Self.isPlatformDeviceGroup(request.url) {
             throughJamfPro = deleteThroughJamfPro(request, item: item)
-            if throughJamfPro { gone = waitUntilGone(request, resource: resource, id: id) }
+            if throughJamfPro { gone = waitUntilGone(request, resource: resource, id: id, attempts: attempts) }
         }
         if gone, item != nil {
             policy.ledger.markRemoved(target: allowed.target, resource: resource, id: id)
@@ -200,8 +205,8 @@ extension LiveCheckNetwork {
         }
     }
 
-    private func waitUntilGone(_ request: URLRequest, resource: String, id: String) -> Bool {
-        for attempt in 0..<max(1, readBack.attempts) {
+    private func waitUntilGone(_ request: URLRequest, resource: String, id: String, attempts: Int) -> Bool {
+        for attempt in 0..<max(1, attempts) {
             if attempt > 0 { Thread.sleep(forTimeInterval: readBack.interval) }
             switch isGone(request, id: id) {
             case true?: return true
