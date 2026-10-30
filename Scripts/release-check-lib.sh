@@ -20,6 +20,12 @@
 #     its tests through JTKIT_LIVE_FAULT; the report says FAULT TEST as for the others
 #   READ_ONLY_ROLES=(…)   optional (0.12.4): roles this app keeps read only,
 #     whatever access the allow-list grants (stricter only, never looser)
+#   HOST_KEYCHAIN_TEST="<selection>"   optional (0.12.5): a test in the app's
+#     test host that calls LiveCheckRun.recordHostKeychainNames(services:), for
+#     Keychain items `security` can't list (the data-protection keychain, e.g.
+#     MSAL's cache in its own access group). Run after the build ("before")
+#     and after cleanup ("after"), also when stage 4 didn't run; only hashes of
+#     the item names are written, and the two must be equal.
 #
 # Apple Business / School Manager (0.12.4): every request to an organisation,
 # sign-in included, is paced to 9 a minute and capped at 40 a run (all test
@@ -311,7 +317,7 @@ rc_live_setup() {
     rc_log "Live folder (in the app's container, 700): ${RC_LIVE_DIR:t}"
     # Earlier runs' outstanding objects join this run's ledger, so this run's
     # cleanup removes them; their folders are listed for rc_live_finish.
-    "$RC_PY" - "$RC_LIVE_PARENT" "$RC_LIVE_DIR" "$RC_RUN/earlier-ledgers.json" <<'EOF' || rc_fail "An earlier run's ledger can't be used (see run.log)"
+    RC_LEGACY="${LEGACY_PREFIXES:-}" "$RC_PY" - "$RC_LIVE_PARENT" "$RC_LIVE_DIR" "$RC_RUN/earlier-ledgers.json" <<'EOF' || rc_fail "An earlier run's ledger can't be used (see run.log)"
 import json, os, sys
 parent, current, out = sys.argv[1:4]
 ledger_path = os.path.join(current, "ledger.json")
@@ -326,8 +332,10 @@ for name in sorted(os.listdir(parent)):
     except Exception as error:
         print(f"Unreadable ledger in {name}: {error}"); sys.exit(1)
     left = [i for i in items if not i.get("removed")]
+    # A legacy object an earlier sweep adopted (0.12.5) may be left too.
+    names = ("JTKTEST ",) + tuple(p for p in os.environ.get("RC_LEGACY", "").split("|") if p)
     for i in left:
-        if not i.get("name", "").startswith("JTKTEST "):
+        if not i.get("name", "").startswith(names):
             print(f"{name}'s ledger lists “{i.get('name')}”, which isn't named as a test object"); sys.exit(1)
     earlier.append({"folder": name, "items": [list(key(i)) for i in left]})
     for i in left:
@@ -344,7 +352,7 @@ EOF
 rc_live_sync() {
     [[ -n "${RC_LIVE_PARENT:-}" && -d "$RC_LIVE_DIR" ]] || return 0
     local file
-    for file in ledger.json results.jsonl refusals.jsonl apple-requests.jsonl; do
+    for file in ledger.json results.jsonl refusals.jsonl apple-requests.jsonl host-keychain.before host-keychain.after; do
         [[ -f "$RC_LIVE_DIR/$file" ]] && cp "$RC_LIVE_DIR/$file" "$RC_RUN/live/$file"
     done
     return 0
@@ -403,6 +411,13 @@ rc_cleanup() {
     fi
     rc_live_off
     rc_forget_credentials
+    if [[ -n "${HOST_KEYCHAIN_TEST:-}" ]] && (( ${RC_BUILT:-0} )); then
+        rc_live_environment 0
+        export TEST_RUNNER_JTKIT_LIVE_HOST_KEYCHAIN=after
+        rc_test "$HOST_KEYCHAIN_TEST" || rc_log "The test host's Keychain names couldn't be taken after the run"
+        unset TEST_RUNNER_JTKIT_LIVE_HOST_KEYCHAIN
+        rc_live_off
+    fi
     [[ -n "${RC_CAFFEINATE:-}" ]] && kill "$RC_CAFFEINATE" 2>/dev/null
     rc_live_sync
     rc_live_finish
@@ -443,11 +458,24 @@ print("; ".join(dict.fromkeys(s["step"] for s in steps[last + 1:] if not s.get("
         fi
     fi
     [[ "${RC_ALLOWLIST_COPY:-}" == FAILED* ]] && result="$RC_ALLOWLIST_COPY"
+    # The test host's Keychain names (0.12.5): both taken, and equal.
+    RC_HOST_KEYCHAIN=""
+    if [[ -n "${HOST_KEYCHAIN_TEST:-}" ]] && (( ${RC_BUILT:-0} )); then
+        local hb="$RC_RUN/live/host-keychain.before" ha="$RC_RUN/live/host-keychain.after"
+        if [[ ! -f "$hb" || ! -f "$ha" ]]; then
+            RC_HOST_KEYCHAIN="FAILED: not taken both before and after"
+        elif cmp -s "$hb" "$ha"; then
+            RC_HOST_KEYCHAIN="unchanged ($(grep -c . "$hb") items, $(shasum -a 256 < "$hb" | cut -c1-16))"
+        else
+            RC_HOST_KEYCHAIN="CHANGED (before $(shasum -a 256 < "$hb" | cut -c1-16), after $(shasum -a 256 < "$ha" | cut -c1-16))"
+        fi
+        [[ "$RC_HOST_KEYCHAIN" != unchanged* && "$result" == passed ]] && result="FAILED: the test host's Keychain item names: $RC_HOST_KEYCHAIN"
+    fi
     if [[ -n "$RC_FAULT" && "$result" == "passed" ]]; then
         result="FAILED: the injected fault ($RC_FAULT) didn't stop the check"
     fi
     RC_LIVE_IN_CONTAINER="${TEST_HOST_CONTAINER:-}" RC_ALLOWLIST_COPY="${RC_ALLOWLIST_COPY:-}" \
-    RC_READ_ONLY_ROLES="${(j:, :)READ_ONLY_ROLES}" \
+    RC_READ_ONLY_ROLES="${(j:, :)READ_ONLY_ROLES}" RC_HOST_KEYCHAIN="${RC_HOST_KEYCHAIN:-}" \
     "$RC_PY" - "$RC_RUN" "$APP_NAME" "$result" "$RC_KIND" "$RC_JTKIT" "${RC_CLEANUP_STATUS:-not needed}" \
         "${(j:|:)RC_STAGE_NAMES}" "${(j:|:)RC_STAGE_STATUS}" <<'EOF'
 import json, os, sys
@@ -514,6 +542,8 @@ lines += [f"- {r['method']} {r['location']}: {r['reason']}" for r in refusals] o
 lines += ["", "## Saved connections and Keychain item names", "",
           f"- Fingerprint before: {before}", f"- Fingerprint after: {after}",
           "- " + ("Unchanged." if before == after else "**CHANGED** (compare fingerprint.before.names and fingerprint.after.names)")]
+if os.environ.get("RC_HOST_KEYCHAIN"):
+    lines.append(f"- Keychain item names seen by the test host (hashes only): {os.environ['RC_HOST_KEYCHAIN']}")
 open(os.path.join(run, "report.md"), "w").write("\n".join(lines) + "\n")
 print("\n".join(lines))
 EOF
@@ -552,7 +582,7 @@ release_check_main() {
     RC_PACKAGES="$RC_DERIVED/SourcePackages"
     RC_WORKSPACE="${JTKIT_WORKSPACE:-$HOME/Developer/Apps.xcworkspace}"
     RC_ROLES=("${ROLES[@]}")
-    RC_STAGE_NAMES=() RC_STAGE_STATUS=() RC_SECRET_VARS=() RC_CLEANED=0 RC_LIVE_STARTED=0 RC_FAILED=""
+    RC_STAGE_NAMES=() RC_STAGE_STATUS=() RC_SECRET_VARS=() RC_CLEANED=0 RC_LIVE_STARTED=0 RC_FAILED="" RC_BUILT=0
     RC_LIVE_DIR="$RC_RUN/live" RC_LIVE_ALLOWLIST="$RC_ALLOWLIST" RC_LIVE_PARENT="" RC_ALLOWLIST_COPY=""
     mkdir -p "$RC_RUN/logs" "$RC_RUN/results" "$RC_RUN/live" && chmod 700 "$RC_BASE" "$RC_RUN"
     RC_READY=1 RC_LOCKED=0
@@ -591,6 +621,14 @@ release_check_main() {
         rc_stage "1 build" "FAILED"
         grep -E "error:" "$RC_RUN/logs/build.log" | head -20 | tee -a "$RC_RUN/run.log"
         rc_fail "The build failed (logs/build.log)"
+    fi
+    RC_BUILT=1
+    if [[ -n "${HOST_KEYCHAIN_TEST:-}" ]]; then
+        rc_live_environment 0
+        export TEST_RUNNER_JTKIT_LIVE_HOST_KEYCHAIN=before
+        rc_test "$HOST_KEYCHAIN_TEST" || { rc_stage "1 build and sign in" "FAILED"; rc_fail "The test host's Keychain names couldn't be taken (logs/${HOST_KEYCHAIN_TEST//\//-}.*.log)"; }
+        unset TEST_RUNNER_JTKIT_LIVE_HOST_KEYCHAIN
+        rc_live_off
     fi
     rc_read_credentials
     rc_live_environment 0

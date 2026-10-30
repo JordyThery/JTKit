@@ -207,6 +207,39 @@ struct MicrosoftSignInTests {
         #expect(try MicrosoftSignIn.authorityURL(tenantID: " contoso.com ").absoluteString == "https://login.microsoftonline.com/contoso.com")
         #expect(throws: MicrosoftSignInError.missingTenantID) { try MicrosoftSignIn.authorityURL(tenantID: " ") }
     }
+    @Test("A silent-only token never opens the window: interaction needed is an error (0.12.5)")
+    func silentOnlyNeverOpensTheWindow() async throws {
+        let fake = FakeMSAL(accounts: [Self.account])
+        fake.granted = Set(Self.read.map { $0.lowercased() })
+        let microsoft = try signIn(fake)
+        let token = try await microsoft.silentToken(for: Self.account, tenantID: Self.tenant, scopes: Self.read)
+        #expect(token.accessToken == "silent")
+        await #expect(throws: MicrosoftSignInError.interactionRequired) {
+            try await microsoft.silentToken(for: Self.account, tenantID: Self.tenant, scopes: Self.write)
+        }
+        fake.expired = true
+        await #expect(throws: MicrosoftSignInError.interactionRequired) {
+            try await microsoft.silentToken(for: Self.account, tenantID: Self.tenant, scopes: Self.read)
+        }
+        #expect(fake.windows.isEmpty)
+        #expect(microsoft.windowCount == 0)
+    }
+
+    @Test("Strict account: only the one account of exactly this tenant, never the only other one (0.12.5)")
+    func strictAccount() throws {
+        let other = MicrosoftAccount(username: "admin@fabrikam.com", identifier: "uid.other", homeTenantID: "0ther000-0000-0000-0000-000000000000")
+        let microsoft = try signIn(FakeMSAL(accounts: [other]))
+        #expect(microsoft.account(strictlyFor: Self.tenant, identifier: nil) == nil)
+        #expect(microsoft.account(strictlyFor: Self.tenant, identifier: other.identifier) == nil,
+                "a saved identifier of another tenant's account doesn't count")
+        #expect(microsoft.savedAccount(identifier: nil, tenantID: Self.tenant) == other, "the loose lookup still falls back")
+        let both = try signIn(FakeMSAL(accounts: [other, Self.account]))
+        #expect(both.account(strictlyFor: Self.tenant.uppercased(), identifier: nil) == Self.account)
+        #expect(both.account(strictlyFor: Self.tenant, identifier: Self.account.identifier) == Self.account)
+        let twice = MicrosoftAccount(username: "second@contoso.com", identifier: "uid2.tid", homeTenantID: Self.tenant)
+        #expect(try signIn(FakeMSAL(accounts: [Self.account, twice])).account(strictlyFor: Self.tenant, identifier: nil) == nil,
+                "two accounts of the tenant: none chosen")
+    }
 }
 
 @Suite("MSAL notice")

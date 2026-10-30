@@ -57,6 +57,15 @@ public nonisolated final class Ledger: @unchecked Sendable {
         }
     }
 
+    /// The ledger's entry for an object, the ID compared without case (Graph's
+    /// GUIDs come back in either case) (0.12.5).
+    public func item(target: String, resource: String, id: String) -> Item? {
+        let key = Item(target: target, resource: resource, id: id, name: "")
+        return lock.withLock {
+            storage.first { $0.target == key.target && $0.resource == key.resource && $0.id.lowercased() == id.lowercased() }
+        }
+    }
+
     /// Records an object; its name must start with a test prefix.
     public func add(_ item: Item, testPrefixes: [String]) throws {
         guard testPrefixes.contains(where: { item.name.hasPrefix($0) }) else {

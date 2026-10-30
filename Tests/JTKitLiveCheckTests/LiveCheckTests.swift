@@ -1,4 +1,5 @@
 import Foundation
+import Security
 import Testing
 @testable import JTKitLiveCheck
 import JTKitTestSupport
@@ -415,6 +416,129 @@ struct AppleBudgetTests {
     }
 }
 
+// MARK: Graph writes (0.12.5)
+
+@Suite("Live check: Graph writes")
+struct GraphWriteRuleTests {
+    private let bearer = ["Authorization": "Bearer \(jwt(tid: entraTest))"]
+    private let target = "intune:\(entraTest)"
+    private let group = "11111111-2222-4333-8444-555555555555"
+    private let filter = "66666666-2222-4333-8444-555555555555"
+    private let script = "77777777-2222-4333-8444-555555555555"
+
+    private func policyWithObjects() throws -> LiveCheckPolicy {
+        let policy = makePolicy()
+        try policy.ledger.add(.init(target: target, resource: "groups", id: group, name: "\(prefix) – Group"), testPrefixes: [prefix])
+        try policy.ledger.add(.init(target: target, resource: "assignmentFilters", id: filter, name: "\(prefix) – Filter"), testPrefixes: [prefix])
+        try policy.ledger.add(.init(target: target, resource: "deviceShellScripts", id: script, name: "\(prefix) – Script"), testPrefixes: [prefix])
+        return policy
+    }
+
+    private func assign(_ targets: [[String: Any]]) -> LiveRequest {
+        request("POST", "https://graph.microsoft.com/beta/deviceManagement/deviceShellScripts/\(script)/assign", headers: bearer,
+                json: ["deviceManagementScriptAssignments": targets.map { ["target": $0] }])
+    }
+
+    @Test("Each Intune object type's create is read by its name or displayName")
+    func createsOfEachType() {
+        let policy = makePolicy()
+        let creates: [(String, [String: Any])] = [
+            ("beta/deviceManagement/assignmentFilters", ["displayName": "\(prefix) – F", "rule": "(device.osVersion -startsWith \"15\")"]),
+            ("beta/deviceManagement/deviceShellScripts", ["displayName": "\(prefix) – S", "scriptContent": "ZWNobw=="]),
+            ("beta/deviceManagement/deviceCustomAttributeShellScripts", ["displayName": "\(prefix) – A", "customAttributeName": "a"]),
+            ("beta/deviceManagement/configurationPolicies", ["name": "\(prefix) – C", "settings": [] as [Any]]),
+            ("v1.0/deviceManagement/deviceCompliancePolicies", ["displayName": "\(prefix) – P",
+                "scheduledActionsForRule": [["ruleName": "PasswordRequired",
+                    "scheduledActionConfigurations": [["actionType": "block", "gracePeriodHours": 0]]]]]),
+            ("v1.0/groups", ["displayName": "\(prefix) – G", "securityEnabled": true, "mailEnabled": false]),
+        ]
+        for (path, body) in creates {
+            let decision = policy.decide(request("POST", "https://graph.microsoft.com/\(path)", headers: bearer, json: body))
+            #expect(decision.isAllowed, "\(path): \(decision)")
+        }
+        #expect(!policy.decide(request("POST", "https://graph.microsoft.com/beta/deviceManagement/configurationPolicies",
+                                       headers: bearer, json: ["name": "Contoso – Baseline"])).isAllowed)
+    }
+
+    @Test("Assignments only to a group (and filter) this run created")
+    func assignmentsOnlyToTheRunsGroup() throws {
+        let policy = try policyWithObjects()
+        let toGroup: [String: Any] = ["@odata.type": "#microsoft.graph.groupAssignmentTarget", "groupId": group.uppercased()]
+        #expect(policy.decide(assign([toGroup])).kind == .change)
+        #expect(policy.decide(assign([["@odata.type": "#microsoft.graph.exclusionGroupAssignmentTarget", "groupId": group]])).kind == .change)
+        #expect(policy.decide(assign([toGroup.merging(["deviceAndAppManagementAssignmentFilterId": filter,
+                                                       "deviceAndAppManagementAssignmentFilterType": "include"]) { $1 }])).kind == .change)
+        #expect(policy.decide(assign([])).kind == .change, "removing every assignment is allowed")
+    }
+
+    @Test("All devices, All users, other groups and other filters are refused", arguments: [
+        ["@odata.type": "#microsoft.graph.allDevicesAssignmentTarget"],
+        ["@odata.type": "#microsoft.graph.allLicensedUsersAssignmentTarget"],
+        ["@odata.type": "#microsoft.graph.groupAssignmentTarget", "groupId": "99999999-2222-4333-8444-555555555555"],
+        ["@odata.type": "#microsoft.graph.groupAssignmentTarget"],
+        ["@odata.type": "#microsoft.graph.configurationManagerCollectionAssignmentTarget", "collectionId": "x"],
+        ["groupId": "11111111-2222-4333-8444-555555555555"],
+    ] as [[String: String]])
+    func otherTargetsAreRefused(target: [String: String]) throws {
+        let policy = try policyWithObjects()
+        guard case .refuse(let reason) = policy.decide(assign([target])) else {
+            Issue.record("allowed: \(target)")
+            return
+        }
+        #expect(reason.contains("assignment") || reason.contains("Assignment"))
+    }
+
+    @Test("Refused also next to an allowed target, and with a filter the run didn't create")
+    func mixedTargetsAreRefused() throws {
+        let policy = try policyWithObjects()
+        let toGroup: [String: Any] = ["@odata.type": "#microsoft.graph.groupAssignmentTarget", "groupId": group]
+        #expect(!policy.decide(assign([toGroup, ["@odata.type": "#microsoft.graph.allDevicesAssignmentTarget"]])).isAllowed)
+        #expect(!policy.decide(assign([toGroup.merging(["deviceAndAppManagementAssignmentFilterId": "99999999-2222-4333-8444-555555555555"]) { $1 }])).isAllowed)
+        // A group an earlier run left (merged into the ledger as found) isn't this run's group.
+        try policy.ledger.add(.init(target: target, resource: "groups", id: "88888888-2222-4333-8444-555555555555",
+                                    name: "JTKTEST ID 0101-0000 – Group", fromSweep: true), testPrefixes: ["JTKTEST "])
+        #expect(!policy.decide(assign([["@odata.type": "#microsoft.graph.groupAssignmentTarget",
+                                        "groupId": "88888888-2222-4333-8444-555555555555"]])).isAllowed)
+    }
+
+    @Test("Compliance actions other than block are refused", arguments: ["retire", "wipe", "remoteLock", "notification", "pushNotification"])
+    func complianceActionsOnlyBlock(action: String) throws {
+        let policy = try policyWithObjects()
+        let create = request("POST", "https://graph.microsoft.com/v1.0/deviceManagement/deviceCompliancePolicies", headers: bearer,
+                             json: ["displayName": "\(prefix) – P", "scheduledActionsForRule": [["ruleName": "PasswordRequired",
+                                 "scheduledActionConfigurations": [["actionType": "block"], ["actionType": action]]]]])
+        #expect(!policy.decide(create).isAllowed)
+    }
+
+    @Test("Graph $batch is refused")
+    func batchIsRefused() {
+        let decision = makePolicy().decide(request("POST", "https://graph.microsoft.com/v1.0/$batch", headers: bearer,
+                                                   json: ["requests": [] as [Any]]))
+        guard case .refuse(let reason) = decision else { Issue.record("allowed"); return }
+        #expect(reason.contains("$batch"))
+    }
+
+    @Test("A permanent delete from deleted items only for a group this run created and removed")
+    func permanentDeleteOnlyOfTheRunsRemovedGroup() throws {
+        let policy = try policyWithObjects()
+        let purge = request("DELETE", "https://graph.microsoft.com/v1.0/directory/deletedItems/\(group)", headers: bearer)
+        #expect(!policy.decide(purge).isAllowed, "not deleted yet")
+        policy.ledger.markRemoved(target: target, resource: "groups", id: group)
+        #expect(policy.decide(purge).kind == .delete)
+        #expect(!policy.decide(request("DELETE", "https://graph.microsoft.com/v1.0/directory/deletedItems/\(script)", headers: bearer)).isAllowed,
+                "not a group")
+        #expect(!policy.decide(request("DELETE", "https://graph.microsoft.com/v1.0/directory/deletedItems/99999999-2222-4333-8444-555555555555",
+                                       headers: bearer)).isAllowed)
+        #expect(!policy.decide(request("POST", "https://graph.microsoft.com/v1.0/directory/deletedItems/\(group)/restore",
+                                       headers: bearer)).isAllowed)
+        // An earlier run's group (merged as found) is removed, never purged.
+        let earlier = "88888888-2222-4333-8444-555555555555"
+        try policy.ledger.add(.init(target: target, resource: "groups", id: earlier, name: "JTKTEST ID 0101-0000 – Group",
+                                    removed: true, fromSweep: true), testPrefixes: ["JTKTEST "])
+        #expect(!policy.decide(request("DELETE", "https://graph.microsoft.com/v1.0/directory/deletedItems/\(earlier)", headers: bearer)).isAllowed)
+    }
+}
+
 // MARK: Rule 4: Graph token tenant
 
 @Suite("Live check: rule 4, Graph token tenant")
@@ -640,9 +764,49 @@ struct LiveCheckRunTests {
         #expect(throws: LiveCheckRun.RunError.self) {
             try run.adoptForSweep(role: "intune-test", service: .intune, resource: "groups", id: "x", name: "JTKTEST X")
         }
+        #expect(throws: LiveCheckRun.RunError.self) {
+            try run.adoptForSweep(role: "intune-test", service: .intune, resource: "groups", id: "y", name: "Security")
+        }
         // adopted objects may now be deleted
         let decision = run.policy.decide(request("DELETE", "https://test-a.jamf.example/api/v1/categories/7"))
         #expect(decision.kind == .delete)
+    }
+
+    @Test("Create-and-remove tenants: only legacy test objects are swept, and only while legacy prefixes are passed (0.12.5)")
+    func legacySweepOnCreateAndRemove() throws {
+        var env = try environment()
+        env["JTKIT_LIVE_LEGACY_PREFIXES"] = "[AUTOTEST]|UIT - "
+        let run = try LiveCheckRun(environment: env)
+        #expect(run.isLegacyTestObject("[AUTOTEST] macOS – Script"))
+        #expect(!run.isLegacyTestObject("JTKTEST ID 0101-0000 – Script"))
+        try run.adoptForSweep(role: "intune-test", service: .intune, resource: "deviceShellScripts",
+                              id: "12345678-2222-4333-8444-555555555555", name: "[AUTOTEST] macOS – Script")
+        #expect(run.policy.decide(request("DELETE", "https://graph.microsoft.com/beta/deviceManagement/deviceShellScripts/12345678-2222-4333-8444-555555555555",
+                                          headers: ["Authorization": "Bearer \(jwt(tid: entraTest))"])).kind == .delete)
+        #expect(throws: LiveCheckRun.RunError.self) {
+            try run.adoptForSweep(role: "intune-test", service: .intune, resource: "groups", id: "z", name: "JTKTEST ID 0101-0000 – Group")
+        }
+        env["JTKIT_LIVE_LEGACY_PREFIXES"] = nil
+        let later = try LiveCheckRun(environment: env)
+        #expect(throws: LiveCheckRun.RunError.self) {
+            try later.adoptForSweep(role: "intune-test", service: .intune, resource: "deviceShellScripts", id: "w", name: "[AUTOTEST] macOS – Script")
+        }
+    }
+
+    @Test("The test host's Keychain names are written as hashes only (0.12.5)")
+    func hostKeychainNamesAreHashes() throws {
+        let run = try LiveCheckRun(environment: try environment())
+        let service = "JTKitLiveCheckTests-\(UUID().uuidString)"
+        let add: [String: Any] = [kSecClass as String: kSecClassGenericPassword, kSecAttrService as String: service,
+                                  kSecAttrAccount as String: "account-one", kSecValueData as String: Data("not-read".utf8)]
+        guard SecItemAdd(add as CFDictionary, nil) == errSecSuccess else { return }   // no Keychain here: nothing to check
+        defer { SecItemDelete([kSecClass as String: kSecClassGenericPassword, kSecAttrService as String: service] as CFDictionary) }
+        let lines = try run.recordHostKeychainNames(services: [service], label: "before")
+        #expect(lines.count == 1)
+        let written = try String(contentsOf: run.runFolder.appending(path: "host-keychain.before"), encoding: .utf8)
+        #expect(!written.contains("account-one") && !written.contains(service) && !written.contains("not-read"))
+        #expect(written.hasPrefix("keychain-host ") && written.count == "keychain-host ".count + 16 + 1)
+        #expect(throws: LiveCheckRun.RunError.self) { try run.recordHostKeychainNames(services: [service], label: "../x") }
     }
 
     @Test func objectsMadeByTheEngineNeedTheRunPrefix() throws {

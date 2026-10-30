@@ -60,6 +60,10 @@ public nonisolated enum LiveDecision: Sendable, Equatable {
 ///    object's name starts with the run's prefix; an update or delete is
 ///    refused unless the object is in the ledger. MDM commands are refused.
 /// 4. Graph: the bearer token's tenant ID must be on the allow-list.
+/// 5. Graph writes (0.12.5): no `$batch`; assignments only to a group (and
+///    filter) this run created, never All devices or All users; compliance
+///    actions only "block"; a permanent delete from Entra's deleted items
+///    only for a group this run created and removed.
 public nonisolated final class LiveCheckPolicy: @unchecked Sendable {
     public let entries: [AllowList.Entry]
     public let includeProduction: Bool
@@ -207,6 +211,19 @@ public nonisolated final class LiveCheckPolicy: @unchecked Sendable {
         if Self.isDeviceCommand(lowered, method: request.method) {
             return .refuse("Device commands are never sent in a live check")
         }
+        if target.hasPrefix("intune:") {
+            if let refusal = graphRefusal(request, target: target, path: lowered) { return .refuse(refusal) }
+            if let deleted = Self.deletedItemID(path) {
+                // Entra's recycle bin: a permanent delete, only of a group
+                // this run created (not one an earlier run left) and already
+                // deleted (0.12.5).
+                guard request.method == "DELETE" else { return .refuse("Only a permanent delete is sent to deleted items") }
+                guard let group = ledger.item(target: target, resource: "groups", id: deleted), !group.fromSweep, group.removed else {
+                    return .refuse("deleted item \(deleted) isn't a group this run created and removed: permanent delete refused")
+                }
+                return .allow(.init(kind: .delete, role: role, target: target, resource: "deleteditems", id: deleted))
+            }
+        }
         let reference = Self.objectReference(path)
         switch request.method {
         case "POST" where reference.id == nil || reference.isClassicCreate:
@@ -229,6 +246,74 @@ public nonisolated final class LiveCheckPolicy: @unchecked Sendable {
         default:
             return .refuse("\(request.method) is refused")
         }
+    }
+
+    // MARK: Graph (0.12.5)
+
+    /// Graph writes: no `$batch` (its requests can't be checked one by one);
+    /// assignments only to groups (and filters) this run created, never All
+    /// devices, All users or any other group; compliance actions only "block"
+    /// (retire, wipe, lock and notifications are device actions or reach people).
+    private func graphRefusal(_ request: LiveRequest, target: String, path: String) -> String? {
+        if path.split(separator: "/").contains("$batch") {
+            return "Graph $batch is refused: the requests inside it can't be checked one by one"
+        }
+        guard !request.body.isEmpty, let body = try? JSONSerialization.jsonObject(with: request.body) else { return nil }
+        var refusal: String?
+        Self.visitObjects(in: body) { object in
+            guard refusal == nil else { return }
+            if let action = object["actionType"] as? String, action.lowercased() != "block" {
+                refusal = "Compliance action “\(action)” is refused: only “block” is sent in a live check"
+                return
+            }
+            // An assignment target: its type says so, or it names a group.
+            let type = (object["@odata.type"] as? String)?.lowercased() ?? ""
+            guard type.hasSuffix("assignmenttarget") || object["groupId"] != nil else { return }
+            switch type {
+            case "#microsoft.graph.groupassignmenttarget", "#microsoft.graph.exclusiongroupassignmenttarget":
+                break
+            case "#microsoft.graph.alldevicesassignmenttarget":
+                refusal = "An assignment to All devices is refused"
+                return
+            case "#microsoft.graph.alllicensedusersassignmenttarget":
+                refusal = "An assignment to All users is refused"
+                return
+            default:
+                refusal = "An assignment target of type “\(type.isEmpty ? "none" : type)” is refused"
+                return
+            }
+            guard let group = object["groupId"] as? String,
+                  let item = ledger.item(target: target, resource: "groups", id: group), !item.fromSweep, !item.removed
+            else {
+                refusal = "An assignment to group \(object["groupId"] as? String ?? "(none)") is refused: only a group this run created"
+                return
+            }
+            if let filter = object["deviceAndAppManagementAssignmentFilterId"] as? String,
+               !filter.isEmpty, filter != "00000000-0000-0000-0000-000000000000",
+               ledger.item(target: target, resource: "assignmentfilters", id: filter) == nil {
+                refusal = "An assignment with filter \(filter) is refused: only a filter this run created"
+            }
+        }
+        return refusal
+    }
+
+    /// Calls `visit` for every JSON object in `value`, nested ones included.
+    static func visitObjects(in value: Any, _ visit: ([String: Any]) -> Void) {
+        if let object = value as? [String: Any] {
+            visit(object)
+            for child in object.values { visitObjects(in: child, visit) }
+        } else if let array = value as? [Any] {
+            for child in array { visitObjects(in: child, visit) }
+        }
+    }
+
+    /// `…/directory/deletedItems/{id}`: the ID, else nil.
+    static func deletedItemID(_ path: String) -> String? {
+        let segments = path.split(separator: "/").map(String.init)
+        guard let index = segments.firstIndex(where: { $0.lowercased() == "deleteditems" }),
+              index > 0, segments[index - 1].lowercased() == "directory", index + 1 < segments.count
+        else { return nil }
+        return segments[index + 1]
     }
 
     // MARK: Request parsing

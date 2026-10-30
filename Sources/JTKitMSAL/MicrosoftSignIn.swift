@@ -36,6 +36,9 @@ public enum MicrosoftSignInError: Error, LocalizedError, Sendable, Equatable {
     case noWindow
     case notSignedIn
     case noToken
+    /// `silentToken`: MSAL needs Microsoft's sign-in window (an expired
+    /// sign-in or a permission not granted yet); no window was opened (0.12.5).
+    case interactionRequired
 
     public var errorDescription: String? {
         switch self {
@@ -49,6 +52,8 @@ public enum MicrosoftSignInError: Error, LocalizedError, Sendable, Equatable {
             "Not signed in to this tenant."
         case .noToken:
             "Microsoft’s sign-in returned no token."
+        case .interactionRequired:
+            "Microsoft needs you to sign in again (or to grant a permission). Sign in once in the app."
         }
     }
 }
@@ -149,6 +154,16 @@ public final class MicrosoftSignIn {
             ?? (accounts.count == 1 ? accounts[0] : nil)
     }
 
+    /// The one cached account whose home tenant is `tenantID` (a tenant ID,
+    /// ignoring case); nil when none or several match. No fallback to the
+    /// only account: for checks that must never reach another tenant (0.12.5).
+    public nonisolated static func strictlyCachedAccount<Account>(in accounts: [Account], tenantID: String,
+                                                                  homeTenant: (Account) -> String?) -> Account? {
+        let tenantID = tenantID.trimmingCharacters(in: .whitespaces).lowercased()
+        let matches = accounts.filter { homeTenant($0)?.lowercased() == tenantID }
+        return matches.count == 1 ? matches[0] : nil
+    }
+
     // MARK: - Accounts
 
     /// The signed-in account at launch: the saved one, else by tenant.
@@ -162,6 +177,17 @@ public final class MicrosoftSignIn {
     /// The account if MSAL still has it.
     public func account(identifier: String) -> MicrosoftAccount? {
         backend.account(identifier: identifier)
+    }
+
+    /// The signed-in account of exactly this tenant (see
+    /// `strictlyCachedAccount`): the saved identifier only counts when that
+    /// account's home tenant is `tenantID` too (0.12.5).
+    public func account(strictlyFor tenantID: String, identifier: String?) -> MicrosoftAccount? {
+        let wanted = tenantID.trimmingCharacters(in: .whitespaces).lowercased()
+        if let identifier, let account = backend.account(identifier: identifier) {
+            return account.homeTenantID?.lowercased() == wanted ? account : nil
+        }
+        return Self.strictlyCachedAccount(in: backend.accounts(), tenantID: wanted) { $0.homeTenantID }
     }
 
     /// Shows Microsoft's sign-in window with the account picker.
@@ -203,6 +229,22 @@ public final class MicrosoftSignIn {
             return try await showWindow(key) {
                 try await self.backend.interactiveToken(scopes: scopes, account: account, authority: authority)
             }
+        }
+    }
+
+    /// A token from MSAL's cache (or a silent refresh) only: never opens
+    /// Microsoft's window. For unattended runs (a release check), which stop
+    /// and say so instead (0.12.5).
+    /// - Throws: `MicrosoftSignInError.interactionRequired` when MSAL needs
+    ///   the window; `.notSignedIn` when MSAL doesn't have the account.
+    public func silentToken(for account: MicrosoftAccount, tenantID: String, scopes: [String],
+                            forceRefresh: Bool = false) async throws -> MicrosoftToken {
+        let authority = try Self.authorityURL(tenantID: tenantID)
+        do {
+            return try await backend.silentToken(scopes: scopes, account: account, authority: authority,
+                                                 forceRefresh: forceRefresh)
+        } catch where backend.needsInteraction(error) {
+            throw MicrosoftSignInError.interactionRequired
         }
     }
 
