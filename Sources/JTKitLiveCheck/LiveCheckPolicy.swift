@@ -191,6 +191,9 @@ public nonisolated final class LiveCheckPolicy: @unchecked Sendable {
         if Self.isApple(entry.service) && lowered.contains("orgdeviceactivities") {
             return .refuse("Apple Business / School Manager activities are never run")
         }
+        if Self.isSecretRead(lowered) {
+            return .refuse("Device secrets (FileVault key, Recovery Lock, lock PIN, local admin password) are never read in a live check")
+        }
         let isRead = request.method == "GET" || request.method == "HEAD"
         if isRead {
             return .allow(.init(kind: .read, role: role, target: target, resource: nil, id: nil))
@@ -251,10 +254,37 @@ public nonisolated final class LiveCheckPolicy: @unchecked Sendable {
         // to a test object, and Platform device actions likewise.
         let markers = ["mdm-commands", "mdmcommands", "computercommands", "mobiledevicecommands",
                        "/commands", "remote-lock", "erase-device", "redeploy", "managed-software-updates/plans",
-                       "/erase", "/unmanage", "remove-mdm-profile", "device-actions/"]
+                       "/erase", "/unmanage", "remove-mdm-profile", "device-actions/",
+                       // Named in 0.12.4; before, refused only because they
+                       // named no test object.
+                       "blank-push", "renew-profile"]
         if markers.contains(where: path.contains) { return true }
-        // Graph device actions: POST …/managedDevices/{id}/<action>
-        return method == "POST" && path.contains("manageddevices/")
+        let segments = path.split(separator: "/").map(String.init)
+        // Jamf Pro DDM sync: …/ddm/{id}/sync
+        if let ddm = segments.firstIndex(of: "ddm"), segments.last == "sync", segments.count > ddm + 2 { return true }
+        // Jamf School: …/devices/{udid}/refresh|restart|wipe|unenroll|…
+        if let devices = segments.firstIndex(of: "devices"), devices + 2 < segments.count,
+           jamfSchoolActions.contains(segments[devices + 2]) { return true }
+        // Graph: any change to a managed device, its actions (POST
+        // …/managedDevices/{id}/<action>) and Delete Record (DELETE …/managedDevices/{id}).
+        return path.contains("manageddevices")
+    }
+
+    static let jamfSchoolActions: Set<String> = [
+        "refresh", "restart", "wipe", "unenroll", "shutdown", "lock", "clearpasscode", "lostmode", "clearactivationlock",
+    ]
+
+    /// Device secrets, refused on every tenant whatever the method (0.12.4):
+    /// reading them is never part of a check, and Jamf Pro rotates a local
+    /// admin password once it has been viewed.
+    static func isSecretRead(_ path: String) -> Bool {
+        let markers = ["/filevault", "view-recovery-lock-password", "view-device-lock-pin",
+                       // Graph: a Mac's FileVault key, BitLocker keys, Windows LAPS
+                       "getfilevaultkey", "bitlocker/recoverykeys", "devicelocalcredentials"]
+        if markers.contains(where: path.contains) { return true }
+        // Jamf Pro LAPS: …/local-admin-password/{id}/account/{user}[/{guid}]/password.
+        // Its settings and account list hold no password and stay readable.
+        return path.contains("local-admin-password/") && path.hasSuffix("/password")
     }
 
     struct ObjectReference: Equatable {

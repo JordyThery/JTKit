@@ -465,9 +465,44 @@ extension JamfPlatform.Client {
     }
 
     /// Mobile devices by serial number, many at once, as `computers(serials:)`.
+    /// A record that never enrolled is read once more by ID for its general
+    /// section, as in `mobileDevice(serial:)` (0.12.4).
     public func mobileDevices(serials: [String], sections: [JamfPro.InventorySection] = JamfPro.mobileDeviceSections,
                               recording: JamfPro.Recording = .errorsOnly) async throws -> JamfPro.Batch<JamfPro.MobileDevice> {
-        try await batch(.mobileDevices, serials: serials, sections: sections, recording: recording) { $0.serialNumber }
+        var batch: JamfPro.Batch<JamfPro.MobileDevice> = try await self.batch(.mobileDevices, serials: serials, sections: sections,
+                                                                                recording: recording) { $0.serialNumber }
+        guard sections.contains(.general) else { return batch }
+        let incomplete = batch.records.filter { $0.value.general == nil && $0.value.id != nil }
+        guard !incomplete.isEmpty else { return batch }
+        // A few at a time, like the list reads. A detail that can't be read
+        // leaves the record as the list gave it: found, without a name.
+        let keys = Array(incomplete.keys)
+        try await withThrowingTaskGroup(of: (String, JamfPro.MobileDevice.General?).self) { group in
+            var next = 0
+            func startNext() {
+                guard next < keys.count else { return }
+                let key = keys[next]
+                next += 1
+                let id = incomplete[key]?.id ?? ""
+                group.addTask {
+                    do {
+                        let response = try await self.send(HTTPRequest(path: "pro/v2/mobile-devices/\(JamfPlatform.pathSegment(id))/detail"),
+                                                           privilege: .readMobileDevices)
+                        return (key, try? JSONDecoder().decode(JamfPro.MobileDeviceDetail.self, from: response.data).general)
+                    } catch is CancellationError {
+                        throw CancellationError()
+                    } catch {
+                        return (key, nil)
+                    }
+                }
+            }
+            for _ in 0..<JamfPro.batchWindow { startNext() }
+            for try await (key, general) in group {
+                if let general { batch.records[key]?.general = general }
+                startNext()
+            }
+        }
+        return batch
     }
 
     // MARK: Asset tags

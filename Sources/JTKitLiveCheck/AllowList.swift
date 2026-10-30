@@ -70,8 +70,9 @@ public nonisolated struct AllowList: Codable, Sendable, Equatable {
             self.keychainService = keychainService
         }
 
-        /// Every hostname of a Jamf Pro or Jamf School entry, lowercased.
-        var hosts: [String] {
+        /// Every hostname of a Jamf Pro or Jamf School entry, lowercased
+        /// (public from 0.12.4, to match an app's saved connection to its role).
+        public var hosts: [String] {
             ([host] + (aliases ?? []).map(Optional.some)).compactMap { $0?.lowercased() }.filter { !$0.isEmpty }
         }
     }
@@ -131,6 +132,17 @@ public nonisolated struct AllowList: Codable, Sendable, Equatable {
     /// The entries of these roles (every entry when `roles` is nil).
     public func entries(roles: Set<String>?) -> [Entry] {
         tenants.filter { roles?.contains($0.role) ?? true }
+    }
+
+    /// The same list with these roles read only (0.12.4): an app's release
+    /// check can make a tenant stricter for its own run (`READ_ONLY_ROLES`),
+    /// never looser.
+    public func readingOnly(_ roles: Set<String>) -> AllowList {
+        var list = self
+        for index in list.tenants.indices where roles.contains(list.tenants[index].role) {
+            list.tenants[index].access = .readOnly
+        }
+        return list
     }
 }
 
