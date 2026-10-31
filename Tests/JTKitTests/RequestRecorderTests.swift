@@ -43,7 +43,7 @@ struct RequestRecorderTests {
         #expect(!ActivityLogExport.transcript(of: entry).contains("secret-token"))
     }
 
-    @Test("An error's response body is recorded, redacted, with its identifiers")
+    @Test("An error’s response body is recorded, redacted, with its identifiers")
     func errorBody() async throws {
         let server = MockServer { _ in
             .json(400, #"{"errors":[{"code":"INVALID_FIELD"}],"serialNumber":"C02XK1JHJG5H","client_secret":"leak"}"#)
@@ -63,7 +63,7 @@ struct RequestRecorderTests {
         #expect(entry.identifiers.contains(FoundIdentifier(.device, "C02XK1JHJG5H")))
     }
 
-    @Test("A secret inside an error's message is hidden in the log, as on screen")
+    @Test("A secret inside an error’s message is hidden in the log, as on screen")
     func secretsInErrorMessage() async throws {
         let message = "invalid request client_secret=s3cr3t-value&grant_type=client_credentials, sent with Bearer eyJhbGciOi.payload.sig"
         let server = MockServer { _ in
@@ -105,7 +105,7 @@ struct RequestRecorderTests {
         #expect(details.bodyNote == nil)
     }
 
-    @Test("A request's JSON filter trims what is recorded, not what the app receives")
+    @Test("A request’s JSON filter trims what is recorded, not what the app receives")
     func recordedJSONFilter() async throws {
         let answer = #"{"results":[{"id":"1","general":{"name":"Lab Mac"},"localUserAccounts":[{"username":"admin"}],"certificates":[{"commonName":"cert"}]}]}"#
         let server = MockServer { _ in .json(200, answer) }
@@ -138,7 +138,7 @@ struct RequestRecorderTests {
         #expect(body.contains("keep") && !body.contains("drop"))
     }
 
-    @Test("With a JSON filter, an answer that isn't JSON isn't recorded at all")
+    @Test("With a JSON filter, an answer that isn’t JSON isn’t recorded at all")
     func recordedJSONFilterRefusesText() async throws {
         let server = MockServer { _ in
             MockResponse(status: 200, headers: ["Content-Type": "text/plain"], body: Data("owner: Jane Doe".utf8))
@@ -151,7 +151,7 @@ struct RequestRecorderTests {
         #expect(details.bodyNote == "Response body not recorded: not JSON.")
     }
 
-    @Test("Bodies over 256 KB aren't recorded; long text is cut at 20,000 characters")
+    @Test("Bodies over 256 KB aren’t recorded; long text is cut at 20,000 characters")
     func sizeLimits() async throws {
         let large = String(repeating: "a", count: RequestRecorder.maximumRecordedBodySize + 1)
         let long = String(repeating: "b", count: 30_000)
@@ -202,7 +202,7 @@ struct RequestRecorderTests {
         #expect(!details.url.contains("123456"))
     }
 
-    @Test("Ordinary Jamf calls are not sensitive")
+    @Test("Ordinary Jamf calls aren’t sensitive")
     func notSensitive() {
         #expect(!SensitiveRequests.isSensitive(path: "/api/v2/mobile-devices/12"))
         #expect(!SensitiveRequests.isSensitive(path: "/api/v1/computers-inventory/7"))
@@ -238,7 +238,7 @@ struct RequestRecorderTests {
     private static let uploadAddress =
         "https://store.blob.core.windows.net/c/blob?sv=2019-02-02&sr=b&sig=SIGNATURE%2Bsecret%3D&se=2026-10-26&sp=rw&comp=block&blockid=YmxvY2s%3D"
 
-    @Test("An upload's address hides its signature, and its contents are never recorded")
+    @Test("An upload’s address hides its signature, and its contents are never recorded")
     func uploadRedacted() async throws {
         let server = MockServer { _ in .json(500, #"<?xml version="1.0"?><Error><Code>InternalError</Code></Error>"#) }
         let log = ActivityLog()
@@ -281,7 +281,7 @@ struct RequestRecorderTests {
     @Test("A note can carry a duration")
     func noteDuration() async throws {
         let log = ActivityLog()
-        await RequestRecorder(log: log, category: "Upload").note("PUT", "app.pkg", note: "Uploaded", duration: 4.5)
+        await RequestRecorder(session: URLSession(configuration: .ephemeral), log: log, category: "Upload").note("PUT", "app.pkg", note: "Uploaded", duration: 4.5)
         #expect(log.entries.first?.duration == 4.5)
         #expect(log.entries.first?.category == "Upload")
     }
@@ -332,7 +332,7 @@ struct RequestRecorderTests {
         #expect(directEntry.request?.url.hasSuffix("?token=\(Redaction.placeholder)") == true)
     }
 
-    @Test("A download's error answer is recorded, as with send")
+    @Test("A download’s error answer is recorded, as with send")
     func downloadError() async throws {
         let server = MockServer { _ in .json(404, #"{"message":"Not Found"}"#) }
         let log = ActivityLog()

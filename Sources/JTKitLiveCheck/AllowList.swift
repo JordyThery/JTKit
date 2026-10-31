@@ -1,9 +1,9 @@
 import Foundation
 
-/// The tenants live checks may reach (ROADMAP step 11), read from a local
+/// The tenants live checks may reach, read from a local
 /// file outside every git work tree, readable by its owner only. Hostnames,
 /// non-secret IDs and access levels only; never secrets. Deny by default:
-/// anything not on it is refused before it's sent.
+/// anything not on it is refused before it’s sent.
 public nonisolated struct AllowList: Codable, Sendable, Equatable {
     public var version: Int
     public var tenants: [Entry]
@@ -36,23 +36,23 @@ public nonisolated struct AllowList: Codable, Sendable, Equatable {
 
     public nonisolated struct Entry: Codable, Sendable, Equatable {
         /// What tests and scripts call it, e.g. `"jamf-test-a"`; never a tenant name.
-        public var role: String
-        public var service: Service
-        /// Jamf Pro and Jamf School: the server's hostname.
-        public var host: String?
+        public let role: String
+        public let service: Service
+        /// Jamf Pro and Jamf School: the server’s hostname.
+        public let host: String?
         /// Other names of the same server, e.g. its jamfcloud.com name.
-        public var aliases: [String]?
+        public let aliases: [String]?
         /// Jamf Platform: `"us"`, `"eu"`, `"apac"`.
-        public var region: String?
-        public var environmentID: String?
-        public var entraTenantID: String?
-        /// Apple Business / School Manager: the API account's client ID.
-        public var clientID: String?
-        public var access: Access
-        public var production: Bool
-        /// Where the release check reads this tenant's credentials when the
+        public let region: String?
+        public let environmentID: String?
+        public let entraTenantID: String?
+        /// Apple Business / School Manager: the API account’s client ID.
+        public let clientID: String?
+        public let access: Access
+        public let production: Bool
+        /// Where the release check reads this tenant’s credentials when the
         /// app has no saved connection for it (a Keychain service name).
-        public var keychainService: String?
+        public let keychainService: String?
 
         public init(role: String, service: Service, host: String? = nil, aliases: [String]? = nil,
                     region: String? = nil, environmentID: String? = nil, entraTenantID: String? = nil,
@@ -71,7 +71,7 @@ public nonisolated struct AllowList: Codable, Sendable, Equatable {
         }
 
         /// Every hostname of a Jamf Pro or Jamf School entry, lowercased
-        /// (public from 0.12.4, to match an app's saved connection to its role).
+        /// (public, to match an app’s saved connection to its role).
         public var hosts: [String] {
             ([host] + (aliases ?? []).map(Optional.some)).compactMap { $0?.lowercased() }.filter { !$0.isEmpty }
         }
@@ -87,11 +87,11 @@ public nonisolated struct AllowList: Codable, Sendable, Equatable {
 
         public var description: String {
             switch self {
-            case .missing(let path): "The allow-list doesn't exist: \(path)"
+            case .missing(let path): "The allow-list doesn’t exist: \(path)"
             case .readableByOthers(let path): "The allow-list must be readable by you only (chmod 600): \(path)"
             case .insideGitWorkTree(let path): "The allow-list lies inside a git work tree; move it out: \(path)"
-            case .unreadable(let reason): "The allow-list can't be read: \(reason)"
-            case .unsupportedVersion(let version): "The allow-list's version \(version) isn't supported"
+            case .unreadable(let reason): "The allow-list can’t be read: \(reason)"
+            case .unsupportedVersion(let version): "The allow-list’s version \(version) isn’t supported"
             case .incomplete(let role, let reason): "Allow-list entry \(role): \(reason)"
             }
         }
@@ -134,13 +134,16 @@ public nonisolated struct AllowList: Codable, Sendable, Equatable {
         tenants.filter { roles?.contains($0.role) ?? true }
     }
 
-    /// The same list with these roles read only (0.12.4): an app's release
+    /// The same list with these roles read only: an app’s release
     /// check can make a tenant stricter for its own run (`READ_ONLY_ROLES`),
     /// never looser.
     public func readingOnly(_ roles: Set<String>) -> AllowList {
         var list = self
-        for index in list.tenants.indices where roles.contains(list.tenants[index].role) {
-            list.tenants[index].access = .readOnly
+        list.tenants = tenants.map { entry in
+            guard roles.contains(entry.role) else { return entry }
+            return Entry(role: entry.role, service: entry.service, host: entry.host, aliases: entry.aliases, region: entry.region,
+                         environmentID: entry.environmentID, entraTenantID: entry.entraTenantID, clientID: entry.clientID,
+                         access: .readOnly, production: entry.production, keychainService: entry.keychainService)
         }
         return list
     }

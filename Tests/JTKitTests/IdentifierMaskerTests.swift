@@ -19,7 +19,7 @@ struct IdentifierMaskerTests {
         #expect(identifiers.allSatisfy { $0.kind == .device })
     }
 
-    @Test("A device record's name is a device name; a Blueprint's or a group's isn't")
+    @Test("A device record’s name is a device name; a Blueprint’s or a group’s isn’t")
     func names() {
         let identifiers = found(#"""
         {"computer":{"serialNumber":"C02XK1JHJG5H","name":"Jordy’s MacBook"},
@@ -34,7 +34,7 @@ struct IdentifierMaskerTests {
         #expect(!values.contains("All Macs"))
     }
 
-    @Test("Emails, usernames, full names and IP addresses are found; version numbers aren't addresses")
+    @Test("Emails, usernames, full names and IP addresses are found; version numbers aren’t addresses")
     func peopleAndAddresses() {
         let identifiers = found(#"""
         {"username":"jdoe","realName":"Jane Doe","userPrincipalName":"jane@corp.example",
@@ -68,7 +68,7 @@ struct IdentifierMaskerTests {
         #expect(byValue["Engineers"] == nil)
     }
 
-    @Test("Paths: serials and UDIDs, but a Blueprint's UUID is an object ID")
+    @Test("Paths: serials and UDIDs, but a Blueprint’s UUID is an object ID")
     func paths() {
         let blueprint = "5b1f7c2e-1111-2222-3333-444455556666"
         let identifiers = IdentifierMasker.identifiers(
@@ -77,7 +77,7 @@ struct IdentifierMaskerTests {
         #expect(IdentifierMasker.identifiers(inPath: "/blueprints/v1/blueprints/\(blueprint)/deploy").isEmpty)
         #expect(IdentifierMasker.identifiers(inPath: "/api/v1/devices/00008103-001A2C3E0C38001E").map(\.value)
                 == ["00008103-001A2C3E0C38001E"])
-        // a numeric ID is not a serial number
+        // a numeric ID isn’t a serial number
         #expect(IdentifierMasker.identifiers(inPath: "/api/v1/computers/1234567890").isEmpty)
     }
 

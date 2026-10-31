@@ -1,6 +1,6 @@
 import SwiftUI
 
-// The apps' recurring visual idioms, packaged as small components so every
+// The apps’ recurring visual idioms, packaged as small components so every
 // screen reads the same way.
 
 /// Capsule status pill, e.g. "Managed", "Test tenant".

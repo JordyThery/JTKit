@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 import JTKit
 import Testing
@@ -106,7 +107,7 @@ struct MicrosoftSignInTests {
         #expect(microsoft.windowCount == 1)
     }
 
-    @Test("Other permissions wait until the window closes, then get a window of their own (decided by Jordy)")
+    @Test("Other permissions wait until the window closes, then get a window of their own")
     func otherScopesAskAgainAfterTheWindow() async throws {
         let fake = FakeMSAL(accounts: [Self.account])
         let microsoft = try signIn(fake)
@@ -123,7 +124,7 @@ struct MicrosoftSignInTests {
         #expect(writeToken.scopes.contains("devicemanagementconfiguration.readwrite.all"), "the write request gets a write token, not the read one")
     }
 
-    @Test("When the first window's consent covers the waiting request, no second window opens")
+    @Test("When the first window’s consent covers the waiting request, no second window opens")
     func waitingRequestCoveredByFirstWindow() async throws {
         let fake = FakeMSAL(accounts: [Self.account])
         let microsoft = try signIn(fake)
@@ -151,7 +152,7 @@ struct MicrosoftSignInTests {
         #expect(microsoft.windowCount == 1)
     }
 
-    @Test("Sign In shows the account picker, and waits for a window that's open")
+    @Test("Sign In shows the account picker, and waits for a window that’s open")
     func signInWaitsAndPicks() async throws {
         let fake = FakeMSAL(accounts: [Self.account])
         let microsoft = try signIn(fake)
@@ -203,11 +204,17 @@ struct MicrosoftSignInTests {
     @Test("The client ID must be a UUID; the tenant gives the sign-in address")
     func addresses() throws {
         #expect(throws: MicrosoftSignInError.invalidClientID) { try MicrosoftSignIn(clientID: "app", backend: FakeMSAL()) }
+        #expect(MicrosoftSignInError.invalidClientID.localizedDescription
+                == "The client ID isn’t a UUID. Copy the Application (client) ID from Entra.", "the same sentence as the Entra sign-in")
         #expect(try MicrosoftSignIn.validatedClientID(" \(Self.clientID)\n") == Self.clientID)
         #expect(try MicrosoftSignIn.authorityURL(tenantID: " contoso.com ").absoluteString == "https://login.microsoftonline.com/contoso.com")
         #expect(throws: MicrosoftSignInError.missingTenantID) { try MicrosoftSignIn.authorityURL(tenantID: " ") }
+        #expect(try MicrosoftSignIn.authorityURL(tenantID: Self.tenant).absoluteString == "https://login.microsoftonline.com/\(Self.tenant)")
+        for tenant in ["..", "contoso.com/../x", "a/b", "contoso.com?x", "contoso"] {
+            #expect(throws: MicrosoftSignInError.invalidTenantID, "\(tenant)") { try MicrosoftSignIn.authorityURL(tenantID: tenant) }
+        }
     }
-    @Test("A silent-only token never opens the window: interaction needed is an error (0.12.5)")
+    @Test("A silent-only token never opens the window: interaction needed is an error")
     func silentOnlyNeverOpensTheWindow() async throws {
         let fake = FakeMSAL(accounts: [Self.account])
         fake.granted = Set(Self.read.map { $0.lowercased() })
@@ -225,7 +232,7 @@ struct MicrosoftSignInTests {
         #expect(microsoft.windowCount == 0)
     }
 
-    @Test("Strict account: only the one account of exactly this tenant, never the only other one (0.12.5)")
+    @Test("Strict account: only the one account of exactly this tenant, never the only other one")
     func strictAccount() throws {
         let other = MicrosoftAccount(username: "admin@fabrikam.com", identifier: "uid.other", homeTenantID: "0ther000-0000-0000-0000-000000000000")
         let microsoft = try signIn(FakeMSAL(accounts: [other]))
@@ -253,13 +260,40 @@ struct MSALNoticeTests {
         #expect(manifest.contains(#"microsoft-authentication-library-for-objc", exact: "\#(MicrosoftSignIn.msalVersion)""#))
     }
 
-    @Test("MIT licence by Microsoft, with a link to MSAL")
-    func licence() {
+    @Test("MIT license by Microsoft, with a link to MSAL")
+    func license() {
         let msal = Acknowledgement.msal
         #expect(msal.heading == "Microsoft Authentication Library for iOS and macOS (MSAL) by Microsoft Corporation")
-        #expect(msal.licenceName == "MIT License")
-        #expect(msal.licence?.contains("Copyright (c) Microsoft Corporation") == true)
+        #expect(msal.licenseName == "MIT License")
+        #expect(msal.license == Acknowledgement.msalLicense)
+        #expect(msal.license?.contains("Copyright (c) Microsoft Corporation") == true)
         #expect(msal.links.map(\.url.absoluteString) == ["https://github.com/AzureAD/microsoft-authentication-library-for-objc"])
         #expect(Acknowledgement.msal(summary: "App sentence.").summary == "App sentence.")
+    }
+}
+
+@Suite("MSAL sign-in window anchor")
+@MainActor
+struct MSALPresentationTests {
+    @Test("A window without a view controller gets a zero-size host for one sign-in, removed afterwards")
+    func hostViewRemoved() throws {
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 200, height: 100), styleMask: [.titled],
+                              backing: .buffered, defer: true)
+        window.contentView = NSView()
+        let contentView = try #require(window.contentView)
+        for _ in 0..<3 {
+            let (viewController, host) = try #require(MSALBackend.presentation(in: [window]))
+            #expect(viewController.view.window === window)
+            #expect(contentView.subviews.count == 1)
+            host?.removeFromSuperview()
+        }
+        #expect(contentView.subviews.isEmpty, "no view left behind per sign-in")
+
+        let content = NSViewController()
+        content.view = NSView(frame: NSRect(x: 0, y: 0, width: 200, height: 100))
+        let controlled = NSWindow(contentViewController: content)
+        let (viewController, host) = try #require(MSALBackend.presentation(in: [controlled]))
+        #expect(viewController === controlled.contentViewController)
+        #expect(host == nil)
     }
 }

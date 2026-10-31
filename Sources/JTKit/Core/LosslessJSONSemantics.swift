@@ -1,7 +1,7 @@
 import Foundation
 
 public nonisolated extension LosslessJSON {
-    /// Equality that allows for server canonicalisation: object key order is
+    /// Equality that allows for server canonicalization: object key order is
     /// ignored and numbers compare by value (`1.0` equals `1`). Arrays stay
     /// ordered, strings and booleans compare exactly. Duplicate keys compare by
     /// their first occurrence, as `LosslessJSON.Object` reads them.

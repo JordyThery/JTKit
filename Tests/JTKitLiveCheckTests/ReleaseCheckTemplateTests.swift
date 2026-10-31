@@ -2,10 +2,10 @@ import Foundation
 import Testing
 
 /// The release-check template (`Scripts/release-check-lib.sh`) runs its
-/// checks in the Mac's own Python, `/usr/bin/python3` (3.9 on macOS 27). A
-/// block that doesn't compile there used to do nothing at all: 0.12.6's
-/// "not removed" check never ran (fixed in 0.12.7). These tests compile every
-/// block with that Python, and run the report with a broken check.
+/// checks in the Mac’s own Python, `/usr/bin/python3` (3.9 on macOS 27). A
+/// block that doesn’t compile there does nothing at all, so its check never
+/// runs. These tests compile every block with that Python, and run the
+/// report with a broken check.
 @Suite("Release-check template")
 struct ReleaseCheckTemplateTests {
     static let template = URL(filePath: #filePath)
@@ -52,7 +52,7 @@ struct ReleaseCheckTemplateTests {
         return blocks
     }
 
-    private static func run(_ executable: String, _ arguments: [String], input: String? = nil,
+    static func run(_ executable: String, _ arguments: [String], input: String? = nil,
                             environment: [String: String]? = nil) throws -> (status: Int32, output: String) {
         let process = Process()
         process.executableURL = URL(filePath: executable)
@@ -70,7 +70,7 @@ struct ReleaseCheckTemplateTests {
         return (process.terminationStatus, String(decoding: data, as: UTF8.self))
     }
 
-    @Test("Every Python block compiles with the Mac's /usr/bin/python3, and none is missed")
+    @Test("Every Python block compiles with the Mac’s /usr/bin/python3, and none is missed")
     func everyPythonBlockCompiles() throws {
         try #require(FileManager.default.isExecutableFile(atPath: Self.python), "no \(Self.python) on this Mac")
         let blocks = try Self.pythonBlocks()
@@ -90,12 +90,13 @@ struct ReleaseCheckTemplateTests {
         #expect(result.status == 0, "\(result.output)")
     }
 
-    /// Runs the template's report for a run folder made by the test.
-    private func report(ledger: String) throws -> String {
+    /// Runs the template’s report for a run folder made by the test.
+    private func report(ledger: String, unrecorded: String? = nil) throws -> String {
         let run = FileManager.default.temporaryDirectory.appending(path: "rc-report-\(UUID().uuidString)", directoryHint: .isDirectory)
         try FileManager.default.createDirectory(at: run.appending(path: "live"), withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: run) }
         try Data(ledger.utf8).write(to: run.appending(path: "live/ledger.json"))
+        if let unrecorded { try Data(unrecorded.utf8).write(to: run.appending(path: "live/unrecorded-creates.jsonl")) }
         try Data("abc\n".utf8).write(to: run.appending(path: "fingerprint.before"))
         try Data("abc\n".utf8).write(to: run.appending(path: "fingerprint.after"))
         let script = """
@@ -108,12 +109,19 @@ struct ReleaseCheckTemplateTests {
         return try Self.run("/bin/zsh", ["-c", script], environment: ["PATH": "/usr/bin:/bin:/usr/sbin:/sbin", "HOME": NSHomeDirectory()]).output
     }
 
-    @Test("A check that can't run fails the run, named; a clean ledger passes")
+    @Test("A check that can’t run fails the run, named; a clean ledger passes")
     func brokenCheckFailsTheRun() throws {
         #expect(try report(ledger: "[]").contains("- Result: **passed**"))
         let broken = try report(ledger: "{ not json")
         #expect(broken.contains("- Result: **FAILED"), "\(broken)")
-        #expect(broken.contains("a check couldn't run: the ledger's not-removed objects"), "\(broken)")
+        #expect(broken.contains("a check couldn’t run: the ledger’s not-removed objects"), "\(broken)")
+    }
+
+    @Test("A create the ledger doesn’t hold fails the run, named")
+    func unrecordedCreateFailsTheRun() throws {
+        let output = try report(ledger: "[]", unrecorded: #"{"resource":"categories","name":"JTKTEST XX 1030 – C","status":201,"reason":"its answer held no readable ID"}"# + "\n")
+        #expect(output.contains("FAILED: created but not in the ledger: categories “JTKTEST XX 1030 – C” (its answer held no readable ID)"), "\(output)")
+        #expect(output.contains("- **Created but not in the ledger:** categories “JTKTEST XX 1030 – C”"), "\(output)")
     }
 
     @Test("An object a read-back still finds fails the run, named")

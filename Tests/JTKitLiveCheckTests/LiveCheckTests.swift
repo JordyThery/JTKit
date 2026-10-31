@@ -5,11 +5,11 @@ import Testing
 import JTKitTestSupport
 
 // Made-up tenants only: hosts under .example, IDs in an obviously fake range.
-private let platformA = "00000000-0000-4000-8000-00000000000a"
-private let entraTest = "00000000-0000-4000-8000-0000000000e1"
-private let prefix = "JTKTEST XX 1027-1432"
+let platformA = "00000000-0000-4000-8000-00000000000a"
+let entraTest = "00000000-0000-4000-8000-0000000000e1"
+let prefix = "JTKTEST XX 1027-1432"
 
-private func sampleList() -> AllowList {
+func sampleList() -> AllowList {
     AllowList(tenants: [
         .init(role: "jamf-test-a", service: .jamfPlatform, region: "eu", environmentID: platformA, access: .full, keychainService: "Test-A"),
         .init(role: "jamf-test-a", service: .jamfPro, host: "test-a.jamf.example", access: .full),
@@ -21,23 +21,23 @@ private func sampleList() -> AllowList {
     ])
 }
 
-private func tempFolder() -> URL {
+func tempFolder() -> URL {
     let url = FileManager.default.temporaryDirectory.appending(path: "LiveCheckTests-\(UUID().uuidString)", directoryHint: .isDirectory)
     try? FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
     return url
 }
 
-private func makePolicy(roles: Set<String>? = nil, includeProduction: Bool = false) -> LiveCheckPolicy {
+func makePolicy(roles: Set<String>? = nil, includeProduction: Bool = false) -> LiveCheckPolicy {
     LiveCheckPolicy(allowList: sampleList(), roles: roles, includeProduction: includeProduction,
                     prefix: prefix, ledger: Ledger(fileURL: tempFolder().appending(path: "ledger.json")))
 }
 
-private func request(_ method: String, _ url: String, headers: [String: String] = [:], json: [String: Any]? = nil, body: String? = nil) -> LiveRequest {
+func request(_ method: String, _ url: String, headers: [String: String] = [:], json: [String: Any]? = nil, body: String? = nil) -> LiveRequest {
     let data = json.flatMap { try? JSONSerialization.data(withJSONObject: $0) } ?? Data((body ?? "").utf8)
     return LiveRequest(method: method, url: URL(string: url)!, headers: headers, body: data)
 }
 
-private func jwt(tid: String) -> String {
+func jwt(tid: String) -> String {
     func encode(_ object: [String: Any]) -> String {
         (try! JSONSerialization.data(withJSONObject: object)).base64EncodedString()
             .replacingOccurrences(of: "=", with: "").replacingOccurrences(of: "+", with: "-").replacingOccurrences(of: "/", with: "_")
@@ -45,7 +45,20 @@ private func jwt(tid: String) -> String {
     return "\(encode(["alg": "none"])).\(encode(["tid": tid])).sig"
 }
 
-private extension LiveDecision {
+/// A ledger item as the network records its own creates: already seen on the server.
+func created(_ target: String, _ resource: String, _ id: String, _ name: String) -> Ledger.Item {
+    Ledger.Item(target: target, resource: resource, id: id, name: name, confirmed: true)
+}
+
+/// A run made from a test environment; the allow-list is passed in code
+/// (`allowlist` is the test’s own key, never read by `LiveCheckRun`).
+func makeRun(_ environment: [String: String], upstream: URLSession? = nil, readBack: ReadBack? = nil) throws -> LiveCheckRun {
+    var environment = environment
+    let list = environment.removeValue(forKey: "allowlist").map { URL(filePath: $0) }
+    return try LiveCheckRun(environment: environment, upstream: upstream, readBack: readBack, allowListURL: list)
+}
+
+extension LiveDecision {
     var kind: LiveDecision.Allowed.Kind? {
         if case .allow(let allowed) = self { return allowed.kind }
         return nil
@@ -179,7 +192,7 @@ struct TestObjectRuleTests {
                                       body: "<category><name>\(prefix) – C</name></category>")).isAllowed)
     }
 
-    /// Profile2Blueprint's live check (0.12.2): a Classic macOS configuration
+    /// Profile2Blueprint’s live check: a Classic macOS configuration
     /// profile and a static computer group through the Platform gateway.
     @Test func classicProfilesAndGroupsThroughTheGateway() throws {
         let policy = makePolicy()
@@ -195,7 +208,7 @@ struct TestObjectRuleTests {
         let group = "<computer_group><name>\(prefix) – Classic Group</name><is_smart>false</is_smart></computer_group>"
         #expect(policy.decide(request("POST", "https://eu.api.jamfcloud.com/proclassic/computergroups/id/0", headers: headers, body: group)).isAllowed)
 
-        // A scope change and a delete only on this run's profile.
+        // A scope change and a delete only on this run’s profile.
         let scope = "<os_x_configuration_profile><scope><computer_groups/></scope></os_x_configuration_profile>"
         #expect(!policy.decide(request("PUT", "\(profiles)/id/21", headers: headers, body: scope)).isAllowed)
         try policy.ledger.add(.init(target: "platform:\(platformA)", resource: "osxconfigurationprofiles", id: "21", name: "\(prefix) – Profile"),
@@ -292,7 +305,7 @@ struct TestObjectRuleTests {
         #expect(!makePolicy().decide(request("POST", url, headers: auth)).isAllowed)
     }
 
-    /// Named in 0.12.4: refused also on a device record the run created.
+    /// Refused by name, also on a device record the run created.
     @Test(arguments: [
         ("POST", "https://test-a.jamf.example/api/v2/mdm/blank-push"),
         ("POST", "https://test-a.jamf.example/api/v1/mdm/renew-profile"),
@@ -325,7 +338,7 @@ struct TestObjectRuleTests {
     }
 }
 
-// MARK: Secrets (0.12.4)
+// MARK: Secrets
 
 @Suite("Live check: device secrets are never read")
 struct SecretReadRuleTests {
@@ -363,7 +376,7 @@ struct SecretReadRuleTests {
     }
 }
 
-// MARK: Apple budget (0.12.4)
+// MARK: Apple budget
 
 @Suite("Live check: Apple request budget")
 struct AppleBudgetTests {
@@ -374,7 +387,7 @@ struct AppleBudgetTests {
         #expect(budget.claim(role: "apple-business", now: start.addingTimeInterval(1)) == .go)
         // The third waits until the first has left the minute.
         #expect(budget.claim(role: "apple-business", now: start.addingTimeInterval(2)) == .wait(58))
-        // Another organisation has its own budget.
+        // Another organization has its own budget.
         #expect(budget.claim(role: "apple-school", now: start.addingTimeInterval(2)) == .go)
         #expect(budget.claim(role: "apple-business", now: start.addingTimeInterval(61)) == .go)
         guard case .refuse(let reason) = budget.claim(role: "apple-business", now: start.addingTimeInterval(500)) else {
@@ -416,7 +429,7 @@ struct AppleBudgetTests {
     }
 }
 
-// MARK: Graph writes (0.12.5)
+// MARK: Graph writes
 
 @Suite("Live check: Graph writes")
 struct GraphWriteRuleTests {
@@ -439,7 +452,7 @@ struct GraphWriteRuleTests {
                 json: ["deviceManagementScriptAssignments": targets.map { ["target": $0] }])
     }
 
-    @Test("Each Intune object type's create is read by its name or displayName")
+    @Test("Each Intune object type’s create is read by its name or displayName")
     func createsOfEachType() {
         let policy = makePolicy()
         let creates: [(String, [String: Any])] = [
@@ -488,13 +501,13 @@ struct GraphWriteRuleTests {
         #expect(reason.contains("assignment") || reason.contains("Assignment"))
     }
 
-    @Test("Refused also next to an allowed target, and with a filter the run didn't create")
+    @Test("Refused also next to an allowed target, and with a filter the run didn’t create")
     func mixedTargetsAreRefused() throws {
         let policy = try policyWithObjects()
         let toGroup: [String: Any] = ["@odata.type": "#microsoft.graph.groupAssignmentTarget", "groupId": group]
         #expect(!policy.decide(assign([toGroup, ["@odata.type": "#microsoft.graph.allDevicesAssignmentTarget"]])).isAllowed)
         #expect(!policy.decide(assign([toGroup.merging(["deviceAndAppManagementAssignmentFilterId": "99999999-2222-4333-8444-555555555555"]) { $1 }])).isAllowed)
-        // A group an earlier run left (merged into the ledger as found) isn't this run's group.
+        // A group an earlier run left (merged into the ledger as found) isn’t this run’s group.
         try policy.ledger.add(.init(target: target, resource: "groups", id: "88888888-2222-4333-8444-555555555555",
                                     name: "JTKTEST ID 0101-0000 – Group", fromSweep: true), testPrefixes: ["JTKTEST "])
         #expect(!policy.decide(assign([["@odata.type": "#microsoft.graph.groupAssignmentTarget",
@@ -523,7 +536,7 @@ struct GraphWriteRuleTests {
         let policy = try policyWithObjects()
         let purge = request("DELETE", "https://graph.microsoft.com/v1.0/directory/deletedItems/\(group)", headers: bearer)
         #expect(!policy.decide(purge).isAllowed, "not deleted yet")
-        policy.ledger.markRemoved(target: target, resource: "groups", id: group)
+        try policy.ledger.recordRemoval(target: target, resource: "groups", id: group)
         #expect(policy.decide(purge).kind == .delete)
         #expect(!policy.decide(request("DELETE", "https://graph.microsoft.com/v1.0/directory/deletedItems/\(script)", headers: bearer)).isAllowed,
                 "not a group")
@@ -531,7 +544,7 @@ struct GraphWriteRuleTests {
                                        headers: bearer)).isAllowed)
         #expect(!policy.decide(request("POST", "https://graph.microsoft.com/v1.0/directory/deletedItems/\(group)/restore",
                                        headers: bearer)).isAllowed)
-        // An earlier run's group (merged as found) is removed, never purged.
+        // An earlier run’s group (merged as found) is removed, never purged.
         let earlier = "88888888-2222-4333-8444-555555555555"
         try policy.ledger.add(.init(target: target, resource: "groups", id: earlier, name: "JTKTEST ID 0101-0000 – Group",
                                     removed: true, fromSweep: true), testPrefixes: ["JTKTEST "])
@@ -602,7 +615,7 @@ struct LedgerTests {
         #expect(throws: Ledger.LedgerError.self) {
             try ledger.add(.init(target: "a.example", resource: "scripts", id: "3", name: "Real script"), testPrefixes: [prefix])
         }
-        ledger.markRemoved(target: "a.example", resource: "categories", id: "1")
+        try ledger.recordRemoval(target: "a.example", resource: "categories", id: "1")
 
         let reopened = Ledger(fileURL: url)
         #expect(reopened.items.count == 2)
@@ -674,8 +687,8 @@ struct LiveCheckRunTests {
         try JSONEncoder().encode(sampleList()).write(to: list)
         try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: list.path)
         return ["JTKIT_LIVE": "1", "JTKIT_LIVE_PREFIX": prefix, "JTKIT_LIVE_RUN_DIR": folder.appending(path: "run").path,
-                "JTKIT_LIVE_ROLES": roles, "JTKIT_LIVE_ALLOWLIST": list.path,
-                "JTKIT_LIVE_JAMF_TEST_A_CLIENT_ID": "id-a", "JTKIT_LIVE_LEGACY_PREFIXES": "UIT - ", "JTKIT_LIVE_WRITES": "1"]
+                "JTKIT_LIVE_ROLES": roles, "allowlist": list.path,
+                "JTKIT_LIVE_JAMF_TEST_A_CLIENT_ID": "id-a", "JTKIT_LIVE_WRITES": "1"]
     }
 
     @Test("READ_ONLY_ROLES makes a role read only for the run, and only roles of the run")
@@ -683,10 +696,10 @@ struct LiveCheckRunTests {
         var env = try environment()
         let createGroup = request("POST", "https://graph.microsoft.com/v1.0/groups",
                                   headers: ["Authorization": "Bearer \(jwt(tid: entraTest))"], json: ["displayName": "\(prefix) – G"])
-        #expect(try LiveCheckRun(environment: env).policy.decide(createGroup).kind == .create(name: "\(prefix) – G"))
+        #expect(try makeRun(env).policy.decide(createGroup).kind == .create(name: "\(prefix) – G"))
 
         env["JTKIT_LIVE_READ_ONLY_ROLES"] = "intune-test"
-        let run = try LiveCheckRun(environment: env)
+        let run = try makeRun(env)
         #expect(run.readOnlyRoles == ["intune-test"])
         #expect(try run.entry(role: "intune-test", service: .intune).access == .readOnly)
         #expect(!run.policy.decide(createGroup).isAllowed)
@@ -696,41 +709,41 @@ struct LiveCheckRunTests {
         #expect(run.policy.decide(request("POST", "https://test-a.jamf.example/api/v1/categories", json: ["name": "\(prefix) – C"])).isAllowed)
 
         env["JTKIT_LIVE_READ_ONLY_ROLES"] = "jamfpro-readonly"
-        #expect(throws: LiveCheckRun.RunError.self) { try LiveCheckRun(environment: env) }
+        #expect(throws: LiveCheckRun.RunError.self) { try makeRun(env) }
     }
 
     @Test func offUnlessTheReleaseCheckSwitchesItOn() throws {
         var env = try environment()
         env["JTKIT_LIVE"] = nil
-        #expect(throws: LiveCheckRun.RunError.self) { try LiveCheckRun(environment: env) }
+        #expect(throws: LiveCheckRun.RunError.self) { try makeRun(env) }
     }
 
     @Test func refusesRolesNotOnTheAllowList() throws {
-        #expect(throws: LiveCheckRun.RunError.self) { try LiveCheckRun(environment: try environment(roles: "jamf-test-a,customer")) }
+        #expect(throws: LiveCheckRun.RunError.self) { try makeRun(try environment(roles: "jamf-test-a,customer")) }
     }
 
     @Test func prefixMustBeATestPrefix() throws {
         var env = try environment()
         env["JTKIT_LIVE_PREFIX"] = "JD - "
-        #expect(throws: LiveCheckRun.RunError.self) { try LiveCheckRun(environment: env) }
+        #expect(throws: LiveCheckRun.RunError.self) { try makeRun(env) }
         #expect(LiveCheckRun.makePrefix(appCode: "JD", date: Date(timeIntervalSince1970: 0)).hasPrefix("JTKTEST JD "))
     }
 
     @Test func credentialsComeFromTheEnvironment() throws {
-        let run = try LiveCheckRun(environment: try environment())
+        let run = try makeRun(try environment())
         #expect(try run.credential("jamf-test-a", "client-id") == "id-a")
         #expect(throws: LiveCheckRun.RunError.self) { try run.credential("jamf-test-a", "client-secret") }
         #expect(LiveCheckRun.variable(role: "jamf-test-a", item: "client-secret") == "JTKIT_LIVE_JAMF_TEST_A_CLIENT_SECRET")
     }
 
     @Test func noFaultUnlessTheScriptAsksForOne() throws {
-        let normal = try LiveCheckRun(environment: try environment())
+        let normal = try makeRun(try environment())
         #expect(normal.fault == nil)
         try normal.injectFault("fail-live-step", at: "after create")   // does nothing
 
         var env = try environment()
         env["JTKIT_LIVE_FAULT"] = "fail-live-step"
-        let faulty = try LiveCheckRun(environment: env)
+        let faulty = try makeRun(env)
         try faulty.injectFault("interrupt-live", at: "elsewhere")       // another fault: nothing
         #expect(throws: LiveCheckRun.RunError.self) { try faulty.injectFault("fail-live-step", at: "after create") }
         let results = try String(contentsOf: faulty.runFolder.appending(path: "results.jsonl"), encoding: .utf8)
@@ -740,7 +753,7 @@ struct LiveCheckRunTests {
     @Test func withoutWritesEveryTenantIsReadOnly() throws {
         var env = try environment()
         env["JTKIT_LIVE_WRITES"] = nil
-        let run = try LiveCheckRun(environment: env)
+        let run = try makeRun(env)
         #expect(run.policy.decide(request("GET", "https://test-a.jamf.example/api/v1/categories")).kind == .read)
         #expect(run.policy.decide(request("POST", "https://test-a.jamf.example/api/v1/auth/token")).kind == .signIn)
         #expect(!run.policy.decide(request("POST", "https://test-a.jamf.example/api/v1/categories", json: ["name": "\(prefix) – C"])).isAllowed)
@@ -750,7 +763,7 @@ struct LiveCheckRunTests {
     }
 
     @Test func engineOnlyOnFullTenantsOfTheRun() throws {
-        let run = try LiveCheckRun(environment: try environment())
+        let run = try makeRun(try environment())
         try run.requireEngineTarget(role: "jamf-test-a", service: .jamfPlatform, region: "eu", environmentID: platformA)
         try run.requireEngineTarget(role: "jamf-test-a", service: .jamfPro, host: "test-a.jamf.example")
         #expect(throws: LiveCheckRun.RunError.self) {
@@ -761,9 +774,11 @@ struct LiveCheckRunTests {
     }
 
     @Test func sweepOnlyOnFullTenantsAndOnlyTestNames() throws {
-        let run = try LiveCheckRun(environment: try environment())
-        try run.adoptForSweep(role: "jamf-test-a", service: .jamfPro, resource: "categories", id: "7", name: "UIT - Security")
-        try run.adoptForSweep(role: "jamf-test-a", service: .jamfPro, resource: "categories", id: "8", name: "JTKTEST JD 0101-0000 – Old")
+        let run = try makeRun(try environment())
+        try run.adoptForSweep(role: "jamf-test-a", service: .jamfPro, resource: "categories", id: "7", name: "JTKTEST JD 0101-0000 – Old")
+        #expect(throws: Ledger.LedgerError.self) {
+            try run.adoptForSweep(role: "jamf-test-a", service: .jamfPro, resource: "categories", id: "8", name: "UIT - Security")
+        }
         #expect(throws: Ledger.LedgerError.self) {
             try run.adoptForSweep(role: "jamf-test-a", service: .jamfPro, resource: "categories", id: "9", name: "Security")
         }
@@ -778,30 +793,26 @@ struct LiveCheckRunTests {
         #expect(decision.kind == .delete)
     }
 
-    @Test("Create-and-remove tenants: only legacy test objects are swept, and only while legacy prefixes are passed (0.12.5)")
-    func legacySweepOnCreateAndRemove() throws {
+    @Test("The one-time legacy sweep is over: the shims say so, and create-and-remove tenants adopt nothing")
+    @available(*, deprecated)
+    func legacySweepIsOver() throws {
         var env = try environment()
         env["JTKIT_LIVE_LEGACY_PREFIXES"] = "[AUTOTEST]|UIT - "
-        let run = try LiveCheckRun(environment: env)
-        #expect(run.isLegacyTestObject("[AUTOTEST] macOS – Script"))
-        #expect(!run.isLegacyTestObject("JTKTEST ID 0101-0000 – Script"))
-        try run.adoptForSweep(role: "intune-test", service: .intune, resource: "deviceShellScripts",
-                              id: "12345678-2222-4333-8444-555555555555", name: "[AUTOTEST] macOS – Script")
-        #expect(run.policy.decide(request("DELETE", "https://graph.microsoft.com/beta/deviceManagement/deviceShellScripts/12345678-2222-4333-8444-555555555555",
-                                          headers: ["Authorization": "Bearer \(jwt(tid: entraTest))"])).kind == .delete)
-        #expect(throws: LiveCheckRun.RunError.self) {
-            try run.adoptForSweep(role: "intune-test", service: .intune, resource: "groups", id: "z", name: "JTKTEST ID 0101-0000 – Group")
-        }
-        env["JTKIT_LIVE_LEGACY_PREFIXES"] = nil
-        let later = try LiveCheckRun(environment: env)
-        #expect(throws: LiveCheckRun.RunError.self) {
-            try later.adoptForSweep(role: "intune-test", service: .intune, resource: "deviceShellScripts", id: "w", name: "[AUTOTEST] macOS – Script")
+        let run = try makeRun(env)
+        #expect(run.legacyPrefixes.isEmpty)
+        #expect(!run.isLegacyTestObject("[AUTOTEST] macOS – Script"))
+        #expect(!run.isSweepable("UIT - Security") && run.isSweepable("JTKTEST ID 0101-0000 – Script"))
+        for name in ["[AUTOTEST] macOS – Script", "JTKTEST ID 0101-0000 – Group"] {
+            #expect(throws: LiveCheckRun.RunError.self) {
+                try run.adoptForSweep(role: "intune-test", service: .intune, resource: "deviceShellScripts",
+                                      id: "12345678-2222-4333-8444-555555555555", name: name)
+            }
         }
     }
 
-    @Test("The test host's Keychain names are written as hashes only (0.12.5)")
+    @Test("The test host’s Keychain names are written as hashes only")
     func hostKeychainNamesAreHashes() throws {
-        let run = try LiveCheckRun(environment: try environment())
+        let run = try makeRun(try environment())
         let service = "JTKitLiveCheckTests-\(UUID().uuidString)"
         let add: [String: Any] = [kSecClass as String: kSecClassGenericPassword, kSecAttrService as String: service,
                                   kSecAttrAccount as String: "account-one", kSecValueData as String: Data("not-read".utf8)]
@@ -816,7 +827,7 @@ struct LiveCheckRunTests {
     }
 
     @Test func objectsMadeByTheEngineNeedTheRunPrefix() throws {
-        let run = try LiveCheckRun(environment: try environment())
+        let run = try makeRun(try environment())
         try run.recordCreated(role: "jamf-test-a", service: .jamfPlatform, resource: "categories", id: "3", name: "\(prefix) – C")
         #expect(throws: Ledger.LedgerError.self) {
             try run.recordCreated(role: "jamf-test-a", service: .jamfPlatform, resource: "categories", id: "4", name: "UIT - C")
@@ -824,7 +835,7 @@ struct LiveCheckRunTests {
     }
 
     @Test func recordsResults() throws {
-        let run = try LiveCheckRun(environment: try environment())
+        let run = try makeRun(try environment())
         run.record(step: "sign in", passed: true)
         run.record(step: "deploy", passed: false, note: "boom")
         let lines = try String(contentsOf: run.runFolder.appending(path: "results.jsonl"), encoding: .utf8).split(separator: "\n")
@@ -832,8 +843,8 @@ struct LiveCheckRunTests {
     }
 
     /// Each test of a release check runs in its own process: a refusal in
-    /// one must still be in the report after the next (before 0.12.3 the
-    /// last process to record a step overwrote the others').
+    /// one must still be in the report after the next, never overwritten by
+    /// the last process to record a step.
     @Test func refusalsOfEveryTestProcessAreKept() async throws {
         let env = try environment()
         let server = MockServer { _ in .json(200, "{}") }
@@ -842,10 +853,10 @@ struct LiveCheckRunTests {
         var second = URLRequest(url: URL(string: "https://y.example/api/v1/scripts")!)
         second.httpMethod = "DELETE"
         // Two runs on the same folder stand for two test processes.
-        let one = try LiveCheckRun(environment: env, upstream: server.session)
+        let one = try makeRun(env, upstream: server.session)
         _ = try? await one.network.session.data(for: first)
         one.record(step: "first test", passed: true)
-        let two = try LiveCheckRun(environment: env, upstream: server.session)
+        let two = try makeRun(env, upstream: server.session)
         _ = try? await two.network.session.data(for: second)
         // A test that never records a step still leaves its refusal.
         #expect(two.runRefusals.map(\.location) == ["x.example/api/v1/categories", "y.example/api/v1/scripts"])
@@ -871,10 +882,10 @@ struct ParsingTests {
 }
 
 
-// MARK: - A delete counts once a read-back confirms it (0.12.6)
+// MARK: - A delete counts once a read-back confirms it
 
-/// A value the mock servers' handlers share.
-private final class Flag: @unchecked Sendable {
+/// A value the mock servers’ handlers share.
+final class Flag: @unchecked Sendable {
     private let lock = NSLock()
     private var stored: Bool
     init(_ value: Bool) { stored = value }
@@ -893,8 +904,8 @@ struct DeleteReadBackTests {
         try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: list.path)
         return try LiveCheckRun(environment: [
             "JTKIT_LIVE": "1", "JTKIT_LIVE_PREFIX": prefix, "JTKIT_LIVE_RUN_DIR": folder.appending(path: "run").path,
-            "JTKIT_LIVE_ROLES": "jamf-test-a,intune-test", "JTKIT_LIVE_ALLOWLIST": list.path, "JTKIT_LIVE_WRITES": "1",
-        ], upstream: upstream, readBack: fast)
+            "JTKIT_LIVE_ROLES": "jamf-test-a,intune-test", "JTKIT_LIVE_WRITES": "1",
+        ], upstream: upstream, readBack: fast, allowListURL: list)
     }
 
     private func delete(_ url: String, on run: LiveCheckRun, headers: [String: String] = [:]) async throws {
@@ -910,7 +921,7 @@ struct DeleteReadBackTests {
             request.method == "DELETE" ? .json(404, #"{"httpStatus":404,"errors":[{"code":"NOT_FOUND"}]}"#) : .json(200, #"{"id":"41"}"#)
         }
         let run = try run(upstream: server.session)
-        try run.ledger.add(.init(target: "test-a.jamf.example", resource: "categories", id: "41", name: "\(prefix) – C"), testPrefixes: [prefix])
+        try run.ledger.add(created("test-a.jamf.example", "categories", "41", "\(prefix) – C"), testPrefixes: [prefix])
         try await delete("https://test-a.jamf.example/api/v1/categories/41", on: run)
         #expect(run.notRemoved.map(\.id) == ["41"])
         #expect(server.requests.filter { $0.method == "GET" }.count == fast.attempts, "read back until it gave up")
@@ -929,13 +940,13 @@ struct DeleteReadBackTests {
     func successWhileStillThere() async throws {
         let server = MockServer { request in request.method == "DELETE" ? .json(204, "") : .json(200, #"{"id":"41"}"#) }
         let run = try run(upstream: server.session)
-        try run.ledger.add(.init(target: "test-a.jamf.example", resource: "categories", id: "41", name: "\(prefix) – C"), testPrefixes: [prefix])
+        try run.ledger.add(created("test-a.jamf.example", "categories", "41", "\(prefix) – C"), testPrefixes: [prefix])
         try await delete("https://test-a.jamf.example/api/v1/categories/41", on: run)
         #expect(run.notRemoved.count == 1)
         #expect(throws: LiveCheckRun.RunError.self) { try run.requireNothingLeft() }
     }
 
-    @Test("Graph's 400 ResourceNotFound on the read-back counts as gone; an error answer isn't read back")
+    @Test("Graph’s 400 ResourceNotFound on the read-back counts as gone; an error answer isn’t read back")
     func graphAndErrorAnswers() async throws {
         let id = "11111111-2222-4333-8444-555555555555"
         let server = MockServer { request in
@@ -946,12 +957,12 @@ struct DeleteReadBackTests {
         }
         let run = try run(upstream: server.session)
         let target = "intune:\(entraTest)"
-        try run.ledger.add(.init(target: target, resource: "configurationPolicies", id: id, name: "\(prefix) – P"), testPrefixes: [prefix])
+        try run.ledger.add(created(target, "configurationPolicies", id, "\(prefix) – P"), testPrefixes: [prefix])
         try await delete("https://graph.microsoft.com/beta/deviceManagement/configurationPolicies/\(id)", on: run,
                          headers: ["Authorization": "Bearer \(jwt(tid: entraTest))"])
         #expect(run.notRemoved.isEmpty)
 
-        try run.ledger.add(.init(target: "test-a.jamf.example", resource: "categories", id: "42", name: "\(prefix) – D"), testPrefixes: [prefix])
+        try run.ledger.add(created("test-a.jamf.example", "categories", "42", "\(prefix) – D"), testPrefixes: [prefix])
         let before = server.requests.count
         try await delete("https://test-a.jamf.example/api/v1/categories/42", on: run)
         #expect(server.requests.count == before + 1, "a 422 deleted nothing: no read-back")
@@ -970,15 +981,18 @@ struct DeleteReadBackTests {
             case ("DELETE", _), ("GET", "/device-groups/v1/device-groups/\(group)"):
                 return .json(404, #"{"httpStatus":404,"errors":[{"code":"NOT_FOUND","field":"groupPlatformId"}]}"#)
             case ("GET", "/pro/v2/groups"):
-                let entry = #"{"groupPlatformId":"\#(group.uppercased())","groupJamfProId":"57","groupName":"\#(prefix) – Group","groupType":"COMPUTER"}"#
+                let entry = #"{"groupPlatformId":"\#(group.uppercased())","groupJamfProId":"57","groupName":"\#(prefix) – Group","deviceType":"COMPUTER","groupType":"SMART"}"#
                 return .json(200, #"{"totalCount":1,"results":["# + (listed.value ? entry : "") + "]}")
+            case ("GET", "/proclassic/computergroups/id/57"):
+                return .init(status: 200, headers: ["Content-Type": "application/xml"],
+                             body: Data("<computer_group><id>57</id><name>\(prefix) – Group</name></computer_group>".utf8))
             default:
                 return .json(500, "{}")
             }
         }
         let run = try run(upstream: server.session)
         let target = "platform:\(platformA)"
-        try run.ledger.add(.init(target: target, resource: "device-groups", id: group, name: "\(prefix) – Group"), testPrefixes: [prefix])
+        try run.ledger.add(created(target, "device-groups", group, "\(prefix) – Group"), testPrefixes: [prefix])
         try await delete("https://eu.api.jamfcloud.com/device-groups/v1/device-groups/\(group)", on: run,
                          headers: ["X-Environment-Id": platformA])
         #expect(run.notRemoved.isEmpty)
@@ -987,20 +1001,19 @@ struct DeleteReadBackTests {
                                            && $0.header("X-Environment-Id") == platformA })
     }
 
-    @Test("The Jamf Pro fallback only for the ledger's group, by its exact name")
+    @Test("The Jamf Pro fallback only for the ledger’s group, by its exact name")
     func fallbackOnlyForTheLedgersGroup() async throws {
         let group = "830636ce-d876-4768-a1df-0be83503e0f1"
         let server = MockServer { request in
             switch (request.method, request.path) {
             case ("GET", "/pro/v2/groups"):
-                return .json(200, #"{"results":[{"groupPlatformId":"\#(group)","groupJamfProId":"57","groupName":"Finance Macs","groupType":"COMPUTER"}]}"#)
+                return .json(200, #"{"results":[{"groupPlatformId":"\#(group)","groupJamfProId":"57","groupName":"Finance Macs","deviceType":"COMPUTER","groupType":"STATIC"}]}"#)
             default:
                 return .json(404, "{}")
             }
         }
         let run = try run(upstream: server.session)
-        try run.ledger.add(.init(target: "platform:\(platformA)", resource: "device-groups", id: group, name: "\(prefix) – Group"),
-                           testPrefixes: [prefix])
+        try run.ledger.add(created("platform:\(platformA)", "device-groups", group, "\(prefix) – Group"), testPrefixes: [prefix])
         try await delete("https://eu.api.jamfcloud.com/device-groups/v1/device-groups/\(group)", on: run,
                          headers: ["X-Environment-Id": platformA])
         #expect(!server.requests.contains { $0.path.hasPrefix("/proclassic/") }, "another name: no fallback")
@@ -1009,9 +1022,9 @@ struct DeleteReadBackTests {
 }
 
 
-// MARK: - Entra's recycle bin (0.12.7)
+// MARK: - Entra’s recycle bin
 
-@Suite("Live check: Entra's recycle bin")
+@Suite("Live check: Entra’s recycle bin")
 struct RecycleBinTests {
     private func run(upstream: URLSession, writes: Bool = true) throws -> LiveCheckRun {
         let folder = tempFolder()
@@ -1020,14 +1033,14 @@ struct RecycleBinTests {
         try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: list.path)
         return try LiveCheckRun(environment: [
             "JTKIT_LIVE": "1", "JTKIT_LIVE_PREFIX": prefix, "JTKIT_LIVE_RUN_DIR": folder.appending(path: "run").path,
-            "JTKIT_LIVE_ROLES": "jamf-test-a,intune-test", "JTKIT_LIVE_ALLOWLIST": list.path, "JTKIT_LIVE_WRITES": writes ? "1" : "0",
-        ], upstream: upstream, readBack: ReadBack(attempts: 2, interval: 0.01, recycleBinAttempts: 5))
+            "JTKIT_LIVE_ROLES": "jamf-test-a,intune-test", "JTKIT_LIVE_WRITES": writes ? "1" : "0",
+        ], upstream: upstream, readBack: ReadBack(attempts: 2, interval: 0.01, recycleBinAttempts: 5), allowListURL: list)
     }
 
     private let bearer = ["Authorization": "Bearer \(jwt(tid: entraTest))"]
     private let group = "22222222-2222-4333-8444-555555555555"
 
-    @Test("The sweep may purge an earlier run's JTKTEST group from the recycle bin, nothing else")
+    @Test("The sweep may purge an earlier run’s JTKTEST group from the recycle bin, nothing else")
     func sweepPurgesOnlyTestGroups() throws {
         let run = try run(upstream: LiveCheckNetwork.makeUpstream())
         let purge = request("DELETE", "https://graph.microsoft.com/v1.0/directory/deletedItems/\(group)", headers: bearer)

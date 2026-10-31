@@ -14,8 +14,8 @@ struct JamfTokenProviderTests {
         log: ActivityLog = ActivityLog(),
         clock: TestClock = TestClock(),
         secret: @escaping @Sendable () throws -> String
-    ) throws -> JamfTokenProvider {
-        try JamfTokenProvider(connection: connection, secret: secret,
+    ) throws -> JamfPlatform.TokenProvider {
+        try JamfPlatform.TokenProvider(connection: connection, secret: secret,
                               recorder: RequestRecorder(session: server.session, log: log),
                               now: { clock.now })
     }
@@ -57,11 +57,11 @@ struct JamfTokenProviderTests {
     @Test("Jamf Pro user tokens: expiry with and without fractional seconds")
     func userTokenFormats() throws {
         let now = Date(timeIntervalSince1970: 1_800_000_000) // 2027-01-15T08:00:00Z
-        let fractional = try JamfTokenProvider.parse(Data(#"{"token":"a","expires":"2027-01-15T08:30:00.000Z"}"#.utf8), now: now)
+        let fractional = try JamfPlatform.TokenProvider.parse(Data(#"{"token":"a","expires":"2027-01-15T08:30:00.000Z"}"#.utf8), now: now)
         #expect(fractional == ("a", 1800))
-        let whole = try JamfTokenProvider.parse(Data(#"{"token":"b","expires":"2027-01-15T08:10:00Z"}"#.utf8), now: now)
+        let whole = try JamfPlatform.TokenProvider.parse(Data(#"{"token":"b","expires":"2027-01-15T08:10:00Z"}"#.utf8), now: now)
         #expect(whole == ("b", 600))
-        let missing = try JamfTokenProvider.parse(Data(#"{"token":"c"}"#.utf8), now: now)
+        let missing = try JamfPlatform.TokenProvider.parse(Data(#"{"token":"c"}"#.utf8), now: now)
         #expect(missing == ("c", 1200))
     }
 
@@ -108,7 +108,7 @@ struct JamfTokenProviderTests {
         #expect(server.requests.last?.bodyString.contains("client_secret=second") == true)
     }
 
-    @Test("A refused sign-in says why, without the secret; the app's own errors pass unchanged")
+    @Test("A refused sign-in says why, without the secret; the app’s own errors pass unchanged")
     func failures() async throws {
         let server = MockServer { _ in .json(401, #"{"error":"invalid_client","error_description":"bad","client_secret":"echoed"}"#) }
         let log = ActivityLog()
@@ -137,6 +137,25 @@ struct JamfTokenProviderTests {
         }
     }
 
+    @Test("A sign-in answer that repeats the secret under any name doesn’t show it, in the error or the log")
+    func secretScrubbedByValue() async throws {
+        let echoed = "long+secret&value=1"
+        let server = MockServer { _ in .json(400, #"{"error":"invalid_request","error_description":"rejected long+secret&value=1","note":"long%2Bsecret%26value%3D1"}"#) }
+        let log = ActivityLog()
+        do {
+            _ = try await provider(server, log: log) { echoed }.token()
+            Issue.record("Expected a failure")
+        } catch let error as HTTPError {
+            guard case let .status(response, _, _, _) = error else { Issue.record("\(error)"); return }
+            #expect(!String(decoding: response.data, as: UTF8.self).contains(echoed))
+            #expect(!error.localizedDescription.contains(echoed))
+            #expect(!String(decoding: response.data, as: UTF8.self).contains("long%2Bsecret"))
+            #expect(!"\(error)".contains(echoed))
+        }
+        let transcript = ActivityLogExport.transcript(of: try #require(log.entries.first))
+        #expect(!transcript.contains(echoed))
+    }
+
     @Test("A password sign-in is logged without the password")
     func basicLogged() async throws {
         let server = MockServer { _ in .json(200, #"{"token":"user-token","expires":"2027-01-15T08:30:00Z"}"#) }
@@ -163,11 +182,11 @@ struct JamfTokenProviderTests {
         #expect(Connection(name: "", service: .intune).jamfBaseURL == nil)
     }
 
-    @Test("Connections that can't sign in to Jamf are refused")
+    @Test("Connections that can’t sign in to Jamf are refused")
     func unsupported() {
         let school = Connection(name: "School", service: .jamfSchool, serverURL: "https://school.example.com")
         #expect(throws: HTTPError.self) {
-            _ = try JamfTokenProvider(connection: school, secret: { "" }, recorder: RequestRecorder(log: nil))
+            _ = try JamfPlatform.TokenProvider(connection: school, secret: { "" }, recorder: RequestRecorder(session: URLSession(configuration: .ephemeral), log: nil))
         }
     }
 

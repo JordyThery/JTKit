@@ -95,7 +95,7 @@ struct RedactionTests {
                                     data: Data(#"{"error":"invalid_client","client_secret":"leaked"}"#.utf8))
         let error = HTTPError.status(response, method: "POST", path: "auth/token", duringSignIn: true)
         let message = error.localizedDescription
-        #expect(message.hasPrefix("Sign-in failed (HTTP 401)"))
+        #expect(message.hasPrefix("Sign-in failed: HTTP 401 Unauthorized\n"))
         #expect(message.contains("invalid_client"))
         #expect(!message.contains("leaked"))
         let transport = HTTPError.transport(method: "GET", path: "x", code: .timedOut, message: "Bearer abc failed")

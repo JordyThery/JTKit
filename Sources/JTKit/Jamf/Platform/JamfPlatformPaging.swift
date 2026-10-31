@@ -6,7 +6,7 @@ extension JamfPlatform {
         public var results: [Item]
         public var totalCount: Int?
         public var hasNext: Bool?
-        /// Results that couldn't be read (e.g. without an ID); they still count
+        /// Results that couldn’t be read (e.g. without an ID); they still count
         /// towards the end of the list.
         public var unreadableCount: Int
 
@@ -17,10 +17,10 @@ extension JamfPlatform {
             self.unreadableCount = unreadableCount
         }
 
-        /// Reads a page; `item` returns nil for a result it can't read.
+        /// Reads a page; `item` returns nil for a result it can’t read.
         public init(json: LosslessJSON, item: (LosslessJSON) -> Item?) throws {
             guard let raw = json["results"]?.arrayValue else {
-                throw JamfPlatformError(.invalidResponse("The list has no \"results\" array."))
+                throw JamfPlatform.APIError(.invalidResponse("The list has no \"results\" array."))
             }
             let parsed = raw.compactMap(item)
             self.init(results: parsed,
@@ -60,7 +60,7 @@ extension JamfPlatform {
             received += result.results.count + result.unreadableCount
             if !hasMore(after: result, received: received, pageSize: pageSize) { return items }
         }
-        throw JamfPlatformError(.pageLimitReached(path: path, pages: maxPages))
+        throw JamfPlatform.APIError(.pageLimitReached(path: path, pages: maxPages))
     }
 }
 

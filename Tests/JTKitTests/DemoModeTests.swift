@@ -4,7 +4,7 @@ import AppKit
 @testable import JTKit
 import JTKitTestSupport
 
-/// JTKit's real Jamf Platform client against the demo server, as an app uses it.
+/// JTKit’s real Jamf Platform client against the demo server, as an app uses it.
 private func demoClient(_ server: DemoJamfPlatformServer = DemoJamfPlatformServer(),
                         log: ActivityLog? = nil) throws -> (JamfPlatform.Client, DemoNetwork) {
     let network = DemoNetwork(servers: [DemoSamples.platformHost: server])
@@ -14,7 +14,7 @@ private func demoClient(_ server: DemoJamfPlatformServer = DemoJamfPlatformServe
     return (client, network)
 }
 
-/// An app's own demo service, as a route sees it: one fixed answer, and the requests it got.
+/// An app’s own demo service, as a route sees it: one fixed answer, and the requests it got.
 private final class RecordingDemoServer: DemoServer, @unchecked Sendable {
     private let lock = NSLock()
     private var received: [DemoRequest] = []
@@ -36,7 +36,7 @@ private final class RecordingDemoServer: DemoServer, @unchecked Sendable {
 
 @Suite("Demo Jamf Platform server")
 struct DemoJamfPlatformServerTests {
-    @Test("Signs in and lists Contoso's device groups and Blueprints, newest first")
+    @Test("Signs in and lists Contoso’s device groups and Blueprints, newest first")
     func listsSampleData() async throws {
         let (client, _) = try demoClient()
         let groups = try await client.deviceGroups()
@@ -48,6 +48,19 @@ struct DemoJamfPlatformServerTests {
         #expect(list.first?.name == "Contoso – Made in Jamf, No Scope")
         #expect(list.last?.name == "Contoso – Finance Division Macs")
         #expect(try await JamfPlatform.Blueprints(client: client).list(search: "iPad").map(\.name) == ["Contoso – iPad App Settings"])
+    }
+
+    @Test("Device groups carry the real API’s fields: deviceType COMPUTER or MOBILE, groupType SMART or STATIC")
+    func deviceGroupShape() async throws {
+        let (client, _) = try demoClient()
+        let raw = try await client.allPages(JamfPlatform.Client.deviceGroupsPath) { entry -> String? in
+            "\(entry["deviceType"]?.stringValue ?? "-") \(entry["groupType"]?.stringValue ?? "-")"
+        }
+        #expect(Set(raw) == ["COMPUTER SMART", "COMPUTER STATIC", "MOBILE SMART", "MOBILE STATIC"])
+        let groups = try await client.deviceGroups()
+        #expect(groups.map(\.deviceType) == DemoSamples.platformGroups.map(\.deviceType))
+        #expect(groups.map(\.groupType) == DemoSamples.platformGroups.map(\.groupType))
+        #expect(groups.contains { $0.deviceType == .mobile && $0.groupType == .static })
     }
 
     @Test("Pages are answered page by page")
@@ -87,7 +100,7 @@ struct DemoJamfPlatformServerTests {
         #expect(try await blueprints.report(id: id) == JamfPlatform.BlueprintReport(succeeded: 48, failed: 0, pending: 0))
     }
 
-    @Test("An app's own Blueprints are added in the service's form and come back unchanged after a patch")
+    @Test("An app’s own Blueprints are added in the service’s form and come back unchanged after a patch")
     func addedBlueprints() async throws {
         let server = DemoJamfPlatformServer()
         let id = DemoSamples.uuid(0xb901)
@@ -132,7 +145,7 @@ struct DemoJamfPlatformServerTests {
         #expect(String(decoding: steps.serialized(), as: UTF8.self).contains(#""Ratio":1.0"#))
     }
 
-    @Test("An app's own device groups come after Contoso's; the same ID replaces one in place")
+    @Test("An app’s own device groups come after Contoso’s; the same ID replaces one in place")
     func addedGroups() async throws {
         let server = DemoJamfPlatformServer()
         let extra = JamfPlatform.DeviceGroup(id: DemoSamples.uuid(0xd6f1), name: "Design Macs", description: "Static",
@@ -150,7 +163,7 @@ struct DemoJamfPlatformServerTests {
         #expect(groups.filter { $0.name == "Design Macs" }.count == 2)
     }
 
-    @Test("A route hands an app's own paths to its server through the real client; other paths stay the server's")
+    @Test("A route hands an app’s own paths to its server through the real client; other paths stay the server’s")
     func routes() async throws {
         let server = DemoJamfPlatformServer()
         let classic = RecordingDemoServer(status: 200, body: #"{"os_x_configuration_profiles":[]}"#)
@@ -171,7 +184,7 @@ struct DemoJamfPlatformServerTests {
         #expect(classic.requests.count == 1)
 
         #expect(try await client.deviceGroups().count == DemoSamples.platformGroups.count, "other paths unchanged")
-        await #expect(throws: JamfPlatformError.self) {
+        await #expect(throws: JamfPlatform.APIError.self) {
             _ = try await client.send(HTTPRequest(path: "proclassicx/1"))
         }
     }
@@ -194,20 +207,20 @@ struct DemoJamfPlatformServerTests {
         let detail = try await blueprints.detail(id: id)
         #expect(detail.scopeDeviceGroups.isEmpty)
         let steps = try #require(detail.steps)
-        let error = await #expect(throws: JamfPlatformError.self) { try await blueprints.patchSteps(id: id, steps: steps) }
+        let error = await #expect(throws: JamfPlatform.APIError.self) { try await blueprints.patchSteps(id: id, steps: steps) }
         #expect(error?.body?.errors.first?.field == "scopeId")
         try await blueprints.patchScope(id: id, deviceGroups: [DemoSamples.platformGroups[0].id])
         try await blueprints.patchSteps(id: id, steps: steps)
     }
 
-    @Test("A Blueprint assigned to a division can't be changed")
+    @Test("A Blueprint assigned to a division can’t be changed")
     func divisionLocked() async throws {
         let (client, _) = try demoClient()
         let blueprints = JamfPlatform.Blueprints(client: client)
         let id = DemoSamples.uuid(0xb006)
         let detail = try await blueprints.detail(id: id)
         #expect(detail.isDivisionLocked)
-        let error = await #expect(throws: JamfPlatformError.self) {
+        let error = await #expect(throws: JamfPlatform.APIError.self) {
             try await blueprints.patchSteps(id: id, steps: try #require(detail.steps))
         }
         #expect(error?.hasCode(.divisionPatchNotAllowed) == true)
@@ -223,7 +236,7 @@ struct DemoJamfPlatformServerTests {
             ]))])])),
         ]))
         let step = LosslessJSON.object(LosslessJSON.Object(["name": .string("Step 1"), "components": .array([profile])]))
-        await #expect(throws: JamfPlatformError.self) {
+        await #expect(throws: JamfPlatform.APIError.self) {
             _ = try await JamfPlatform.Blueprints(client: client).create(
                 name: "Wi-Fi", description: nil, deviceGroups: [DemoSamples.platformGroups[0].id], steps: [step])
         }
@@ -232,7 +245,7 @@ struct DemoJamfPlatformServerTests {
     @Test("The Jamf School scenario has no device groups and numeric group IDs")
     func jamfSchool() async throws {
         let (client, _) = try demoClient(DemoJamfPlatformServer(scenario: .jamfSchool))
-        let error = await #expect(throws: JamfPlatformError.self) { _ = try await client.deviceGroups() }
+        let error = await #expect(throws: JamfPlatform.APIError.self) { _ = try await client.deviceGroups() }
         #expect(error?.hasCode(.tenantNotFound) == true)
         let detail = try await JamfPlatform.Blueprints(client: client).detail(id: DemoSamples.uuid(0xb003))
         #expect(detail.scopeDeviceGroups == ["102"])
@@ -260,21 +273,22 @@ struct DemoNetworkTests {
         #expect(error?.code == .cannotFindHost)
     }
 
-    @Test("A demo server answers only its own network's session")
+    @Test("A demo server answers only its own network’s session")
     func separateNetworks() async throws {
         let first = DemoNetwork(servers: [DemoSamples.platformHost: DemoJamfPlatformServer()])
         let second = DemoNetwork(servers: [:])
-        let url = try #require(URL(string: "https://\(DemoSamples.platformHost)/device-groups/v1/device-groups"))
-        let (_, response) = try await first.session.data(from: url)
+        var signIn = URLRequest(url: try #require(URL(string: "https://\(DemoSamples.platformHost)/auth/token")))
+        signIn.httpMethod = "POST"
+        let (_, response) = try await first.session.data(for: signIn)
         #expect((response as? HTTPURLResponse)?.statusCode == 200)
-        await #expect(throws: URLError.self) { _ = try await second.session.data(from: url) }
+        await #expect(throws: URLError.self) { _ = try await second.session.data(for: signIn) }
     }
 }
 
 @Suite("Demo connections and secrets")
 @MainActor
 struct DemoConnectionTests {
-    @Test("Demo connections are recognised by ID and by address; real ones aren't")
+    @Test("Demo connections are recognized by ID and by address; real ones aren’t")
     func isDemo() {
         #expect(Connection.demoJamfPlatform.isDemo)
         #expect(Connection(id: UUID(uuidString: DemoSamples.uuid(0x42))!, name: "x", service: .jamfPro).isDemo)
@@ -330,7 +344,7 @@ struct DemoModeSwitchTests {
         return (UserDefaults(suiteName: name)!, name)
     }
 
-    @Test("The choice is saved under the app's key")
+    @Test("The choice is saved under the app’s key")
     func saved() {
         let (defaults, name) = defaults()
         defer { defaults.removePersistentDomain(forName: name) }
@@ -382,7 +396,7 @@ struct DemoModeSwitchTests {
         #expect(demo.jamfPlatform().session === source.session)
     }
 
-    @Test("With unsaved work the switch waits for the app's question; without, it switches")
+    @Test("With unsaved work the switch waits for the app’s question; without, it switches")
     func asksBeforeSwitching() {
         let (defaults, name) = defaults()
         defer { defaults.removePersistentDomain(forName: name) }
@@ -409,7 +423,7 @@ struct DemoModeSwitchTests {
         demo.isOn = false
     }
 
-    @Test("The question and the picker's name, in the shared wording")
+    @Test("The question and the picker’s name, in the shared wording")
     func wording() {
         #expect(DemoModeSwitchConfirmation.title(isOn: true, discarding: "unsaved changes")
                 == "Turn on Demo Mode and discard unsaved changes?")
@@ -430,7 +444,7 @@ struct DemoModeSwitchTests {
         try? FileManager.default.removeItem(at: demo.scratchDirectory)
     }
 
-    @Test("Window titles get “— Demo” while it's on, once, and lose it when it's off")
+    @Test("Window titles get “— Demo” while it’s on, once, and lose it when it’s off")
     func titles() {
         #expect(DemoMode.windowTitle("AppSettings2Blueprint", isOn: true) == "AppSettings2Blueprint — Demo")
         #expect(DemoMode.windowTitle("AppSettings2Blueprint — Demo", isOn: true) == "AppSettings2Blueprint — Demo")
@@ -469,7 +483,7 @@ struct DemoSampleDataTests {
         }
     }
 
-    @Test("Every ID is in the fake range, every name is Contoso's, every identifier is invented",
+    @Test("Every ID is in the fake range, every name is Contoso’s, every identifier is invented",
           arguments: [false, true])
     func lint(jamfSchool: Bool) throws {
         let uuid = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/
@@ -479,7 +493,7 @@ struct DemoSampleDataTests {
             for text in Self.strings(in: .object(blueprint)) {
                 if text.wholeMatch(of: uuid) != nil { #expect(DemoSamples.isDemoID(text), "\(text)") }
                 if text.contains("@") { #expect(text.hasSuffix(".contoso.example"), "\(text)") }
-                // Apple's and Jamf's type identifiers are schema names; any other identifier is invented.
+                // Apple’s and Jamf’s type identifiers are schema names; any other identifier is invented.
                 if text.hasPrefix("com."), !text.hasPrefix("com.apple."), !text.hasPrefix("com.jamf.") {
                     #expect(text.hasPrefix("com.contoso.example."), "\(text)")
                 }

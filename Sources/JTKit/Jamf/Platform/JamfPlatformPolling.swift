@@ -57,14 +57,14 @@ extension JamfPlatform {
     }
 
     /// Checks on a job until it is done or the time limit is reached. Cancel
-    /// (cancelling the task) stops it at once, also during a wait.
+    /// (canceling the task) stops it at once, also during a wait.
     public struct Poller: Sendable {
         public var policy: PollingPolicy
         private let sleep: @Sendable (Duration) async throws -> Void
         private let now: @Sendable () -> ContinuousClock.Instant
 
         /// - Parameters:
-        ///   - sleep, now: injectable for tests; a test's `sleep` can move its `now` on.
+        ///   - sleep, now: injectable for tests; a test’s `sleep` can move its `now` on.
         public init(
             policy: PollingPolicy = .standard,
             sleep: @escaping @Sendable (Duration) async throws -> Void = { try await Task.sleep(for: $0) },

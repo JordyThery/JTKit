@@ -4,9 +4,9 @@ import JTKit
 /// A Microsoft account signed in on this Mac, as MSAL keeps it.
 public struct MicrosoftAccount: Sendable, Hashable {
     public let username: String
-    /// MSAL's home account ID, saved by the app to find the account again.
+    /// MSAL’s home account ID, saved by the app to find the account again.
     public let identifier: String
-    /// The account's home tenant ID, when MSAL knows it.
+    /// The account’s home tenant ID, when MSAL knows it.
     public let homeTenantID: String?
 
     public init(username: String, identifier: String, homeTenantID: String? = nil) {
@@ -33,19 +33,23 @@ public struct MicrosoftToken: Sendable {
 public enum MicrosoftSignInError: Error, LocalizedError, Sendable, Equatable {
     case invalidClientID
     case missingTenantID
+    /// Neither a tenant ID (a UUID) nor a domain name.
+    case invalidTenantID
     case noWindow
     case notSignedIn
     case noToken
-    /// `silentToken`: MSAL needs Microsoft's sign-in window (an expired
-    /// sign-in or a permission not granted yet); no window was opened (0.12.5).
+    /// `silentToken`: MSAL needs Microsoft’s sign-in window (an expired
+    /// sign-in or a permission not granted yet); no window was opened.
     case interactionRequired
 
     public var errorDescription: String? {
         switch self {
         case .invalidClientID:
-            "This connection has no valid client ID. Enter the Application (client) ID of the app registration in that tenant."
+            "The client ID isn’t a UUID. Copy the Application (client) ID from Entra."
         case .missingTenantID:
             "This connection has no tenant ID."
+        case .invalidTenantID:
+            "This connection’s tenant isn’t a tenant ID or domain. Copy the Directory (tenant) ID from Entra."
         case .noWindow:
             "No window available to show Microsoft’s sign-in."
         case .notSignedIn:
@@ -65,7 +69,7 @@ protocol SignInBackend: AnyObject {
     func accounts() -> [MicrosoftAccount]
     func account(identifier: String) -> MicrosoftAccount?
     func silentToken(scopes: [String], account: MicrosoftAccount, authority: URL, forceRefresh: Bool) async throws -> MicrosoftToken
-    /// Microsoft's sign-in window: for `account` when given (no account
+    /// Microsoft’s sign-in window: for `account` when given (no account
     /// picker), else with the account picker.
     func interactiveToken(scopes: [String], account: MicrosoftAccount?, authority: URL) async throws -> MicrosoftToken
     func remove(_ account: MicrosoftAccount)
@@ -74,25 +78,25 @@ protocol SignInBackend: AnyObject {
     func needsInteraction(_ error: any Error) -> Bool
 }
 
-/// Microsoft's interactive sign-in (MSAL) for one app registration (client
+/// Microsoft’s interactive sign-in (MSAL) for one app registration (client
 /// ID), in any of its tenants. MSAL keeps the signed-in accounts and tokens
 /// in its own Keychain cache, so they survive relaunches.
 ///
-/// - Silent token first; Microsoft's sign-in window only when MSAL needs it.
+/// - Silent token first; Microsoft’s sign-in window only when MSAL needs it.
 /// - One window at a time. Requests that need the window for the same
 ///   tenant, account and permissions share it; a request for other
 ///   permissions waits until the window closes, then asks again.
 /// - After an expired sign-in the window is for the saved account.
 /// - Permissions are asked for step by step: each request names its own.
 /// - `MicrosoftTokenSource` hands its tokens to `Graph.Client`, the same way
-///   as the app sign-in (`EntraTokenProvider`).
+///   as the app sign-in (`Graph.TokenProvider`).
 @MainActor
 public final class MicrosoftSignIn {
-    /// The MSAL version JTKit pins; its licence notice is `Acknowledgement.msal`.
+    /// The MSAL version JTKit pins; its license notice is `Acknowledgement.msal`.
     public nonisolated static let msalVersion = "2.16.0"
     public nonisolated static let authorityBase = "https://login.microsoftonline.com"
 
-    /// MSAL's macOS redirect address: `msauth.<bundle ID>://auth`.
+    /// MSAL’s macOS redirect address: `msauth.<bundle ID>://auth`.
     public nonisolated static var defaultRedirectURI: String {
         "msauth.\(Bundle.main.bundleIdentifier ?? "")://auth"
     }
@@ -114,7 +118,7 @@ public final class MicrosoftSignIn {
     public private(set) var windowCount = 0
 
     /// - Throws: `MicrosoftSignInError.invalidClientID` when the client ID
-    ///   isn't a UUID; MSAL's error when it can't be set up.
+    ///   isn’t a UUID; MSAL’s error when it can’t be set up.
     public convenience init(clientID: String, redirectURI: String = MicrosoftSignIn.defaultRedirectURI) throws {
         let clientID = try Self.validatedClientID(clientID)
         try self.init(clientID: clientID, backend: MSALBackend(clientID: clientID, redirectURI: redirectURI))
@@ -135,18 +139,22 @@ public final class MicrosoftSignIn {
     }
 
     /// The sign-in address for a tenant ID or verified domain.
+    ///
+    /// - Throws: `.missingTenantID` when it is empty, `.invalidTenantID`
+    ///   when it is neither a UUID nor a domain name.
     public nonisolated static func authorityURL(tenantID: String) throws -> URL {
         let tenantID = tenantID.trimmingCharacters(in: .whitespaces)
-        guard !tenantID.isEmpty, let url = URL(string: "\(authorityBase)/\(tenantID)") else {
-            throw MicrosoftSignInError.missingTenantID
+        guard !tenantID.isEmpty else { throw MicrosoftSignInError.missingTenantID }
+        guard Graph.TokenProvider.isTenant(tenantID), let url = URL(string: "\(authorityBase)/\(tenantID)") else {
+            throw MicrosoftSignInError.invalidTenantID
         }
         return url
     }
 
-    /// The cached account for a tenant when its saved identifier isn't
+    /// The cached account for a tenant when its saved identifier isn’t
     /// found: the one whose home tenant matches (ignoring case), else the
     /// only one (an app registration usually lives in one tenant, and a
-    /// domain doesn't match a tenant ID).
+    /// domain doesn’t match a tenant ID).
     public nonisolated static func cachedAccount<Account>(in accounts: [Account], tenantID: String,
                                                           homeTenant: (Account) -> String?) -> Account? {
         let tenantID = tenantID.trimmingCharacters(in: .whitespaces).lowercased()
@@ -156,7 +164,7 @@ public final class MicrosoftSignIn {
 
     /// The one cached account whose home tenant is `tenantID` (a tenant ID,
     /// ignoring case); nil when none or several match. No fallback to the
-    /// only account: for checks that must never reach another tenant (0.12.5).
+    /// only account: for checks that must never reach another tenant.
     public nonisolated static func strictlyCachedAccount<Account>(in accounts: [Account], tenantID: String,
                                                                   homeTenant: (Account) -> String?) -> Account? {
         let tenantID = tenantID.trimmingCharacters(in: .whitespaces).lowercased()
@@ -167,7 +175,7 @@ public final class MicrosoftSignIn {
     // MARK: - Accounts
 
     /// The signed-in account at launch: the saved one, else by tenant.
-    public func savedAccount(identifier: String?, tenantID: String) -> MicrosoftAccount? {
+    func savedAccount(identifier: String?, tenantID: String) -> MicrosoftAccount? {
         if let identifier, let account = backend.account(identifier: identifier) {
             return account
         }
@@ -181,7 +189,7 @@ public final class MicrosoftSignIn {
 
     /// The signed-in account of exactly this tenant (see
     /// `strictlyCachedAccount`): the saved identifier only counts when that
-    /// account's home tenant is `tenantID` too (0.12.5).
+    /// account’s home tenant is `tenantID` too.
     public func account(strictlyFor tenantID: String, identifier: String?) -> MicrosoftAccount? {
         let wanted = tenantID.trimmingCharacters(in: .whitespaces).lowercased()
         if let identifier, let account = backend.account(identifier: identifier) {
@@ -190,10 +198,10 @@ public final class MicrosoftSignIn {
         return Self.strictlyCachedAccount(in: backend.accounts(), tenantID: wanted) { $0.homeTenantID }
     }
 
-    /// Shows Microsoft's sign-in window with the account picker.
+    /// Shows Microsoft’s sign-in window with the account picker.
     public func signIn(tenantID: String, scopes: [String]) async throws -> MicrosoftToken {
         let authority = try Self.authorityURL(tenantID: tenantID)
-        // never two windows: wait for one that's open
+        // never two windows: wait for one that’s open
         while let open = window {
             _ = try? await open.task.value
         }
@@ -202,7 +210,7 @@ public final class MicrosoftSignIn {
         }
     }
 
-    /// A token for the account: silent first, Microsoft's window when MSAL
+    /// A token for the account: silent first, Microsoft’s window when MSAL
     /// needs it.
     /// - Parameter forceRefresh: a new token even if the cached one is still
     ///   valid, e.g. after Graph answered 401.
@@ -221,7 +229,7 @@ public final class MicrosoftSignIn {
                 if open.key == key {
                     return try await open.task.value
                 }
-                // another request's window (other permissions): wait until
+                // another request’s window (other permissions): wait until
                 // it closes, then ask again: its consent may cover this one
                 _ = try? await open.task.value
                 continue
@@ -232,11 +240,11 @@ public final class MicrosoftSignIn {
         }
     }
 
-    /// A token from MSAL's cache (or a silent refresh) only: never opens
-    /// Microsoft's window. For unattended runs (a release check), which stop
-    /// and say so instead (0.12.5).
+    /// A token from MSAL’s cache (or a silent refresh) only: never opens
+    /// Microsoft’s window. For unattended runs (a release check), which stop
+    /// and say so instead.
     /// - Throws: `MicrosoftSignInError.interactionRequired` when MSAL needs
-    ///   the window; `.notSignedIn` when MSAL doesn't have the account.
+    ///   the window; `.notSignedIn` when MSAL doesn’t have the account.
     public func silentToken(for account: MicrosoftAccount, tenantID: String, scopes: [String],
                             forceRefresh: Bool = false) async throws -> MicrosoftToken {
         let authority = try Self.authorityURL(tenantID: tenantID)
@@ -261,7 +269,7 @@ public final class MicrosoftSignIn {
         windowCount += 1
         // the window is marked closed inside the task, before anyone waiting
         // on it resumes: a waiter that resumed first would still see it open,
-        // wait on it again (it's finished) and loop without end
+        // wait on it again (it’s finished) and loop without end
         let task = Task { @MainActor in
             defer { if self.window?.id == id { self.window = nil } }
             return try await show()
@@ -275,7 +283,7 @@ public final class MicrosoftSignIn {
     }
 }
 
-/// Hands out the interactive sign-in's tokens to `Graph.Client`. After
+/// Hands out the interactive sign-in’s tokens to `Graph.Client`. After
 /// `forgetToken()` (Graph answered 401) the next token is a fresh one.
 public actor MicrosoftTokenSource: BearerTokenSource {
     private let fetch: @Sendable (_ forceRefresh: Bool) async throws -> String

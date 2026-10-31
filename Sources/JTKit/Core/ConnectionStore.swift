@@ -1,7 +1,7 @@
 import Foundation
 import Observation
 
-/// Where one kind of secret of a connection is kept: the app's store (its
+/// Where one kind of secret of a connection is kept: the app’s store (its
 /// Keychain service) and the account name it has always used.
 public nonisolated struct SecretLocation: Sendable {
     public let store: any SecretStore
@@ -18,30 +18,31 @@ public nonisolated struct SecretLocation: Sendable {
     }
 }
 
-/// Why the store can't do what was asked, in plain language.
+/// Why the store can’t do what was asked, in plain language.
 public nonisolated enum ConnectionStoreError: LocalizedError, Equatable, Sendable {
-    /// The saved list couldn't be read. Nothing is saved until it is fixed.
+    /// The saved list couldn’t be read. Nothing is saved until it is fixed.
     case unreadable(detail: String, copy: String?)
     case couldNotSave(String)
-    case keychainRefused
+    /// The Keychain refused a secret; `status` is its error code, when known.
+    case keychainRefused(status: OSStatus?)
 
     public var errorDescription: String? {
         switch self {
         case .unreadable(let detail, let copy):
             let copyNote = copy.map { " A copy is at \($0)." } ?? ""
-            return "The saved connections couldn't be read, so changes are not saved until this is fixed (\(detail)).\(copyNote)"
+            return "The saved connections couldn’t be read, so changes aren’t saved until this is fixed (\(detail)).\(copyNote)"
         case .couldNotSave(let detail):
-            return "The connections couldn't be saved: \(detail)"
-        case .keychainRefused:
-            return "The Keychain refused to save the secret. See the log for the error code."
+            return "The connections couldn’t be saved: \(detail)"
+        case .keychainRefused(let status):
+            return SecretWriteError(status: status).errorDescription ?? ""
         }
     }
 }
 
-/// The app's saved connections: its own records, in its own storage, with
+/// The app’s saved connections: its own records, in its own storage, with
 /// their secrets in its own Keychain items.
 ///
-/// Safety rule: when the saved list can't be read, the store keeps a copy,
+/// Safety rule: when the saved list can’t be read, the store keeps a copy,
 /// reports `problem`, and refuses every save, so it never replaces saved
 /// connections with an empty list. The first save makes a one-time backup of
 /// the data as it was (`ConnectionStorage.backUpOnce`).
@@ -50,7 +51,7 @@ public nonisolated enum ConnectionStoreError: LocalizedError, Equatable, Sendabl
 public final class ConnectionStore<Record: ConnectionRecord> {
 
     public private(set) var records: [Record] = []
-    /// Set when the saved list couldn't be read.
+    /// Set when the saved list couldn’t be read.
     public private(set) var problem: ConnectionStoreError?
 
     @ObservationIgnored private let storage: any ConnectionStorage<Record>
@@ -59,8 +60,8 @@ public final class ConnectionStore<Record: ConnectionRecord> {
     @ObservationIgnored private var hasBackedUp = false
 
     /// - Parameters:
-    ///   - storage: where the app's records are, e.g. `JSONFileConnectionStorage`.
-    ///   - secrets: where each kind of secret is; kinds the app doesn't use are left out.
+    ///   - storage: where the app’s records are, e.g. `JSONFileConnectionStorage`.
+    ///   - secrets: where each kind of secret is; kinds the app doesn’t use are left out.
     ///   - log: receives problems, never secrets.
     public init(storage: any ConnectionStorage<Record>,
                 secrets: [ConnectionSecretKind: SecretLocation],
@@ -80,7 +81,7 @@ public final class ConnectionStore<Record: ConnectionRecord> {
             let copy = storage.keepUnreadableCopy()
             problem = .unreadable(detail: error.localizedDescription, copy: copy)
             records = []
-            log?("[Connections] could not read the saved connections: \(error); copy: \(copy ?? "none")")
+            log?("[Connections] couldn’t read the saved connections: \(error); copy: \(copy ?? "none")")
         }
     }
 
@@ -105,15 +106,46 @@ public final class ConnectionStore<Record: ConnectionRecord> {
 
     /// Adds the record and its secrets, or replaces the saved ones. A secret
     /// left out of `secrets` stays as it is; an empty one is deleted. Secrets
-    /// are written first, so a record is never saved with a missing secret.
+    /// are written first, so a record is never saved with a missing secret;
+    /// when a secret or the record can’t be saved, the secrets already
+    /// written are put back as they were, so a failed save changes nothing
+    /// (except a secret the Keychain couldn’t read, which can’t be put back).
     public func save(_ record: Record, secrets: [ConnectionSecretKind: String]) throws {
         if let problem { throw problem }
-        for (kind, secret) in secrets {
-            guard setSecret(secret.isEmpty ? nil : secret, kind, for: record.connection) else {
-                throw ConnectionStoreError.keychainRefused
+        guard !record.connection.isDemo else {
+            throw ConnectionStoreError.couldNotSave("“\(record.connection.name)” is a demo connection, which is never saved.")
+        }
+        var previous = [(kind: ConnectionSecretKind, secret: String?)]()
+        func putBack() {
+            for (kind, secret) in previous.reversed() {
+                setSecret(secret, kind, for: record.connection)
             }
         }
-        try save(record)
+        for kind in ConnectionSecretKind.allCases {
+            guard let secret = secrets[kind] else { continue }
+            // what to put back; one that can’t be read is replaced anyway (the
+            // way to repair it) and can’t be put back
+            let old: String??
+            do {
+                old = .some(try readSecret(kind, for: record.connection))
+            } catch {
+                log?("[Connections] couldn’t read the \(kind.rawValue) secret before replacing it: \(error)")
+                old = nil
+            }
+            do {
+                try writeSecret(secret.isEmpty ? nil : secret, kind, for: record.connection)
+            } catch {
+                putBack()
+                throw ConnectionStoreError.keychainRefused(status: (error as? SecretWriteError)?.status)
+            }
+            if let old { previous.append((kind, old)) }
+        }
+        do {
+            try save(record)
+        } catch {
+            putBack()
+            throw error
+        }
     }
 
     /// Removes the record and all its secrets.
@@ -133,6 +165,20 @@ public final class ConnectionStore<Record: ConnectionRecord> {
         return location.store.secret(for: location.account(connection))
     }
 
+    /// Whether a secret is stored, asking the Keychain for the item’s
+    /// attributes only, never its value. Demo connections have none.
+    /// - Throws: `SecretStoreError` when the Keychain can’t tell.
+    public func hasSecret(_ kind: ConnectionSecretKind = .main, for connection: Connection) throws -> Bool {
+        guard !connection.isDemo, let location = secretLocations[kind] else { return false }
+        return try location.store.hasSecret(for: location.account(connection))
+    }
+
+    /// The secret, nil when none is stored; throws when it can’t be read.
+    func readSecret(_ kind: ConnectionSecretKind, for connection: Connection) throws -> String? {
+        guard !connection.isDemo, let location = secretLocations[kind] else { return nil }
+        return try location.store.readSecret(for: location.account(connection))
+    }
+
     /// Passing nil deletes the secret. Returns false when the write failed.
     @discardableResult
     public func setSecret(_ secret: String?, _ kind: ConnectionSecretKind = .main, for connection: Connection) -> Bool {
@@ -140,6 +186,15 @@ public final class ConnectionStore<Record: ConnectionRecord> {
         guard !connection.isDemo else { return false }
         guard let location = secretLocations[kind] else { return secret == nil }
         return location.store.setSecret(secret, for: location.account(connection))
+    }
+
+    private func writeSecret(_ secret: String?, _ kind: ConnectionSecretKind, for connection: Connection) throws {
+        guard !connection.isDemo else { throw SecretWriteError(status: nil) }
+        guard let location = secretLocations[kind] else {
+            if secret == nil { return }
+            throw SecretWriteError(status: nil)
+        }
+        try location.store.writeSecret(secret, for: location.account(connection))
     }
 
     /// Whether the app stores this kind of secret.
@@ -157,7 +212,7 @@ public final class ConnectionStore<Record: ConnectionRecord> {
                 hasBackedUp = true
             } catch {
                 // without the backup the original stays untouched
-                log?("[Connections] could not make the one-time backup: \(error)")
+                log?("[Connections] couldn’t make the one-time backup: \(error)")
                 throw ConnectionStoreError.couldNotSave("the one-time backup failed: \(error.localizedDescription)")
             }
         }
@@ -167,7 +222,7 @@ public final class ConnectionStore<Record: ConnectionRecord> {
             // records it was given, e.g. what it last wrote
             records = (try? storage.load()) ?? updated
         } catch {
-            log?("[Connections] could not save: \(error)")
+            log?("[Connections] couldn’t save: \(error)")
             throw ConnectionStoreError.couldNotSave(error.localizedDescription)
         }
     }

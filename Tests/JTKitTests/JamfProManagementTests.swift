@@ -4,10 +4,10 @@ import Testing
 @testable import JTKit
 import JTKitTestSupport
 
-// JTKit 0.8.2 (ROADMAP step 7, from Checkpoint): PreStages, ADE,
+// Jamf Pro around a device: PreStages, ADE,
 // compliance, DDM, declarations, sites, departments, buildings, the four
 // secrets and their rules, copying a secret, and the privilege table checked
-// against Jamf Pro's own API description.
+// against Jamf Pro’s own API description.
 
 private func direct(_ server: MockServer, log: ActivityLog? = nil) throws -> JamfPlatform.Client {
     try JamfPlatform.Client(baseURL: URL(string: "https://jamf.example.com")!, scope: .organization, server: .jamfPro,
@@ -47,11 +47,11 @@ struct JamfProManagementTests {
         try await client.addToPreStage(.mobileDevice, id: "3", serials: ["S1"])
         #expect(paths(server) == ["/api/v2/mobile-device-prestages/3/scope", "/api/v2/mobile-device-prestages/3/scope"])
         #expect(server.requests[1].bodyString.contains(#""versionLock":4"#))
-        await #expect(throws: JamfPlatformError.self) { try await client.removeFromPreStage(.mobileDevice, id: "3", serials: ["S1"]) }
+        await #expect(throws: JamfPlatform.APIError.self) { try await client.removeFromPreStage(.mobileDevice, id: "3", serials: ["S1"]) }
         #expect(server.requests.filter { $0.path.hasSuffix("delete-multiple") }.count == 1)
     }
 
-    @Test("ADE: Apple's server IDs and the serial → token map")
+    @Test("ADE: Apple’s server IDs and the serial → token map")
     func ade() async throws {
         let server = MockServer { request in
             if request.path.hasSuffix("/device-enrollments") {
@@ -92,7 +92,7 @@ struct JamfProManagementTests {
         #expect(try await client.ddmStatusItems(managementID: "M-2", kind: .computer) == nil)
     }
 
-    @Test("Jamf Pro's flattened declarations: the Error detail first, a record without identifier only when invalid")
+    @Test("Jamf Pro’s flattened declarations: the Error detail first, a record without identifier only when invalid")
     func flattened() {
         let text = "{active=true, identifier=Blueprint_0F2C1B0A-1111-2222-3333-444455556666_s1, valid=invalid, reasons=[{code=C, description=D, details={Error=Target (15.7.3) is older [x]}}, {code=OnlyCode}]},{valid=valid},{valid=invalid, reasons=[{description=Broken}]}"
         let declarations = JamfPro.flattenedDeclarations(text)
@@ -103,7 +103,7 @@ struct JamfProManagementTests {
         #expect(JamfPro.flattenedDeclarations(nil).isEmpty && JamfPro.flattenedDeclarations("garbage").isEmpty)
     }
 
-    @Test("A declaration's detail is read but never recorded")
+    @Test("A declaration’s detail is read but never recorded")
     func declaration() async throws {
         let server = MockServer { _ in
             .json(200, #"{"declarations":[{"uuid":"u","type":"t","payloadJson":"{\"Password\":\"SECRET\"}"}]}"#)
@@ -135,7 +135,7 @@ struct JamfProManagementTests {
             let items = (0..<1000).map { #"{"id":"\#(page * 1000 + $0)","name":"N"}"# }
             return .json(200, #"{"totalCount":20000,"results":[\#(items.joined(separator: ","))]}"#)
         }
-        await #expect(throws: JamfPlatformError.self) { _ = try await direct(server).departmentNames() }
+        await #expect(throws: JamfPlatform.APIError.self) { _ = try await direct(server).departmentNames() }
         #expect(server.requests.count == 10)
     }
 }
@@ -182,7 +182,7 @@ struct JamfProSecretTests {
         #expect(await log.entries.filter { $0.request?.contentsWithheld == true }.count == 6)
     }
 
-    @Test("A failed read carries only the status and JTKit's hints, never the server's text")
+    @Test("A failed read carries only the status and JTKit’s hints, never the server’s text")
     func failure() async throws {
         let server = MockServer { _ in
             .json(403, #"{"httpStatus":403,"traceId":"trace-SECRET","errors":[{"code":"X","description":"Could not return SECRET-key"}]}"#)
@@ -190,7 +190,7 @@ struct JamfProSecretTests {
         do {
             _ = try await direct(server).fileVaultKey(computerID: "7")
             Issue.record("read")
-        } catch let error as JamfPlatformError {
+        } catch let error as JamfPlatform.APIError {
             #expect(!error.message().contains("SECRET"))
             #expect(error.message() == """
                 HTTP 403 Forbidden
@@ -252,9 +252,9 @@ struct SecretPasteboardTests {
     }
 }
 
-// MARK: - Privileges against Jamf Pro's API description
+// MARK: - Privileges against Jamf Pro’s API description
 
-@Suite("The privilege table against Jamf Pro's API description")
+@Suite("The privilege table against Jamf Pro’s API description")
 struct PrivilegeTableTests {
 
     /// `x-required-privileges` per path and method, from Jamf Pro 11.33.1
@@ -268,8 +268,8 @@ struct PrivilegeTableTests {
 
     static var everyListed: Set<String> { Set(description.values.flatMap(\.values).flatMap { $0 }) }
 
-    /// Table entries the description doesn't list, and why. Anything else
-    /// missing from it is a renamed or misspelt privilege.
+    /// Table entries the description doesn’t list, and why. Anything else
+    /// missing from it is a renamed or misspelled privilege.
     static let notInDescription: [String: String] = [
         "Delete Mobile Devices": "Classic API (mobiledevices/id/{id}); not in this description",
         "Send Inventory Requests to Mobile Devices": "checked by Jamf Pro for the Classic command; not in this description",
@@ -287,8 +287,8 @@ struct PrivilegeTableTests {
     ]
 
     /// Table entries for objects only the Classic API serves (JamfMigrator
-    /// copies them over `JSSResource`), which this description doesn't cover.
-    /// Their names follow Jamf Pro's privilege list (checked in JamfMigrator's
+    /// copies them over `JSSResource`), which this description doesn’t cover.
+    /// Their names follow Jamf Pro’s privilege list (checked in JamfMigrator’s
     /// docs/PERMISSIONS.md against a Jamf Pro 11.32 instance).
     static let classicOnly: Set<String> = [
         "Create Sites",
@@ -370,7 +370,7 @@ struct PrivilegeTableTests {
 
     /// Every privilege name Jamf Pro 11.33.1 offers for an API role
     /// (Fixtures/jamf-pro-11.33.1-privilege-names.json, read from a test
-    /// instance's `GET api/v1/api-role-privileges` on 2026-10-26; names only).
+    /// instance’s `GET api/v1/api-role-privileges` on 2026-10-26; names only).
     static let privilegeNames: Set<String> = {
         let url = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
             .appendingPathComponent("Fixtures/jamf-pro-11.33.1-privilege-names.json")
@@ -387,7 +387,7 @@ struct PrivilegeTableTests {
             .map { String($0.1) })
     }()
 
-    /// Every `Privilege` constant in JTKit's table.
+    /// Every `Privilege` constant in JTKit’s table.
     static let table: [String] = {
         let url = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
             .appendingPathComponent("../../Sources/JTKit/Jamf/Pro/JamfPro.swift")
@@ -420,8 +420,8 @@ struct PrivilegeTableTests {
         }
     }
 
-    /// The description's privileges for a request JTKit sent, nil when the
-    /// path isn't in it (the Classic API, the Platform API).
+    /// The description’s privileges for a request JTKit sent, nil when the
+    /// path isn’t in it (the Classic API, the Platform API).
     static func listed(path: String, method: String) -> [String]? {
         guard path.hasPrefix("pro/") else { return nil }
         let wanted = path.dropFirst("pro".count).split(separator: "/")

@@ -1,17 +1,17 @@
 import Observation
 import SwiftUI
 
-/// What every app's Settings window shares.
+/// What every app’s Settings window shares.
 public nonisolated enum SettingsLayout {
     /// The width of every tab in every app, so Settings windows match. Wide
     /// enough for a list beside an editor, as in a connections tab.
     public static let width: CGFloat = 680
 
-    /// The first tab, before the app's own.
+    /// The first tab, before the app’s own.
     static let generalTitle = "General"
     static let generalSymbol = "gearshape"
 
-    /// The last tab, after the app's own.
+    /// The last tab, after the app’s own.
     static let updatesTitle = "Updates"
     static let updatesSymbol = "arrow.down.circle"
 }
@@ -37,7 +37,7 @@ final class SettingsTabSelection {
 }
 
 extension View {
-    /// Names a tab of the Settings window that isn't a `SettingsTab`, so
+    /// Names a tab of the Settings window that isn’t a `SettingsTab`, so
     /// `SettingsTabLink` can open it, e.g. `.settingsTabName("Apple")`.
     public func settingsTabName(_ name: String) -> some View {
         tag(name)
@@ -76,9 +76,9 @@ public struct SettingsTabLink<Label: View>: View {
     }
 }
 
-/// The app's Settings window (⌘,), with tabs in the toolbar: General first,
-/// starting with the Appearance picker (`AppAppearance`) and then the app's own
-/// general settings, the app's own tabs next, and Updates
+/// The app’s Settings window (⌘,), with tabs in the toolbar: General first,
+/// starting with the Appearance picker (`AppAppearance`) and then the app’s own
+/// general settings, the app’s own tabs next, and Updates
 /// (`UpdateSettingsSection`) always last.
 ///
 /// It also applies the saved appearance to the whole app when the app starts.
@@ -98,13 +98,13 @@ public struct SettingsWindow<General: View, AppTabs: View>: Scene {
     let appTabs: AppTabs
 
     /// - Parameters:
-    ///   - updates: the app's update checker; the Updates tab uses its setting.
+    ///   - updates: the app’s update checker; the Updates tab uses its setting.
     ///   - appearanceKey: the `UserDefaults` key for the appearance. Keep the default.
     ///   - opensTabsByName: lets `SettingsTabLink` open a tab. Only when every
-    ///     app tab has a name (see `SettingsTabLink`): a tab without one can't
+    ///     app tab has a name (see `SettingsTabLink`): a tab without one can’t
     ///     be selected then.
-    ///   - general: the app's own `Section`s for the General tab, below Appearance.
-    ///   - tabs: the app's own tabs, each a `SettingsTab` or a view with a `tabItem`.
+    ///   - general: the app’s own `Section`s for the General tab, below Appearance.
+    ///   - tabs: the app’s own tabs, each a `SettingsTab` or a view with a `tabItem`.
     public init(
         updates: UpdateChecker,
         appearanceKey: String = AppAppearance.defaultKey,
@@ -151,8 +151,8 @@ extension SettingsWindow where General == EmptyView, AppTabs == EmptyView {
     }
 }
 
-/// The Settings window's content: General, the app's tabs, then Updates. Needs
-/// the app's `UpdateChecker` in the environment; `SettingsWindow` puts it there.
+/// The Settings window’s content: General, the app’s tabs, then Updates. Needs
+/// the app’s `UpdateChecker` in the environment; `SettingsWindow` puts it there.
 public struct SettingsTabs<General: View, AppTabs: View>: View {
     let appearanceKey: String
     let opensTabsByName: Bool
@@ -205,7 +205,7 @@ extension SettingsTabs where General == EmptyView {
     }
 }
 
-/// One tab of the Settings window: the app's sections in a grouped form, at the
+/// One tab of the Settings window: the app’s sections in a grouped form, at the
 /// shared width, as tall as its content. Its title is also its name for
 /// `SettingsTabLink`.
 public struct SettingsTab<Content: View>: View {
@@ -214,7 +214,7 @@ public struct SettingsTab<Content: View>: View {
     let content: Content
 
     /// - Parameters:
-    ///   - title: the tab's name in the toolbar, e.g. `"Connections"`.
+    ///   - title: the tab’s name in the toolbar, e.g. `"Connections"`.
     ///   - systemImage: an SF Symbol for the toolbar, e.g. `"network"`.
     ///   - content: `Section`s; the tab puts them in a grouped `Form`.
     public init(_ title: String, systemImage: String, @ViewBuilder content: () -> Content) {

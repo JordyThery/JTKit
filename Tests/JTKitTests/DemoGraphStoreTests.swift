@@ -3,7 +3,7 @@ import Testing
 @testable import JTKit
 import JTKitTestSupport
 
-/// The demo sign-in's fixed token, as an app hands it to `Graph.Client`.
+/// The demo sign-in’s fixed token, as an app hands it to `Graph.Client`.
 private struct DemoSignInToken: BearerTokenSource {
     let value: String
     func token() async throws -> String { value }
@@ -24,7 +24,7 @@ private func demoMode(scenario: String? = nil) -> DemoMode {
 }
 
 /// A client for the demo tenant as Intune Deployer builds one: the demo
-/// sign-in's token, delegated access, the demo network's session.
+/// sign-in’s token, delegated access, the demo network’s session.
 @MainActor
 private func delegatedClient(_ demo: DemoMode, log: ActivityLog? = nil) -> Graph.Client {
     let signIn = demo.microsoftSignIn()
@@ -58,7 +58,7 @@ private struct Named: Decodable {
 @Suite("Demo Graph store")
 @MainActor
 struct DemoGraphStoreTests {
-    @Test("The demo sign-in reaches Contoso's tenant with its fixed token; nothing else signs in")
+    @Test("The demo sign-in reaches Contoso’s tenant with its fixed token; nothing else signs in")
     func signedIn() async throws {
         let demo = demoMode()
         let signIn = demo.microsoftSignIn()
@@ -74,7 +74,7 @@ struct DemoGraphStoreTests {
             "organization/\(DemoWorld.intuneTenantID)?$select=id,mobileDeviceManagementAuthority", version: .v1))
         #expect(authority["mobileDeviceManagementAuthority"] as? String == "intune")
         // another token is refused, as Graph refuses it
-        await #expect(throws: GraphError.self) {
+        await #expect(throws: Graph.APIError.self) {
             _ = try await DemoGraphStoreTests.meWith(token: "eyJ-not-the-demo-token")
         }
     }
@@ -83,7 +83,7 @@ struct DemoGraphStoreTests {
         try await client(on: DemoIntuneServer(), token: token).getRaw("me", version: .v1)
     }
 
-    @Test("Lists are paged on Graph's address, with $filter and $select kept on the next page")
+    @Test("Lists are paged on Graph’s address, with $filter and $select kept on the next page")
     func paging() async throws {
         let server = DemoIntuneServer(pageSize: 2)
         let client = client(on: server)
@@ -119,9 +119,9 @@ struct DemoGraphStoreTests {
         #expect(patched["description"] as? String == "Changed" && patched["payload"] as? String == "PGRpY3QvPg==")
         try await client.delete("\(path)/\(id)", version: .v1)
         #expect(try await client.list(Named.self, path, version: .v1).allSatisfy { $0.id != id })
-        await #expect(throws: GraphError.self) { _ = try await client.getRaw("\(path)/\(id)", version: .v1) }
+        await #expect(throws: Graph.APIError.self) { _ = try await client.getRaw("\(path)/\(id)", version: .v1) }
         // a beta-only list refuses v1.0, as Graph does
-        await #expect(throws: GraphError.self) {
+        await #expect(throws: Graph.APIError.self) {
             _ = try await client.listRaw("deviceManagement/configurationPolicies", version: .v1)
         }
         #expect(demo.intuneServer.objects(at: path).count == 1, "only Contoso's own is left")
@@ -150,7 +150,7 @@ struct DemoGraphStoreTests {
             "settings": [setting("a_1", "a_1_0"), setting("b_1", "b_1_1")],
         ]))
         #expect(try await client.listRaw("\(path)/\(id)/settings", version: .beta).count == 2)
-        // the catalog: Contoso's own definition, then the ones an app adds
+        // the catalog: Contoso’s own definition, then the ones an app adds
         demo.intuneServer.add(definitions: [DemoSettingDefinition(id: "a_1", displayName: "A", options: [("a_1_0", "Off")])])
         let ids = try await client.list(Named.self,
             "deviceManagement/configurationSettings?$select=id&$top=1000&$filter=(platforms has 'macOS') and technologies has 'mdm'",
@@ -158,7 +158,7 @@ struct DemoGraphStoreTests {
         #expect(ids == ["a_1", "com.apple.mcx.filevault2_enable"])
         let definition = try json(try await client.getRaw("deviceManagement/configurationSettings/a_1", version: .beta))
         #expect((definition["options"] as? [[String: Any]])?.first?["itemId"] as? String == "a_1_0")
-        await #expect(throws: GraphError.self) {
+        await #expect(throws: Graph.APIError.self) {
             _ = try await client.getRaw("deviceManagement/configurationSettings/unknown", version: .beta)
         }
     }
@@ -220,7 +220,7 @@ struct DemoGraphStoreTests {
         let uri = try #require(ready["azureStorageUri"] as? String)
         #expect(URL(string: uri)?.host() == DemoIntuneServer.storageHost)
 
-        // the blocks and the block list, through the client's own session
+        // the blocks and the block list, through the client’s own session
         let recorder = client.recorder
         for (blockID, bytes) in [("YmxvY2sx", Data(repeating: 1, count: 6)), ("YmxvY2sy", Data(repeating: 2, count: 4))] {
             var request = URLRequest(url: try #require(URL(string: "\(uri)&comp=block&blockid=\(blockID)")))
@@ -249,7 +249,7 @@ struct DemoGraphStoreTests {
         #expect(log.entries.allSatisfy { $0.connection == "Contoso Intune (Demo)" })
     }
 
-    @Test("A commit without the uploaded content fails, as Graph's does")
+    @Test("A commit without the uploaded content fails, as Graph’s does")
     func commitWithoutContent() async throws {
         let client = delegatedClient(demoMode())
         let apps = "deviceAppManagement/mobileApps"
@@ -266,7 +266,7 @@ struct DemoGraphStoreTests {
         #expect(file["uploadState"] as? String == "commitFileFailed")
     }
 
-    @Test("missingPermission: reads work, every write gets Graph's real 403 naming the permission")
+    @Test("missingPermission: reads work, every write gets Graph’s real 403 naming the permission")
     func missingPermission() async throws {
         let client = delegatedClient(demoMode(scenario: "missingPermission"))
         #expect(!(try await client.listRaw("deviceManagement/deviceConfigurations", version: .v1)).isEmpty)
@@ -281,7 +281,7 @@ struct DemoGraphStoreTests {
             do {
                 _ = try await client.post(path, version: version, body: try body(["displayName": "Contoso"]))
                 Issue.record("\(path) was written")
-            } catch let error as GraphError {
+            } catch let error as Graph.APIError {
                 #expect(error.status == 403, "\(path)")
                 #expect(error.permission == permission, "\(path)")
                 #expect(error.body?.code == (path == "groups" ? "Authorization_RequestDenied" : "Forbidden"))
@@ -289,7 +289,7 @@ struct DemoGraphStoreTests {
         }
     }
 
-    @Test("Contoso's tenant is clearly fake: IDs in the fake range, Contoso names, contoso.example addresses")
+    @Test("Contoso’s tenant is clearly fake: IDs in the fake range, Contoso names, contoso.example addresses")
     func clearlyFake() throws {
         let server = DemoIntuneServer()
         for list in DemoGraphStore.knownLists where list != "deviceManagement/configurationSettings" {
@@ -309,7 +309,7 @@ struct DemoGraphStoreTests {
         #expect(DemoIntuneServer.storageHost.hasSuffix(".demo.invalid"))
     }
 
-    @Test("An app's own sample objects join the tenant's list")
+    @Test("An app’s own sample objects join the tenant’s list")
     func addedObjects() async throws {
         let demo = demoMode()
         let tagged = try body(["@odata.type": "#microsoft.graph.macOSCustomConfiguration",

@@ -1,6 +1,6 @@
 import Foundation
 
-/// Jamf Pro's own API (`/api/…`): device lookups, asset tags, the version and
+/// Jamf Pro’s own API (`/api/…`): device lookups, asset tags, the version and
 /// the privileges each call needs.
 ///
 /// The calls run on `JamfPlatform.Client`, which reaches Jamf Pro directly
@@ -13,27 +13,23 @@ public nonisolated enum JamfPro {
     /// Serials and UDIDs are letters, digits and hyphens. They can come from
     /// device-controlled data (a USB descriptor) or a pasted list, so anything
     /// else is refused rather than put into an RSQL filter.
-    public static func validatedIdentifier(_ value: String) throws -> String {
+    static func validatedIdentifier(_ value: String) throws -> String {
         let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty, trimmed.count <= 64,
               trimmed.unicodeScalars.allSatisfy({ CharacterSet.alphanumerics.contains($0) && $0.isASCII || $0 == "-" })
-        else { throw JamfPlatformError(.invalidIdentifier(String(trimmed.prefix(64)))) }
+        else { throw JamfPlatform.APIError(.invalidIdentifier(String(trimmed.prefix(64)))) }
         return trimmed
     }
 
     /// The Jamf Pro version, e.g. "11.33.1-t1792501724838".
     public struct Version: Decodable, Hashable, Sendable {
         public var version: String
-
-        public init(version: String) {
-            self.version = version
-        }
     }
 }
 
 extension JamfPro {
     /// A Jamf Pro privilege, named as Jamf Pro shows it under Settings › API
-    /// Roles and Clients (and in a user account's privileges).
+    /// Roles and Clients (and in a user account’s privileges).
     ///
     /// The one table every app uses: each call carries its privilege, so a
     /// refused request (403) names the one that is missing.
@@ -90,8 +86,6 @@ extension JamfPro {
         public static let viewLocalAdminPassword: Privilege = "View Local Admin Password"
 
         // Commands
-        @available(*, deprecated, message: "Not a Jamf Pro privilege: v2/mdm/blank-push needs viewMDMCommandInformation.")
-        public static let sendBlankPush: Privilege = "Send Blank Push"
         public static let sendComputerRemoteLockCommand: Privilege = "Send Computer Remote Lock Command"
         public static let sendComputerRemoteWipeCommand: Privilege = "Send Computer Remote Wipe Command"
         public static let sendComputerUnmanageCommand: Privilege = "Send Computer Unmanage Command"
@@ -102,8 +96,6 @@ extension JamfPro {
         public static let sendMobileDeviceRestartDeviceCommand: Privilege = "Send Mobile Device Restart Device Command"
         public static let sendMobileDeviceShutDownCommand: Privilege = "Send Mobile Device Shut Down Command"
         public static let sendInventoryRequestsToMobileDevices: Privilege = "Send Inventory Requests to Mobile Devices"
-        @available(*, deprecated, renamed: "sendInventoryRequestsToMobileDevices", message: "Jamf Pro names it Send Inventory Requests to Mobile Devices.")
-        public static let updateInventoryForMobileDevices: Privilege = "Send Inventory Requests to Mobile Devices"
         public static let viewMDMCommandInformation: Privilege = "View MDM command information in Jamf Pro API"
         public static let unmanageMobileDevices: Privilege = "Unmanage Mobile Devices"
         public static let sendRenewMDMProfileCommand: Privilege = "Send Command to Renew MDM Profile"
@@ -115,8 +107,6 @@ extension JamfPro {
         public static let readSelfService: Privilege = "Read Self Service"
         public static let readPatchInternalSource: Privilege = "Read Patch Internal Source"
         public static let readPatchExternalSource: Privilege = "Read Patch External Source"
-        @available(*, deprecated, renamed: "viewLicenseSerialNumbers", message: "Jamf Pro names it View License Serial Numbers.")
-        public static let viewLicenseSerial: Privilege = "View License Serial"
         /// Without it, licensed software is read without its serial numbers.
         public static let viewLicenseSerialNumbers: Privilege = "View License Serial Numbers"
 

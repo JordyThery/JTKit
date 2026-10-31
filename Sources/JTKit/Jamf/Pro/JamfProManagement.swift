@@ -1,11 +1,10 @@
 import Foundation
 
-// Jamf Pro's reads and writes around a device (ROADMAP step 7, JTKit 0.8.2,
-// from Checkpoint, with its tests): PreStages and their scope, Automated
-// Device Enrollment, compliance, the DDM status report and declarations,
+// Jamf Pro’s reads and writes around a device: PreStages and their scope,
+// Automated Device Enrollment, compliance, the DDM status report and declarations,
 // sites, departments and buildings, and site moves. Lists are read with
-// JTKit's page reader: reaching its page limit is an error, never a list
-// quietly cut short. Each call names the privilege Jamf Pro's API
+// JTKit’s page reader: reaching its page limit is an error, never a list
+// quietly cut short. Each call names the privilege Jamf Pro’s API
 // description gives for it, checked by a test against a saved copy.
 
 extension JamfPro {
@@ -44,11 +43,11 @@ extension JamfPro {
         }
     }
 
-    /// A device's compliance, as the Device Compliance integration's vendor
+    /// A device’s compliance, as the Device Compliance integration’s vendor
     /// last reported it.
     public struct DeviceCompliance: Hashable, Sendable {
-        /// False when the device is outside the integration's scope, which
-        /// isn't the same as being non-compliant.
+        /// False when the device is outside the integration’s scope, which
+        /// isn’t the same as being non-compliant.
         public var applicable: Bool
         /// `COMPLIANT`, `NON_COMPLIANT` or `UNKNOWN`.
         public var state: String?
@@ -61,11 +60,11 @@ extension JamfPro {
         }
     }
 
-    /// One item of a device's DDM status report, as Jamf Pro keeps it.
+    /// One item of a device’s DDM status report, as Jamf Pro keeps it.
     public struct StatusItem: Hashable, Sendable {
         public var key: String
         public var value: String?
-        /// As Jamf Pro writes it: the device's own clock, without a zone.
+        /// As Jamf Pro writes it: the device’s own clock, without a zone.
         public var lastUpdateTime: String?
 
         public init(key: String, value: String? = nil, lastUpdateTime: String? = nil) {
@@ -81,7 +80,7 @@ extension JamfPro {
         public var uuid: String?
         /// e.g. `com.apple.configuration.softwareupdate.enforcement.specific`.
         public var type: String?
-        /// The declaration's own JSON, as text.
+        /// The declaration’s own JSON, as text.
         public var payload: String?
 
         public init(uuid: String? = nil, type: String? = nil, payload: String? = nil) {
@@ -91,11 +90,11 @@ extension JamfPro {
         }
     }
 
-    /// The declarations in a status report's
+    /// The declarations in a status report’s
     /// `management.declarations.configurations`, which Jamf Pro flattens with
-    /// Java's `toString` (unquoted `{key=value, …}`, nested braces, free text
+    /// Java’s `toString` (unquoted `{key=value, …}`, nested braces, free text
     /// with brackets and commas). Undocumented, so every step degrades rather
-    /// than fails: a record that can't be read is left out.
+    /// than fails: a record that can’t be read is left out.
     public static func flattenedDeclarations(_ value: String?) -> [JamfPlatform.Declaration] {
         guard let value, !value.isEmpty else { return [] }
         return FlattenedText.split(value, on: ",").compactMap { record in
@@ -120,7 +119,7 @@ extension JamfPro {
     }
 }
 
-/// Reading Jamf Pro's Java-style flattened text.
+/// Reading Jamf Pro’s Java-style flattened text.
 private nonisolated enum FlattenedText {
     /// `{key=value, key=value}` as a dictionary, nested values kept as text.
     static func fields(_ value: String) -> [String: String] {
@@ -183,14 +182,14 @@ extension JamfPlatform.Client {
                                  privileges: [family.readPrivilege]).serialsByPrestageId
     }
 
-    /// Adds devices to a PreStage's scope. Reads the scope's `versionLock`
+    /// Adds devices to a PreStage’s scope. Reads the scope’s `versionLock`
     /// first (the scope is optimistically locked). Never repeated after a
     /// server error.
     public func addToPreStage(_ family: JamfPro.PreStageFamily, id: String, serials: [String]) async throws {
         try await changeScope(family, id: id, serials: serials, removing: false)
     }
 
-    /// Removes devices from a PreStage's scope (`scope/delete-multiple`).
+    /// Removes devices from a PreStage’s scope (`scope/delete-multiple`).
     public func removeFromPreStage(_ family: JamfPro.PreStageFamily, id: String, serials: [String]) async throws {
         try await changeScope(family, id: id, serials: serials, removing: true)
     }
@@ -215,7 +214,7 @@ extension JamfPlatform.Client {
     }
 
     /// Serial number (in capitals) → ADE instance ID, for every device synced
-    /// through any of the instance's tokens.
+    /// through any of the instance’s tokens.
     public func deviceEnrollmentInstanceBySerial() async throws -> [String: String] {
         let instances = try await allPages("pro/v1/device-enrollments", privilege: .readDeviceEnrollmentProgramInstances) {
             Self.text($0["id"])
@@ -240,8 +239,8 @@ extension JamfPlatform.Client {
                                  privileges: [.readConditionalAccess]).sharedDeviceFeatureEnabled ?? false
     }
 
-    /// A device's compliance: the applicable entry, else the first; nil when
-    /// the answer has none. Recorded (a read-only lookup, ROADMAP step 5).
+    /// A device’s compliance: the applicable entry, else the first; nil when
+    /// the answer has none. Recorded (a read-only lookup).
     public func deviceCompliance(_ kind: MDMCommand.DeviceKind, id: String) async throws -> JamfPro.DeviceCompliance? {
         struct Item: Decodable {
             let applicable: Bool?
@@ -261,7 +260,7 @@ extension JamfPlatform.Client {
 
     // MARK: DDM
 
-    /// A device's DDM status report (`v1/ddm/{managementId}/status-items`).
+    /// A device’s DDM status report (`v1/ddm/{managementId}/status-items`).
     /// Nil when there is none to read (403, 404); empty when the device sent
     /// nothing. Recorded (a read-only lookup).
     public func ddmStatusItems(managementID: String, kind: MDMCommand.DeviceKind) async throws -> [JamfPro.StatusItem]? {
@@ -277,7 +276,7 @@ extension JamfPlatform.Client {
         let answer: Answer
         do {
             answer = try await decoded(Answer.self, request, privileges: [Self.readPrivilege(kind)])
-        } catch let error as JamfPlatformError where error.status == 403 || error.status == 404 {
+        } catch let error as JamfPlatform.APIError where error.status == 403 || error.status == 404 {
             return nil
         }
         return (answer.statusItems ?? []).compactMap { item in
@@ -303,7 +302,7 @@ extension JamfPlatform.Client {
 
     // MARK: Sites, departments, buildings
 
-    /// Every site; the full-access site ("-1") isn't listed. Jamf Pro answers
+    /// Every site; the full-access site ("-1") isn’t listed. Jamf Pro answers
     /// with a list or a page.
     public func sites() async throws -> [JamfPro.Site] {
         let response = try await sendThrowing(HTTPRequest(path: "pro/v1/sites"), privilege: .readSites)
@@ -319,14 +318,14 @@ extension JamfPlatform.Client {
     public func setSite(_ siteID: String, computerID: String) async throws {
         let body = try JSONSerialization.data(withJSONObject: ["general": ["siteId": siteID]])
         _ = try await sendThrowing(HTTPRequest(method: "PATCH", path: "pro/v4/computers-inventory-detail/\(JamfPlatform.pathSegment(computerID))",
-                                               body: body, safeToRepeat: true), privilege: .updateComputers)
+                                               body: body, repeating: .safe), privilege: .updateComputers)
     }
 
     /// Moves a mobile device to a site ("-1" for none). Safe to repeat.
     public func setSite(_ siteID: String, mobileDeviceID: String) async throws {
         let body = try JSONSerialization.data(withJSONObject: ["siteId": siteID])
         _ = try await sendThrowing(HTTPRequest(method: "PATCH", path: "pro/v2/mobile-devices/\(JamfPlatform.pathSegment(mobileDeviceID))",
-                                               body: body, safeToRepeat: true), privilege: .updateMobileDevices)
+                                               body: body, repeating: .safe), privilege: .updateMobileDevices)
     }
 
     /// Department names by ID, 1,000 at a time (at most ten pages).
@@ -358,7 +357,7 @@ extension JamfPlatform.Client {
         do {
             return try JSONDecoder().decode(type, from: response.data)
         } catch {
-            throw failure(JamfPlatformError(.invalidResponse("\(request.path) could not be read: \(error.localizedDescription)")))
+            throw failure(JamfPlatform.APIError(.invalidResponse("\(request.path) couldn’t be read: \(error.localizedDescription)")))
         }
     }
 }

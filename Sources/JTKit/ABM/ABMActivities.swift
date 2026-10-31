@@ -1,9 +1,8 @@
 import Foundation
 
 extension ABM {
-    /// The six writes (organization device activities), in JTKit's command
-    /// list beside `MDMCommand`, with the same confirmation and the rules
-    /// decided by Jordy (ROADMAP step 9):
+    /// The six writes (organization device activities), in JTKit’s command
+    /// list beside `MDMCommand`, with the same confirmation and these rules:
     ///
     /// - every dialog names the organization;
     /// - Release, Assign with Migration Deadline and Update Migration Deadline
@@ -35,7 +34,7 @@ extension ABM {
             self == .assignWithMigrationDeadline || self == .updateMigrationDeadline
         }
 
-        /// Only Release can't be undone through the API.
+        /// Only Release can’t be undone through the API.
         public var canBeUndone: Bool { self != .release }
 
         /// From two devices, the number is typed before sending.
@@ -49,13 +48,13 @@ extension ABM {
             self != .release || service.supportsRelease
         }
 
-        /// The action, as the dialog's title and button word it.
+        /// The action, as the dialog’s title and button word it.
         public func title(server: String? = nil) -> String {
             switch self {
-            case .assign: "Assign to “\(server ?? "the Selected Server")”"
+            case .assign: "Assign to “\(server ?? "the Selected MDM Server")”"
             case .unassign: "Unassign from MDM Server"
             case .release: "Release from Organization"
-            case .assignWithMigrationDeadline: "Migrate to “\(server ?? "the Selected Server")”"
+            case .assignWithMigrationDeadline: "Migrate to “\(server ?? "the Selected MDM Server")”"
             case .updateMigrationDeadline: "Update Migration Deadline"
             case .cancelMigration: "Cancel Migration"
             }
@@ -64,8 +63,8 @@ extension ABM {
         /// What it does, for one device or several.
         ///
         /// - Parameters:
-        ///   - currentServer: the one device's service, for Cancel Migration.
-        ///   - deadlineIsEarlier: Update Migration Deadline's new deadline is
+        ///   - currentServer: the one device’s service, for Cancel Migration.
+        ///   - deadlineIsEarlier: Update Migration Deadline’s new deadline is
         ///     earlier than a current one or already past.
         public func consequence(count: Int, service: Service, currentServer: String? = nil,
                                 deadline: Date? = nil, deadlineIsEarlier: Bool = false) -> String {
@@ -75,19 +74,19 @@ extension ABM {
             case .assign:
                 return one
                     ? "Apple processes MDM server assignments asynchronously, so allow a moment before the new state appears."
-                    : "Devices that are released or not in \(service.label) are skipped. Apple processes assignments asynchronously."
+                    : "Devices that are released or not in \(service.portal) are skipped. Apple processes assignments asynchronously."
             case .unassign:
                 return one
-                    ? "The device stays in your organization but is no longer assigned to any MDM server, so it will not enrol automatically until it is assigned again."
-                    : "The devices stay in your organization but are no longer assigned to any MDM server, so they will not enrol automatically until assigned again. Devices with no assignment are skipped."
+                    ? "The device stays in your organization but is no longer assigned to any MDM server, so it won’t enroll automatically until it is assigned again."
+                    : "The devices stay in your organization but are no longer assigned to any MDM server, so they won’t enroll automatically until assigned again. Devices with no assignment are skipped."
             case .release:
                 return one
-                    ? "The device will be removed from your organization and can no longer be assigned to an MDM server. This cannot be undone through the API."
-                    : "The devices will be removed from your organization and can no longer be assigned to an MDM server. This cannot be undone through the API."
+                    ? "The device will be removed from your organization and can no longer be assigned to an MDM server. This can’t be undone through the API."
+                    : "The devices will be removed from your organization and can no longer be assigned to an MDM server. This can’t be undone through the API."
             case .assignWithMigrationDeadline:
                 return one
-                    ? "The \(service.label) assignment changes immediately. Nothing is erased: the device keeps running under its current service until it migrates, and Apple prompts the user to migrate before \(due)."
-                    : "The \(service.label) assignments change immediately. Nothing is erased: each device keeps running under its current service until it migrates, and Apple prompts the user to migrate before \(due). Devices Apple reports as not migration-capable are skipped."
+                    ? "The \(service.portal) assignment changes immediately. Nothing is erased: the device keeps running under its current service until it migrates, and Apple prompts the user to migrate before \(due)."
+                    : "The \(service.portal) assignments change immediately. Nothing is erased: each device keeps running under its current service until it migrates, and Apple prompts the user to migrate before \(due). Devices Apple reports as not migration-capable are skipped."
             case .updateMigrationDeadline:
                 let rule = deadlineIsEarlier
                     ? "This deadline is earlier than the current one, or already past, so Apple enforces it immediately: \(one ? "the user can’t" : "users can’t") delay the migration."
@@ -95,8 +94,8 @@ extension ABM {
                 return one ? rule : rule + " Devices with no migration in progress are skipped."
             case .cancelMigration:
                 return one
-                    ? "Only the scheduled migration is cancelled. The device stays assigned to \(currentServer ?? "its assigned server") in \(service.label) and keeps running under its current service. To undo the assignment as well, assign it back to the previous server."
-                    : "Only the scheduled migrations are cancelled. The devices stay assigned to their new server in \(service.label) and keep running under their current service. To undo the assignments as well, assign them back to the previous server."
+                    ? "Only the scheduled migration is canceled. The device stays assigned to \(currentServer ?? "its assigned MDM server") in \(service.portal) and keeps running under its current service. To undo the assignment as well, assign it back to the previous MDM server."
+                    : "Only the scheduled migrations are canceled. The devices stay assigned to their new MDM server in \(service.portal) and keep running under their current service. To undo the assignments as well, assign them back to the previous MDM server."
             }
         }
 
@@ -104,10 +103,10 @@ extension ABM {
         ///
         /// - Parameters:
         ///   - serials: the devices it goes to (after skipping).
-        ///   - organization: the organization's name, always shown.
-        ///   - server: the target service's name (Assign, Migrate).
-        ///   - currentServer: the one device's service (Cancel Migration).
-        ///   - currentDeadlines: the devices' current deadlines (Update).
+        ///   - organization: the organization’s name, always shown.
+        ///   - server: the target service’s name (Assign, Migrate).
+        ///   - currentServer: the one device’s service (Cancel Migration).
+        ///   - currentDeadlines: the devices’ current deadlines (Update).
         ///   - explanation: why fewer devices than selected receive it.
         public func confirmation(serials: [String], organization: String, service: Service, server: String? = nil,
                                  currentServer: String? = nil, deadline: Date? = nil, currentDeadlines: [Date] = [],
@@ -132,7 +131,7 @@ extension ABM {
         public var serverID: String?
         public var deadline: Date?
 
-        /// - Throws: `ABM.Error.Kind.invalidSerial` for a serial with
+        /// - Throws: `ABM.APIError.Kind.invalidSerial` for a serial with
         ///   characters no Apple serial has.
         public init(_ type: ActivityType, serials: [String], serverID: String? = nil, deadline: Date? = nil) throws {
             self.type = type
@@ -141,7 +140,7 @@ extension ABM {
             self.deadline = deadline
         }
 
-        /// Apple's examples: UTC with milliseconds.
+        /// Apple’s examples: UTC with milliseconds.
         static func deadlineText(_ date: Date) -> String {
             let formatter = ISO8601DateFormatter()
             formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
@@ -152,11 +151,11 @@ extension ABM {
         /// The request body, after the checks Apple would make, so nothing
         /// is sent that it refuses anyway.
         ///
-        /// - Throws: `ABM.Error.Kind.invalidRequest`.
+        /// - Throws: `ABM.APIError.Kind.invalidRequest`.
         public func body(for service: Service, now: Date = Date()) throws -> Data {
-            func refuse(_ message: String) -> ABM.Error { ABM.Error(.invalidRequest(message), service: service) }
+            func refuse(_ message: String) -> ABM.APIError { ABM.APIError(.invalidRequest(message), service: service) }
             guard type.isAvailable(on: service) else {
-                throw refuse("\(service.label) cannot release devices from the organization.")
+                throw refuse("\(service.label) can’t release devices from the organization.")
             }
             guard !serials.isEmpty else { throw refuse("No devices to send \(type.title()) to.") }
             if type.needsServer, serverID?.isEmpty ?? true {
@@ -166,7 +165,7 @@ extension ABM {
             if type.needsDeadline {
                 guard let deadline else { throw refuse("\(type.title()) needs a migration deadline.") }
                 guard deadline.timeIntervalSince(now) <= ABM.maximumMigrationDeadline else {
-                    throw refuse("\(service.label) will not accept a migration deadline more than 90 days from now.")
+                    throw refuse("\(service.label) won’t accept a migration deadline more than 90 days from now.")
                 }
                 attributes["activityTypeMetadata"] = ["mdmMigrationDeadlineDateTime": Self.deadlineText(deadline)]
             }
@@ -206,7 +205,7 @@ extension ABM {
             return status != "IN_PROGRESS"
         }
 
-        /// What became of it, by Apple's documented values.
+        /// What became of it, by Apple’s documented values.
         public var outcome: ActivityOutcome {
             let status = status?.uppercased() ?? ""
             let sub = subStatus?.uppercased() ?? ""
@@ -233,9 +232,9 @@ extension ABM {
     public enum ActivityOutcome: Sendable, Hashable {
         /// Apple processed every device.
         case completed
-        /// Apple processed it, but couldn't make its activity report.
+        /// Apple processed it, but couldn’t make its activity report.
         case completedWithoutReport
-        /// Apple couldn't process some of the devices.
+        /// Apple couldn’t process some of the devices.
         case partlyFailed
         case failed(String)
         case stopped
@@ -243,8 +242,10 @@ extension ABM {
         case stillProcessing
         /// Apple returned no activity to follow.
         case notFollowed
-        /// A value Apple didn't document.
+        /// A value Apple didn’t document.
         case unknown(String)
+        /// Checking on the write failed, so what Apple did isn’t known.
+        case watchFailed(String)
 
         /// The Action entry is a failure.
         public var isFailure: Bool {
@@ -257,12 +258,12 @@ extension ABM {
         /// The Action entry carries a warning.
         public var isWarning: Bool {
             switch self {
-            case .completedWithoutReport, .stillProcessing, .notFollowed, .unknown: true
+            case .completedWithoutReport, .stillProcessing, .notFollowed, .unknown, .watchFailed: true
             default: false
             }
         }
 
-        /// The sentence after the Action entry's summary; nil when done.
+        /// The sentence after the Action entry’s summary; nil when done.
         public func sentence(_ service: Service) -> String? {
             switch self {
             case .completed:
@@ -281,6 +282,8 @@ extension ABM {
                 "Apple accepted it but returned no job to follow; check the devices in \(service.portal)."
             case .unknown(let value):
                 "Apple reports “\(value)”; check the devices in \(service.portal)."
+            case .watchFailed(let reason):
+                "Checking on it failed (\(reason)); check the devices in \(service.portal)."
             }
         }
     }

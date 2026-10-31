@@ -11,7 +11,7 @@ public nonisolated struct UpdateConfiguration: Sendable {
     public var owner: String
     /// Repository name as it appears in the GitHub URL, e.g. `"AppSettings2Blueprint"`.
     public var repository: String
-    /// The app's display name, used in the update sheet's text.
+    /// The app’s display name, used in the update sheet’s text.
     public var appName: String
 
     /// `UserDefaults` key for the automatic check. Absent means on.
@@ -41,7 +41,7 @@ public nonisolated struct UpdateConfiguration: Sendable {
         self.automaticCheckInterval = automaticCheckInterval
     }
 
-    /// GitHub's "latest release" endpoint for the repository.
+    /// GitHub’s "latest release" endpoint for the repository.
     public var latestReleaseURL: URL? {
         URL(string: "https://api.github.com/repos/\(owner)/\(repository)/releases/latest")
     }

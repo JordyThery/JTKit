@@ -38,7 +38,7 @@ extension ABM {
         public var mdmMigrationStatus: String?
         public var mdmMigrationDeadlineDateTime: String?
 
-        /// The attributes asked for in the organization's device list, which
+        /// The attributes asked for in the organization’s device list, which
         /// cuts it by about 80%.
         public static let fields = [
             "serialNumber", "deviceModel", "productFamily", "status",
@@ -49,10 +49,6 @@ extension ABM {
             "wifiMacAddress", "bluetoothMacAddress", "ethernetMacAddress",
             "isMdmMigrationCapable", "mdmMigrationStatus", "mdmMigrationDeadlineDateTime",
         ]
-
-        public init(serialNumber: String) {
-            self.serialNumber = serialNumber
-        }
 
         enum CodingKeys: String, CodingKey, CaseIterable {
             case serialNumber, deviceModel, productFamily, status, addedToOrgDateTime, releasedFromOrgDateTime
@@ -143,7 +139,7 @@ extension ABM {
         }
     }
 
-    /// A device's Activation Lock state, as the organization reports it:
+    /// A device’s Activation Lock state, as the organization reports it:
     /// the live state, for Macs and mobile devices, with the kind of lock.
     public struct ActivationLock: Sendable, Hashable {
         public var isLocked: Bool
@@ -161,7 +157,7 @@ extension ABM {
         public var id: String
         /// The ID when Apple sends no name.
         public var name: String
-        /// MDM, APPLE_CONFIGURATOR or APPLE_MDM (Apple's built-in management).
+        /// MDM, APPLE_CONFIGURATOR or APPLE_MDM (Apple’s built-in management).
         public var serverType: String?
         public var status: String?
 
@@ -175,7 +171,7 @@ extension ABM {
         public var isAppleManagement: Bool { serverType?.uppercased() == "APPLE_MDM" }
     }
 
-    /// A device enrolled in Apple's built-in device management.
+    /// A device enrolled in Apple’s built-in device management.
     public struct ManagedDevice: Sendable, Hashable {
         /// The resource ID the details are read by, not the serial number.
         public var id: String
@@ -193,7 +189,7 @@ extension ABM {
         public var isMac: Bool { productFamily?.uppercased() == "MAC" }
     }
 
-    /// The management state of one device under Apple's built-in
+    /// The management state of one device under Apple’s built-in
     /// management. Reporting only: the API has no commands for these devices.
     public struct ManagedDeviceDetail: Sendable, Decodable, Hashable {
         public var lastCheckInDateTime: String?
@@ -204,8 +200,6 @@ extension ABM {
         public var deviceLockStatus: String?
         public var deviceEraseStatus: String?
         public var lostModeStatus: String?
-
-        public init() {}
     }
 
     /// One audit event about a device: when, what, by whom, whether it
@@ -239,7 +233,7 @@ extension ABM {
         public var isFailure: Bool { outcome?.uppercased() == "FAILURE" }
     }
 
-    /// A page of a device's history, with the cursor that continues it.
+    /// A page of a device’s history, with the cursor that continues it.
     public struct AuditPage: Sendable, Hashable {
         public var events: [AuditEvent]
         public var nextCursor: String?
@@ -277,11 +271,11 @@ extension ABM {
         /// unassigned, unless the serial is in `unknownAssignments`.
         public var serverIDBySerial: [String: String]
         public var servers: [MDMServer]
-        /// Services whose device list couldn't be read (whole or in part).
+        /// Services whose device list couldn’t be read (whole or in part).
         public var unreadableServers: [MDMServer]
         /// Devices Apple reports as assigned that no readable list holds:
         /// they may be on an unreadable service, so their service is unknown
-        /// rather than "unassigned" (decided by Jordy).
+        /// rather than "unassigned".
         public var unknownAssignments: Set<String>
         public var capturedAt: Date
 
@@ -296,7 +290,7 @@ extension ABM {
         }
     }
 
-    /// Apple's dates come with or without fractional seconds.
+    /// Apple’s dates come with or without fractional seconds.
     public static func date(_ text: String) -> Date? {
         for options: ISO8601DateFormatter.Options in [[.withInternetDateTime, .withFractionalSeconds], [.withInternetDateTime]] {
             let formatter = ISO8601DateFormatter()

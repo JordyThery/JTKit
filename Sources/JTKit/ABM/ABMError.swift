@@ -1,10 +1,10 @@
 import Foundation
 
 extension ABM {
-    /// One item of Apple's error answer (`{errors: [{id, status, code,
+    /// One item of Apple’s error answer (`{errors: [{id, status, code,
     /// title, detail}]}`).
     public struct ErrorItem: Hashable, Sendable {
-        /// Apple's ID for this error, for Apple support.
+        /// Apple’s ID for this error, for Apple support.
         public var id: String?
         public var code: String?
         public var title: String?
@@ -17,7 +17,7 @@ extension ABM {
             self.detail = detail
         }
 
-        /// The items of an error answer; empty when it isn't one.
+        /// The items of an error answer; empty when it isn’t one.
         public static func items(in data: Data) -> [ErrorItem] {
             guard let object = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
                   let errors = object["errors"] as? [[String: Any]] else { return [] }
@@ -29,7 +29,7 @@ extension ABM {
             }
         }
 
-        /// `CODE: title — detail`, leaving out what's missing.
+        /// `CODE: title — detail`, leaving out what’s missing.
         public var line: String {
             let words = [title, detail].compactMap { $0 }
             let text = words.count == 2 && words[0] != words[1] ? "\(words[0]) — \(words[1])" : (words.first ?? "")
@@ -43,34 +43,34 @@ extension ABM {
 
     /// Why an Apple Business or School Manager request or sign-in failed, in
     /// the same format as the Jamf and Intune errors: the HTTP status line,
-    /// one `CODE: title — detail` line per error, Apple's error ID, then
-    /// hints: the app's own first, then the standard ones. Everything shown
+    /// one `CODE: title — detail` line per error, Apple’s error ID, then
+    /// hints: the app’s own first, then the standard ones. Everything shown
     /// goes through `Redaction`; the error ID stays visible in the
     /// bug-report export.
-    public struct Error: Swift.Error, LocalizedError, Sendable {
+    public struct APIError: Swift.Error, LocalizedError, Sendable {
         public enum Kind: Sendable {
             /// Not sent: not a request the app makes, or an unsafe path.
             case refused(method: String, path: String)
             /// No answer from Apple, also after the retries.
             case transport(method: String, path: String, code: URLError.Code, message: String)
-            /// Apple's sign-in refused the API account. `code` and
-            /// `description` are Apple's `error` and `error_description`,
+            /// Apple’s sign-in refused the API account. `code` and
+            /// `description` are Apple’s `error` and `error_description`,
             /// never its whole answer.
             case signIn(status: Int, code: String?, description: String?)
-            /// The private key can't be read.
+            /// The private key can’t be read.
             case unreadableKey
             /// Apple answered with an error status.
             case status(Int, errors: [ErrorItem], method: String, path: String)
-            /// The answer couldn't be read, e.g. a list without `data`.
+            /// The answer couldn’t be read, e.g. a list without `data`.
             case invalidResponse(String)
             /// Apple kept returning more pages than any real list has.
             case pageLimitReached(path: String, pages: Int)
-            /// Not sent: a next-page link pointed away from Apple's address,
+            /// Not sent: a next-page link pointed away from Apple’s address,
             /// so the token would have gone there.
             case nextPageElsewhere(String)
             /// Not sent: a serial number with characters no Apple serial has.
             case invalidSerial(String)
-            /// Not sent: a write the service doesn't accept (Release in Apple
+            /// Not sent: a write the service doesn’t accept (Release in Apple
             /// School Manager, a missing or late deadline).
             case invalidRequest(String)
         }
@@ -78,7 +78,7 @@ extension ABM {
         public var kind: Kind
         /// Business or School, for the wording; nil before it is known.
         public var service: Service?
-        /// The app's own hints, shown before the standard ones.
+        /// The app’s own hints, shown before the standard ones.
         public var appHints: [String]
 
         public init(_ kind: Kind, service: Service? = nil, appHints: [String] = []) {
@@ -87,7 +87,7 @@ extension ABM {
             self.appHints = appHints
         }
 
-        /// JTKit's HTTP error in Apple's terms, with the error answer read.
+        /// JTKit’s HTTP error in Apple’s terms, with the error answer read.
         init(_ error: HTTPError, service: Service, appHints: [String] = []) {
             let kind: Kind
             switch error {
@@ -121,7 +121,7 @@ extension ABM {
 
         /// Apple stops answering past its limit, so a lost connection after
         /// every retry almost always means that.
-        static let limitHint = "Apple allows about 20 requests a minute for each organization. Wait a minute, then try again."
+        static let limitHint = "\(ABM.rateLimit.explanation). Wait a minute, then try again."
 
         /// The hints every app shows for this error.
         public var standardHints: [String] {
@@ -145,20 +145,20 @@ extension ABM {
             }
         }
 
-        /// The message: the error, the app's hints (its own, then
+        /// The message: the error, the app’s hints (its own, then
         /// `extraHints`), then the standard ones, each shown once.
         public func message(appHints extraHints: [String] = []) -> String {
             var lines: [String]
             switch kind {
             case let .refused(method, path):
-                lines = ["Refused before sending: \(method) \(path) is not a request this app makes."]
+                lines = ["Refused before sending: \(method) \(path) isn’t a request this app makes."]
             case let .transport(_, _, _, message):
-                lines = ["\(name) didn’t answer: \(message)"]
+                lines = ["Network error: \(message)"]
             case let .signIn(status, code, description):
-                lines = ["\(name) sign-in failed: " + Self.statusLine(status)]
+                lines = ["Sign-in failed: " + Self.statusLine(status)]
                 if let line = [code, description].compactMap({ $0 }).joined(separator: ": ").nonEmpty { lines.append(line) }
             case .unreadableKey:
-                lines = ["Could not read the \(name) private key. Expected the PEM-encoded EC P-256 key downloaded when the API account was created."]
+                lines = [ApplePrivateKey.ImportError.notPrivateKey.errorDescription ?? ""]
             case let .status(status, errors, _, _):
                 lines = [Self.statusLine(status)]
                 for item in errors {

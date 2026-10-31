@@ -52,13 +52,13 @@ extension KeyedDecodingContainer where Key == AnyKey {
         text(key).flatMap(JamfPlatform.date(from:))
     }
 
-    /// A nested object, or nil when it is missing or can't be read.
+    /// A nested object, or nil when it is missing or can’t be read.
     func object<T: Decodable>(_ type: T.Type, _ key: AnyKey) -> T? {
         (try? decodeIfPresent(T.self, forKey: key)) ?? nil
     }
 }
 
-/// A list item that is nil when it can't be read, so one bad record doesn't
+/// A list item that is nil when it can’t be read, so one bad record doesn’t
 /// lose the page.
 nonisolated struct Tolerant<Value: Decodable>: Decodable {
     let value: Value?

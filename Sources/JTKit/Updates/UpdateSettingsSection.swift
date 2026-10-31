@@ -1,11 +1,11 @@
 import SwiftUI
 
-/// The Updates section for an app's Settings: the daily-check switch. Checking
+/// The Updates section for an app’s Settings: the daily-check switch. Checking
 /// now stays in the app menu ("Check for Updates…").
 ///
-/// Put it in a grouped `Form`, with the app's `UpdateChecker` in the environment.
-/// The switch uses the checker's `automaticCheckKey`, so saved choices keep working.
-public struct UpdateSettingsSection: View {
+/// Put it in a grouped `Form`, with the app’s `UpdateChecker` in the environment.
+/// The switch uses the checker’s `automaticCheckKey`, so saved choices keep working.
+struct UpdateSettingsSection: View {
     @Environment(UpdateChecker.self) private var checker
 
     public init() {}

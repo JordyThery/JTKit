@@ -4,11 +4,11 @@ import Foundation
 /// "Contoso Source (Demo)", a golden master with a few objects of every type
 /// that refer to each other (a policy with a script, a package, a category,
 /// a smart group and a Self Service icon), and "Contoso Destination (Demo)",
-/// a fresh tenant with Jamf's built-ins and a few objects already there: one
+/// a fresh tenant with Jamf’s built-ins and a few objects already there: one
 /// the same as on the source, some that differ, one only there.
 public nonisolated enum DemoJamfProObjectSamples {
-    public static let sourceHost = "contoso-source.\(DemoNetwork.reservedDomain)"
-    public static let destinationHost = "contoso-destination.\(DemoNetwork.reservedDomain)"
+    static let sourceHost = "contoso-source.\(DemoNetwork.reservedDomain)"
+    static let destinationHost = "contoso-destination.\(DemoNetwork.reservedDomain)"
 
     struct Seed {
         var classic: [String: [(Int, String)]] = [:]
@@ -38,7 +38,7 @@ public nonisolated enum DemoJamfProObjectSamples {
             + "</mobile_device_groups><buildings/><departments/><exclusions><mobile_devices/><mobile_device_groups/></exclusions></scope>"
     }
 
-    /// A configuration profile's payload, escaped as Jamf returns it.
+    /// A configuration profile’s payload, escaped as Jamf returns it.
     private static func payloads(_ identifier: String, _ name: String, uuid: String) -> String {
         let plist = "<?xml version=\"1.0\" encoding=\"UTF-8\"?><plist version=\"1.0\"><dict>"
             + "<key>PayloadDisplayName</key><string>\(name)</string>"
@@ -117,7 +117,7 @@ public nonisolated enum DemoJamfProObjectSamples {
                 + "</display_fields>\(noSite)</advanced_user_search>")],
             "osxconfigurationprofiles": [
                 (1, "<os_x_configuration_profile><general><id>1</id><name>Contoso – Wi-Fi</name>"
-                    + "<description>Contoso's office Wi-Fi</description>\(noSite)\(category(1, "Contoso Security"))"
+                    + "<description>Contoso’s office Wi-Fi</description>\(noSite)\(category(1, "Contoso Security"))"
                     + "<distribution_method>Install Automatically</distribution_method><user_removable>false</user_removable>"
                     + "<level>System</level><uuid>\(DemoSamples.uuid(0x5101))</uuid><redeploy_on_update>Newly Assigned</redeploy_on_update>"
                     + payloads("com.contoso.example.wifi", "Contoso – Wi-Fi", uuid: DemoSamples.uuid(0x5101))
@@ -141,14 +141,14 @@ public nonisolated enum DemoJamfProObjectSamples {
                 + "<is_free>true</is_free><bundle_id>com.contoso.example.notes</bundle_id>"
                 + "<url>https://apps.contoso.example/notes</url>\(category(2, "Contoso Apps"))\(noSite)</general>"
                 + "\(computerScope([designMacs]))<self_service><install_button_text>Get</install_button_text>"
-                + "<self_service_description>Contoso's note-taking app</self_service_description></self_service>"
+                + "<self_service_description>Contoso’s note-taking app</self_service_description></self_service>"
                 + "<vpp><assign_vpp_device_based_licenses>true</assign_vpp_device_based_licenses>"
                 + "<vpp_admin_account_id>1</vpp_admin_account_id></vpp></mac_application>")],
             "mobiledeviceapplications": [(1, "<mobile_device_application><general><id>1</id><name>Contoso Field App</name>"
                 + "<display_name>Contoso Field</display_name><bundle_id>com.contoso.example.field</bundle_id><version>2.8</version>"
                 + "<internal_app>false</internal_app><itunes_store_url>https://apps.contoso.example/field</itunes_store_url>"
                 + "\(category(2, "Contoso Apps"))\(noSite)<deploy_automatically>true</deploy_automatically></general>"
-                + "\(mobileScope([salesIPads]))<self_service><self_service_description>Contoso's field app</self_service_description>"
+                + "\(mobileScope([salesIPads]))<self_service><self_service_description>Contoso’s field app</self_service_description>"
                 + "</self_service></mobile_device_application>")],
             "ebooks": [(1, "<ebook><general><id>1</id><name>Contoso Employee Handbook</name><author>Contoso HR</author>"
                 + "<version>3</version><free>true</free><url>https://books.contoso.example/handbook</url>"
@@ -160,7 +160,7 @@ public nonisolated enum DemoJamfProObjectSamples {
             "restrictedsoftware": [(1, "<restricted_software><general><id>1</id><name>Contoso – Block Torrent Clients</name>"
                 + "<process_name>Transmission.app</process_name><match_exact_process_name>true</match_exact_process_name>"
                 + "<send_notification>true</send_notification><kill_process>true</kill_process>"
-                + "<delete_executable>false</delete_executable><display_message>This app isn't allowed at Contoso.</display_message>"
+                + "<delete_executable>false</delete_executable><display_message>This app isn’t allowed at Contoso.</display_message>"
                 + "\(noSite)</general>\(computerScope([macsSmart]))</restricted_software>")],
             "licensedsoftware": [(1, "<licensed_software><general><id>1</id><name>Contoso Design Suite</name>"
                 + "<publisher>Contoso Software</publisher><platform>Mac</platform><send_email_on_violation>false</send_email_on_violation>"
@@ -228,7 +228,7 @@ public nonisolated enum DemoJamfProObjectSamples {
                 "inventoryDisplayType": "GENERAL", "inputType": "POPUP", "popupMenuChoices": ["Yes", "No"],
             ]],
             "v1/scripts": [[
-                "id": "1", "name": "Contoso – Set Dock", "info": "Puts Contoso's apps in the Dock", "notes": "",
+                "id": "1", "name": "Contoso – Set Dock", "info": "Puts Contoso’s apps in the Dock", "notes": "",
                 "priority": "AFTER", "categoryId": "3", "categoryName": "Contoso Utilities", "osRequirements": "",
                 "parameter4": "Contoso Intranet", "scriptContents": "#!/bin/zsh\n# Contoso demo script: adds the intranet to the Dock\nexit 0\n",
             ]],
@@ -257,7 +257,7 @@ public nonisolated enum DemoJamfProObjectSamples {
                     "name": "Operating System Version", "priority": 0, "andOr": "and", "searchType": "like", "value": "26.",
                     "openingParen": false, "closingParen": false]]],
             ],
-            "v3/computer-groups/static-groups": [["id": "3", "name": designMacs.1, "description": "The design team's Macs",
+            "v3/computer-groups/static-groups": [["id": "3", "name": designMacs.1, "description": "The design team’s Macs",
                                                   "siteId": "-1", "assignments": [["computerId": "1", "selected": true]]]],
             "v2/mobile-device-groups/smart-groups": [
                 ["id": "1", "name": "All Managed iPads", "siteId": "-1", "criteria": [[
@@ -290,11 +290,11 @@ public nonisolated enum DemoJamfProObjectSamples {
                                          "deadlineMessage": "", "deadline": 1, "quitDelay": 1, "completeMessage": "",
                                          "relaunch": true, "suppress": false],
                 "selfServiceSettings": ["includeInFeaturedCategory": false, "includeInComplianceCategory": false,
-                                        "forceViewDescription": false, "description": "Contoso's browser",
+                                        "forceViewDescription": false, "description": "Contoso’s browser",
                                         "categories": [["id": "2", "featured": false]]],
             ]],
             "v2/enrollment-customizations": [[
-                "id": "1", "displayName": "Contoso Welcome", "description": "Contoso's enrollment screens", "siteId": "-1",
+                "id": "1", "displayName": "Contoso Welcome", "description": "Contoso’s enrollment screens", "siteId": "-1",
                 "enrollmentCustomizationBrandingSettings": ["textColor": "000000", "buttonColor": "0A5AD2",
                                                             "buttonTextColor": "FFFFFF", "backgroundColor": "FFFFFF",
                                                             "iconUrl": ""],
@@ -327,11 +327,11 @@ public nonisolated enum DemoJamfProObjectSamples {
                               ["id": "6", "name": "Contoso Security", "priority": 5]],
             // differs from the source: an older version of the script
             "v1/scripts": [[
-                "id": "7", "name": "Contoso – Set Dock", "info": "Puts Contoso's apps in the Dock", "notes": "",
+                "id": "7", "name": "Contoso – Set Dock", "info": "Puts Contoso’s apps in the Dock", "notes": "",
                 "priority": "AFTER", "categoryId": "-1", "osRequirements": "",
                 "parameter4": "", "scriptContents": "#!/bin/zsh\n# Contoso demo script, first version\nexit 0\n",
             ]],
-            // Jamf's built-ins on a new tenant
+            // Jamf’s built-ins on a new tenant
             "v3/computer-groups/smart-groups": [["id": "1", "name": "All Managed Clients", "description": "", "siteId": "-1",
                                                  "criteria": [["name": "Computer Name", "priority": 0, "andOr": "and",
                                                                "searchType": "like", "value": "",
@@ -378,7 +378,7 @@ public nonisolated enum DemoJamfProObjectSamples {
         Date().formatted(.iso8601)
     }
 
-    /// Jamf's own patch source, on every tenant.
+    /// Jamf’s own patch source, on every tenant.
     private static let patchSources: [String: [(Int, String)]] = [
         "patchinternalsources": [(1, "<patch_internal_source><id>1</id><name>Jamf</name><is_enabled>true</is_enabled>"
             + "</patch_internal_source>")],
@@ -477,7 +477,7 @@ public nonisolated enum DemoJamfProObjectSamples {
                    "groupEnrollmentAccessEnabled": false, "userAttributeEnabled": false, "sessionTimeout": 480],
     ] }
 
-    /// A new tenant's defaults: some settings differ from the source, some don't.
+    /// A new tenant’s defaults: some settings differ from the source, some don’t.
     private static var destinationSettings: [String: [String: Any]] {
         var settings = sourceSettings
         settings["v3/check-in"]?["checkInFrequency"] = 30

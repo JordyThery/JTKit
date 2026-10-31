@@ -1,13 +1,13 @@
 import Foundation
 
-/// One request to a service, relative to the client's base URL.
+/// One request to a service, relative to the client’s base URL.
 public nonisolated struct HTTPRequest: Sendable {
     public var method: String
     /// Percent-encoded path relative to the base URL, e.g.
     /// `device-groups/v1/device-groups`. A leading slash is ignored.
     public var path: String
     /// Encoded strictly (`FormEncoding`), so `=`, `&` and quotes in values
-    /// can't change the meaning of the request.
+    /// can’t change the meaning of the request.
     public var query: [URLQueryItem]
     public var body: Data?
     /// JSON by default; XML for Classic API paths.
@@ -15,38 +15,47 @@ public nonisolated struct HTTPRequest: Sendable {
     public var contentType: String?
     /// Headers for this request only.
     public var headers: [String: String]
-    /// An edit that can be sent twice without harm (e.g. a PUT that replaces
-    /// a whole record). Server errors and network drops are retried only for
-    /// reads and for these.
-    public var safeToRepeat: Bool
+    /// Whether the request is sent again after a server error or a dropped
+    /// connection. A 429 is always retried: nothing was done.
+    public var repeating: Repeating
     /// Record both bodies in the activity log, also of a success. Only for
     /// requests the app knows carry nothing secret: by default request
     /// bodies are never recorded and response bodies only for errors.
     public var recordsBodies: Bool
     /// Trims a JSON body before it is redacted and recorded, e.g. to keep only
     /// the inventory sections the app asked for. Gets the parsed JSON and
-    /// returns what may be recorded. A body that isn't JSON then isn't
+    /// returns what may be recorded. A body that isn’t JSON then isn’t
     /// recorded at all. The answer the app receives is unchanged.
     public var recordedJSON: RecordedJSONFilter?
-    /// Record only the method, path, status and duration, as for JTKit's
+    /// Record only the method, path, status and duration, as for JTKit’s
     /// built-in sensitive calls: no headers, no bodies, not even an error
-    /// answer's. For requests whose contents the app knows can carry a
-    /// secret, e.g. licence serial numbers.
+    /// answer’s. For requests whose contents the app knows can carry a
+    /// secret, e.g. license serial numbers.
     public var withholdsContents: Bool
     /// A query that is already percent-encoded, sent as given (after `query`):
     /// for query syntax that strict encoding would change, such as Microsoft
-    /// Graph's `$select` and `$filter`, and next-page links. It must be
-    /// correctly encoded, or the request isn't sent.
+    /// Graph’s `$select` and `$filter`, and next-page links. It must be
+    /// correctly encoded, or the request isn’t sent.
     public var encodedQuery: String?
-    /// For a delete that is safe to repeat: a 404 after an earlier attempt
-    /// may have reached the server (a server error or a dropped connection)
-    /// means that attempt did it, so it counts as done. The answer then has
-    /// status 404. A 404 on the first attempt is still an error.
-    public var notFoundAfterRepeatIsDone: Bool
-    /// A server error (5xx) is this request's answer: returned at once, not
+    /// A server error (5xx) is this request’s answer: returned at once, not
     /// retried or thrown. For a read whose server error is documented as a
-    /// state, e.g. Apple's Activation Lock for a device in an internal state.
+    /// state, e.g. Apple’s Activation Lock for a device in an internal state.
     public var serverErrorIsAnAnswer: Bool
+
+    /// When a request is sent again after a server error (5xx) or a dropped
+    /// connection, which may have reached the server.
+    public enum Repeating: Sendable, Hashable {
+        /// Reads are; an edit isn’t.
+        case standard
+        /// An edit that can be sent twice without harm (e.g. a PUT that
+        /// replaces a whole record) is, as a read.
+        case safe
+        /// A delete that is safe to repeat. A 404 after an attempt that may
+        /// have reached the server means that attempt did it, so it counts
+        /// as done; the answer then has status 404. A 404 on the first
+        /// attempt is still an error.
+        case safeNotFoundIsDone
+    }
 
     public init(
         method: String = "GET",
@@ -56,12 +65,11 @@ public nonisolated struct HTTPRequest: Sendable {
         accept: String? = nil,
         contentType: String? = nil,
         headers: [String: String] = [:],
-        safeToRepeat: Bool = false,
+        repeating: Repeating = .standard,
         recordsBodies: Bool = false,
         recordedJSON: RecordedJSONFilter? = nil,
         withholdsContents: Bool = false,
         encodedQuery: String? = nil,
-        notFoundAfterRepeatIsDone: Bool = false,
         serverErrorIsAnAnswer: Bool = false
     ) {
         self.method = method
@@ -71,22 +79,60 @@ public nonisolated struct HTTPRequest: Sendable {
         self.accept = accept
         self.contentType = contentType
         self.headers = headers
-        self.safeToRepeat = safeToRepeat
+        self.repeating = repeating
         self.recordsBodies = recordsBodies
         self.recordedJSON = recordedJSON
         self.withholdsContents = withholdsContents
         self.encodedQuery = encodedQuery
-        self.notFoundAfterRepeatIsDone = notFoundAfterRepeatIsDone
         self.serverErrorIsAnAnswer = serverErrorIsAnAnswer
+    }
+
+    @available(*, deprecated, message: "Use repeating: .safe, or .safeNotFoundIsDone for notFoundAfterRepeatIsDone.")
+    public init(
+        method: String = "GET",
+        path: String,
+        query: [URLQueryItem] = [],
+        body: Data? = nil,
+        accept: String? = nil,
+        contentType: String? = nil,
+        headers: [String: String] = [:],
+        safeToRepeat: Bool,
+        recordsBodies: Bool = false,
+        recordedJSON: RecordedJSONFilter? = nil,
+        withholdsContents: Bool = false,
+        encodedQuery: String? = nil,
+        notFoundAfterRepeatIsDone: Bool = false,
+        serverErrorIsAnAnswer: Bool = false
+    ) {
+        self.init(method: method, path: path, query: query, body: body, accept: accept, contentType: contentType,
+                  headers: headers,
+                  repeating: notFoundAfterRepeatIsDone ? .safeNotFoundIsDone : safeToRepeat ? .safe : .standard,
+                  recordsBodies: recordsBodies, recordedJSON: recordedJSON, withholdsContents: withholdsContents,
+                  encodedQuery: encodedQuery, serverErrorIsAnAnswer: serverErrorIsAnAnswer)
+    }
+
+    @available(*, deprecated, renamed: "repeating")
+    public var safeToRepeat: Bool {
+        get { repeating != .standard }
+        set { repeating = newValue ? (repeating == .standard ? .safe : repeating) : .standard }
+    }
+
+    @available(*, deprecated, renamed: "repeating")
+    public var notFoundAfterRepeatIsDone: Bool {
+        get { repeating == .safeNotFoundIsDone }
+        set { repeating = newValue ? .safeNotFoundIsDone : (repeating == .safeNotFoundIsDone ? .safe : repeating) }
     }
 
     /// GET and HEAD.
     public var isRead: Bool {
         ["GET", "HEAD"].contains(method.uppercased())
     }
+
+    /// Sent again after a server error or a dropped connection.
+    var isRepeatable: Bool { isRead || repeating != .standard }
 }
 
-public nonisolated struct HTTPResponse: Sendable {
+public nonisolated struct HTTPResponse: Sendable, CustomStringConvertible, CustomDebugStringConvertible {
     public let status: Int
     public let headers: [String: String]
     public let data: Data
@@ -101,6 +147,15 @@ public nonisolated struct HTTPResponse: Sendable {
         headers.first { $0.key.caseInsensitiveCompare(name) == .orderedSame }?.value
     }
 
+    /// The status, the headers redacted and the body’s size: never a cookie
+    /// or a body, also not in `"\(error)"`.
+    public var description: String {
+        let shown = Redaction.headers(headers).map { "\($0.name): \($0.value)" }.joined(separator: ", ")
+        return "HTTP \(status) [\(shown)] \(data.count) bytes"
+    }
+
+    public var debugDescription: String { description }
+
     public func decoded<T: Decodable>(_ type: T.Type = T.self) throws -> T {
         do {
             return try JSONDecoder().decode(type, from: data)
@@ -110,9 +165,10 @@ public nonisolated struct HTTPResponse: Sendable {
     }
 }
 
-/// Why a request failed. Every message goes through `Redaction`.
-public nonisolated enum HTTPError: Error, LocalizedError, Sendable {
-    /// Not sent: not on the app's list of allowed requests, or the path
+/// Why a request failed. Every message goes through `Redaction`, also its
+/// `description`, so `"\(error)"` shows no cookie or secret either.
+public nonisolated enum HTTPError: Error, LocalizedError, Sendable, CustomStringConvertible, CustomDebugStringConvertible {
+    /// Not sent: not on the app’s list of allowed requests, or the path
     /// contains `..` or an encoded slash.
     case refused(method: String, path: String)
     case invalidURL(String)
@@ -132,7 +188,7 @@ public nonisolated enum HTTPError: Error, LocalizedError, Sendable {
         let text: String
         switch self {
         case let .refused(method, path):
-            text = "Refused before sending: \(method) \(path) is not a request this app makes."
+            text = "Refused before sending: \(method) \(path) isn’t a request this app makes."
         case let .invalidURL(message):
             text = message
         case let .transport(_, _, _, message):
@@ -140,15 +196,18 @@ public nonisolated enum HTTPError: Error, LocalizedError, Sendable {
         case let .status(response, method, path, duringSignIn):
             let detail = Self.detail(of: response)
             text = duringSignIn
-                ? "Sign-in failed (HTTP \(response.status))" + (detail.map { ": \($0)" } ?? ".")
+                ? "Sign-in failed: HTTP \(response.status) \(HTTPURLResponse.localizedString(forStatusCode: response.status).capitalized)" + (detail.map { "\n\($0)" } ?? "")
                 : "\(method) \(path) failed with HTTP \(response.status)." + (detail.map { " \($0)" } ?? "")
         case let .decoding(message):
-            text = "Unexpected response format: \(message)"
+            text = "Unexpected response: \(message)"
         }
         return Redaction.text(text)
     }
 
-    /// The start of the server's answer, redacted, at most 300 characters.
+    public var description: String { errorDescription ?? "HTTP error" }
+    public var debugDescription: String { description }
+
+    /// The start of the server’s answer, redacted, at most 300 characters.
     static func detail(of response: HTTPResponse) -> String? {
         guard let body = Redaction.body(response.data, contentType: response.header("Content-Type")) else { return nil }
         let flat = body.split(whereSeparator: \.isNewline).map { $0.trimmingCharacters(in: .whitespaces) }.joined(separator: " ")
@@ -156,12 +215,22 @@ public nonisolated enum HTTPError: Error, LocalizedError, Sendable {
     }
 }
 
-/// Where a client gets its bearer token, e.g. `JamfTokenProvider`.
+/// Where a client gets its bearer token, e.g. `JamfPlatform.TokenProvider`.
 public protocol BearerTokenSource: Sendable {
     /// A token valid for a while yet; signs in when needed.
     func token() async throws -> String
     /// Drops the token, e.g. after the server answered 401.
     func forgetToken() async
+    /// A token, as `token()`; `beforeSigningIn` runs first when it has to
+    /// sign in, e.g. to count the sign-in in a rate limit. A source that
+    /// doesn’t need that uses the default, which ignores it.
+    func token(beforeSigningIn: @escaping @Sendable () async throws -> Void) async throws -> String
+}
+
+extension BearerTokenSource {
+    public func token(beforeSigningIn: @escaping @Sendable () async throws -> Void) async throws -> String {
+        try await token()
+    }
 }
 
 /// The retry rules, the same in every app.
@@ -172,23 +241,23 @@ public protocol BearerTokenSource: Sendable {
 /// the wait doubles from 1 s, with up to 0.5 s of randomness. No wait is
 /// longer than 120 s. A 401 gets a new token and one more try (part of the 4).
 public nonisolated struct RetryRules: Sendable, Hashable {
-    public var maxAttempts: Int
-    public var firstWait: TimeInterval
-    public var randomness: TimeInterval
-    public var longestWait: TimeInterval
+    public let maxAttempts: Int
+    public let firstWait: TimeInterval
+    public let randomness: TimeInterval
+    public let longestWait: TimeInterval
     /// Waits after attempt 1, 2, … used instead of doubling (the last one
     /// repeats); `Retry-After` still comes first. Nil: doubling.
-    public var fixedWaits: [TimeInterval]?
+    public let fixedWaits: [TimeInterval]?
     /// Every network error counts as a short drop worth another try (for
     /// reads and edits safe to repeat), not only the usual few: Apple
     /// Business and School Manager answer their limit by dropping the
     /// connection, in more than one way.
-    public var everyNetworkErrorIsADrop: Bool
+    public let everyNetworkErrorIsADrop: Bool
 
     public static let standard = RetryRules()
 
-    /// Apple Business and School Manager (step 9, decided by Jordy): 5, 15
-    /// and 45 s, because once Apple's quota is spent it stays quiet for a
+    /// Apple Business and School Manager: 5, 15
+    /// and 45 s, because once Apple’s quota is spent it stays quiet for a
     /// while and a short retry only spends another request.
     public static let appleBusiness = RetryRules(fixedWaits: [5, 15, 45], everyNetworkErrorIsADrop: true)
 
@@ -210,16 +279,16 @@ public nonisolated struct RetryRules: Sendable, Hashable {
     /// The wait after a failed attempt (1, 2, …) without `Retry-After`.
     /// - Parameter random: between 0 and 1.
     public func backoff(afterAttempt attempt: Int, random: Double) -> TimeInterval {
-        if let fixedWaits, let last = fixedWaits.last {
+        if let fixedWaits, !fixedWaits.isEmpty {
             let index = min(max(attempt, 1) - 1, fixedWaits.count - 1)
-            return min(fixedWaits.indices.contains(index) ? fixedWaits[index] : last, longestWait)
+            return min(fixedWaits[index], longestWait)
         }
         let doubled = firstWait * pow(2, Double(max(attempt, 1) - 1))
         return min(doubled + random * randomness, longestWait)
     }
 
     /// The wait a `Retry-After` header asks for: seconds, or an HTTP date.
-    public static func retryAfter(_ value: String?, now: Date = .now) -> TimeInterval? {
+    static func retryAfter(_ value: String?, now: Date = .now) -> TimeInterval? {
         guard let value = value?.trimmingCharacters(in: .whitespaces), !value.isEmpty else { return nil }
         if let seconds = Double(value) {
             return seconds.isFinite ? max(seconds, 0) : nil
@@ -256,23 +325,23 @@ public nonisolated struct RateLimit: Sendable, Hashable {
 }
 
 /// How request paths map onto the server.
-public nonisolated enum PathMapping: Sendable, Hashable {
+nonisolated enum PathMapping: Sendable, Hashable {
     /// Paths are used as given.
     case none
     /// Jamf Pro without the Platform API gateway: `pro/…` goes to `api/…` and
     /// `proclassic/…` to `JSSResource/…`; other gateway paths are refused
-    /// (JamfMigrator's direct connections).
+    /// (JamfMigrator’s direct connections).
     case jamfProDirect
 }
 
 /// Paths that are always refused, whatever the app allows: `..`, `.`,
 /// empty segments, encoded slashes or backslashes, broken encoding and
-/// characters a path can't hold.
-public nonisolated enum RequestPath {
+/// characters a path can’t hold.
+nonisolated enum RequestPath {
     public static func isSafe(_ path: String) -> Bool {
         var trimmed = Substring(path)
         if trimmed.hasPrefix("/") { trimmed.removeFirst() }
-        // one trailing slash is allowed: Jamf School's Move to Trash is
+        // one trailing slash is allowed: Jamf School’s Move to Trash is
         // documented as `devices/{udid}/`
         if trimmed.hasSuffix("/") { trimmed.removeLast() }
         guard !trimmed.isEmpty else { return false }
@@ -289,11 +358,11 @@ public nonisolated enum RequestPath {
     }
 }
 
-/// Sends requests to one service: adds the token and the app's headers,
+/// Sends requests to one service: adds the token and the app’s headers,
 /// checks every request before it leaves, and retries by `RetryRules`.
 /// Every attempt, wait and refusal is written to the activity log by the
 /// `RequestRecorder` underneath.
-public actor HTTPClient {
+actor HTTPClient {
     public nonisolated let baseURL: URL
     public nonisolated let recorder: RequestRecorder
     private let tokens: (any BearerTokenSource)?
@@ -307,7 +376,7 @@ public actor HTTPClient {
     /// When the requests in the current window started, oldest first.
     private var recentRequests: [Date] = []
     private var inProgress = 0
-    private var waitingTurns: [CheckedContinuation<Void, Never>] = []
+    private var waitingTurns: [(id: UUID, turn: CheckedContinuation<Void, any Error>)] = []
     private let rules: RetryRules
     private let sleep: @Sendable (Duration) async throws -> Void
     private let random: @Sendable () -> Double
@@ -319,10 +388,11 @@ public actor HTTPClient {
     ///   - tokens: the bearer token; nil sends no Authorization header.
     ///   - recorder: sends and records each attempt.
     ///   - headers: sent with every request, e.g. `X-Environment-Id`.
-    ///   - permits: the app's list of allowed requests, checked before
+    ///   - permits: the app’s list of allowed requests, checked before
     ///     anything is sent. Unsafe paths are refused anyway (`RequestPath`).
     ///   - pathMapping: `.jamfProDirect` for Jamf Pro without the gateway.
-    ///   - redirects: what to do when the server redirects.
+    ///   - redirects: what to do when the server redirects; by default only
+    ///     to HTTPS on the same host and port, so the token never goes elsewhere.
     ///   - writeSpacing: the shortest time between the start of two writes.
     ///   - maxConcurrent: at most this many requests at a time (Microsoft
     ///     Graph: 4); the others wait in order. A request keeps its turn while
@@ -337,7 +407,7 @@ public actor HTTPClient {
         headers: [String: String] = [:],
         permits: @escaping @Sendable (HTTPRequest) -> Bool = { _ in true },
         pathMapping: PathMapping = .none,
-        redirects: RedirectRule = .follow,
+        redirects: RedirectRule = .sameHostHTTPSOnly,
         writeSpacing: Duration = .zero,
         maxConcurrent: Int? = nil,
         rateLimit: RateLimit? = nil,
@@ -374,7 +444,7 @@ public actor HTTPClient {
         var queries = request.query.isEmpty ? [] : [FormEncoding.encode(request.query)]
         if let encoded = request.encodedQuery, !encoded.isEmpty {
             guard Self.isEncodedQuery(encoded) else {
-                throw HTTPError.invalidURL("The query of \(request.path) is not correctly encoded.")
+                throw HTTPError.invalidURL("The query of \(request.path) isn’t correctly encoded.")
             }
             queries.append(encoded)
         }
@@ -382,7 +452,7 @@ public actor HTTPClient {
             components.percentEncodedQuery = queries.joined(separator: "&")
         }
         guard let url = components.url else {
-            throw HTTPError.invalidURL("Could not build an address for \(request.path).")
+            throw HTTPError.invalidURL("Couldn’t build an address for \(request.path).")
         }
         return url
     }
@@ -394,7 +464,7 @@ public actor HTTPClient {
     /// Sends the request, retrying by the rules. Returns only a 2xx answer
     /// (and a 5xx for `serverErrorIsAnAnswer`).
     ///
-    /// - Throws: `HTTPError`, `CancellationError`, or the token source's error.
+    /// - Throws: `HTTPError`, `CancellationError`, or the token source’s error.
     public func send(_ request: HTTPRequest) async throws -> HTTPResponse {
         guard RequestPath.isSafe(request.path), permits(request) else {
             await recorder.note(request.method, request.path,
@@ -403,14 +473,14 @@ public actor HTTPClient {
             throw HTTPError.refused(method: request.method, path: request.path)
         }
         let url = try url(for: request)
-        let repeatable = request.isRead || request.safeToRepeat
+        let repeatable = request.isRepeatable
         var attempt = 0
         var renewedToken = false
         // an earlier attempt may have been carried out: a server error or a
         // dropped connection, not a 429 or 401 (nothing was done)
         var mayHaveBeenDone = false
 
-        await takeTurn()
+        try await takeTurn()
         defer { finishTurn() }
 
         while true {
@@ -444,10 +514,13 @@ public actor HTTPClient {
             }
 
             // an error answer can repeat the token; it is shown and kept, so
-            // the token goes first (a success is returned as it came)
+            // the token and cookies go first (a success is returned as it came)
             let isError = !(200..<300).contains(http.statusCode)
-            let response = HTTPResponse(status: http.statusCode, headers: Self.headers(of: http),
-                                        data: isError ? Self.removing(knownSecrets, from: data) : data)
+            let headers = Self.headers(of: http)
+            let response = HTTPResponse(
+                status: http.statusCode,
+                headers: isError ? headers.reduce(into: [:]) { $0[$1.key] = Redaction.headerValue(name: $1.key, value: $1.value) } : headers,
+                data: isError ? Self.removing(knownSecrets, from: data) : data)
             switch http.statusCode {
             case 200..<300:
                 return response
@@ -459,7 +532,7 @@ public actor HTTPClient {
                                     category: "Retry", isWarning: true)
             case 500..<600 where request.serverErrorIsAnAnswer:
                 return response
-            case 404 where request.notFoundAfterRepeatIsDone && mayHaveBeenDone:
+            case 404 where request.repeating == .safeNotFoundIsDone && mayHaveBeenDone:
                 await recorder.note(request.method, request.path,
                                     note: "HTTP 404 after a repeat: an earlier attempt already did it.",
                                     category: "Retry")
@@ -506,13 +579,16 @@ public actor HTTPClient {
         }
         var token: String?
         if let tokens {
-            token = try await tokens.token()
+            // a sign-in counts in the rate limit too, as one more request
+            token = rateLimit == nil
+                ? try await tokens.token()
+                : try await tokens.token(beforeSigningIn: { try await self.reserveSlot(for: request) })
             urlRequest.setValue("Bearer \(token ?? "")", forHTTPHeaderField: "Authorization")
         }
         return (urlRequest, token)
     }
 
-    /// Waits until another request fits in the rate limit's window. The
+    /// Waits until another request fits in the rate limit’s window. The
     /// slot is taken before anything is sent, so simultaneous requests queue.
     private func reserveSlot(for request: HTTPRequest) async throws {
         guard let rateLimit else { return }
@@ -530,7 +606,7 @@ public actor HTTPClient {
             do {
                 try await sleep(.milliseconds(Int((delay * 1000).rounded())))
             } catch {
-                await recorder.note(request.method, request.path, note: "Cancelled while waiting.", category: "Retry")
+                await recorder.note(request.method, request.path, note: "Canceled while waiting.", category: "Retry")
                 throw CancellationError()
             }
         }
@@ -543,7 +619,7 @@ public actor HTTPClient {
         return cleaned == text ? data : Data(cleaned.utf8)
     }
 
-    /// Waits before the next attempt, written to the log first. Cancelling
+    /// Waits before the next attempt, written to the log first. Canceling
     /// the task stops the wait at once.
     private func wait(_ seconds: TimeInterval, reason: String, request: HTTPRequest, nextAttempt: Int) async throws {
         let delay = min(max(seconds, 0), rules.longestWait)
@@ -554,20 +630,39 @@ public actor HTTPClient {
         do {
             try await sleep(.milliseconds(Int((delay * 1000).rounded())))
         } catch {
-            await recorder.note(request.method, request.path, note: "Cancelled while waiting.", category: "Retry")
+            await recorder.note(request.method, request.path, note: "Canceled while waiting.", category: "Retry")
             throw CancellationError()
         }
     }
 
     /// Waits for a turn when the client has a limit; turns are handed out
-    /// in the order they were asked for.
-    private func takeTurn() async {
+    /// in the order they were asked for. Canceling the task stops the wait
+    /// at once, without taking a turn.
+    private func takeTurn() async throws {
         guard let maxConcurrent else { return }
         if inProgress < maxConcurrent {
             inProgress += 1
             return
         }
-        await withCheckedContinuation { waitingTurns.append($0) }
+        let id = UUID()
+        try await withTaskCancellationHandler {
+            try await withCheckedThrowingContinuation { (turn: CheckedContinuation<Void, any Error>) in
+                if Task.isCancelled {
+                    turn.resume(throwing: CancellationError())
+                } else {
+                    waitingTurns.append((id, turn))
+                }
+            }
+        } onCancel: {
+            Task { await self.cancelTurn(id) }
+        }
+    }
+
+    /// A canceled request leaves the queue; one already given its turn
+    /// keeps it and stops at its next cancellation check.
+    private func cancelTurn(_ id: UUID) {
+        guard let index = waitingTurns.firstIndex(where: { $0.id == id }) else { return }
+        waitingTurns.remove(at: index).turn.resume(throwing: CancellationError())
     }
 
     /// Hands the turn straight to the next waiting request, if any.
@@ -576,7 +671,7 @@ public actor HTTPClient {
         if waitingTurns.isEmpty {
             inProgress -= 1
         } else {
-            waitingTurns.removeFirst().resume()
+            waitingTurns.removeFirst().turn.resume()
         }
     }
 

@@ -4,7 +4,7 @@ extension Graph {
     /// How a client signs in to Microsoft Graph, which decides who grants a
     /// missing permission.
     public enum Access: Sendable, Hashable {
-        /// A person signs in (Microsoft's sign-in window): delegated
+        /// A person signs in (Microsoft’s sign-in window): delegated
         /// permissions, accepted at sign-in or granted by an admin.
         case delegated
         /// The app signs in with its own secret: application permissions,
@@ -16,7 +16,7 @@ extension Graph {
     /// and as an application permission.
     public struct Permission: Hashable, Sendable, CustomStringConvertible {
         public let name: String
-        /// The application permission's name when it differs.
+        /// The application permission’s name when it differs.
         public let applicationName: String
 
         public init(_ name: String, application: String? = nil) {
@@ -31,7 +31,7 @@ extension Graph {
         public var description: String { name }
 
         public static let userRead = Permission("User.Read", application: "User.Read.All")
-        /// The tenant's name and ID; delegated sign-ins read it with User.Read.
+        /// The tenant’s name and ID; delegated sign-ins read it with User.Read.
         public static let organizationRead = Permission("User.Read", application: "Organization.Read.All")
         public static let configurationRead = Permission("DeviceManagementConfiguration.Read.All")
         public static let configurationReadWrite = Permission("DeviceManagementConfiguration.ReadWrite.All")
@@ -58,7 +58,7 @@ extension Graph {
         ]
 
         /// The permission a request needs, from the table of the calls the
-        /// apps make; nil for a call that isn't in it.
+        /// apps make; nil for a call that isn’t in it.
         /// - Parameter path: after the version, without the query, e.g.
         ///   `deviceManagement/configurationPolicies/{id}/assign`.
         public static func required(method: String, path: String) -> Permission? {
@@ -93,6 +93,9 @@ extension Graph {
                 case "applepushnotificationcertificate", "deponboardingsettings":
                     return .serviceConfigRead
                 case "manageddevices":
+                    // every device action needs PrivilegedOperations.All, also
+                    // the harmless ones (Microsoft groups by what reaches the
+                    // device); deleting a record needs ReadWrite.All
                     if isRead { return .managedDevicesRead }
                     return method.uppercased() == "DELETE" && segments.count == 3
                         ? .managedDevicesReadWrite : .managedDevicesPrivileged

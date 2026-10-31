@@ -2,6 +2,21 @@ import Foundation
 
 // MARK: - Records
 
+/// The result of looking up one device by serial number or UDID, in Jamf Pro
+/// or Jamf School.
+public nonisolated enum DeviceMatch<Record: Sendable & Hashable>: Sendable, Hashable {
+    /// No record has this serial number or UDID.
+    case none
+    case one(Record)
+    /// Several records have it; which one is meant is unclear.
+    case several(Int)
+
+    public var record: Record? {
+        if case .one(let record) = self { return record }
+        return nil
+    }
+}
+
 extension JamfPro {
     /// An inventory section a lookup asks for.
     public enum InventorySection: String, Sendable, Hashable, CaseIterable {
@@ -39,7 +54,7 @@ extension JamfPro {
     }
 
     /// A computer from `v4/computers-inventory`. Every section and field is
-    /// optional: a section that wasn't asked for, a missing field or a value
+    /// optional: a section that wasn’t asked for, a missing field or a value
     /// of an unexpected type reads as nil, never as a failed lookup.
     public struct Computer: Decodable, Hashable, Sendable {
         public struct General: Hashable, Sendable {
@@ -90,7 +105,7 @@ extension JamfPro {
         public struct DiskEncryption: Hashable, Sendable {
             public var fileVault2Enabled: Bool?
             public var individualRecoveryKeyValidityStatus: String?
-            /// The boot partition's FileVault state, e.g. "ENCRYPTED".
+            /// The boot partition’s FileVault state, e.g. "ENCRYPTED".
             public var bootPartitionFileVault2State: String?
             public var bootPartitionFileVault2Percent: Int?
         }
@@ -115,18 +130,6 @@ extension JamfPro {
         public var userAndLocation: UserAndLocation?
 
         public var serialNumber: String? { hardware?.serialNumber }
-
-        public init(id: String? = nil, udid: String? = nil, general: General? = nil, hardware: Hardware? = nil,
-                    operatingSystem: OperatingSystem? = nil, diskEncryption: DiskEncryption? = nil,
-                    userAndLocation: UserAndLocation? = nil) {
-            self.id = id
-            self.udid = udid
-            self.general = general
-            self.hardware = hardware
-            self.operatingSystem = operatingSystem
-            self.diskEncryption = diskEncryption
-            self.userAndLocation = userAndLocation
-        }
 
         public init(from decoder: any Decoder) throws {
             let c = try decoder.container(keyedBy: AnyKey.self)
@@ -203,7 +206,7 @@ extension JamfPro {
             public var passcodePresent: Bool?
             public var passcodeCompliant: Bool?
             public var passcodeCompliantWithProfile: Bool?
-            /// Jamf Pro's hardware encryption level (a number).
+            /// Jamf Pro’s hardware encryption level (a number).
             public var hardwareEncryption: Int?
         }
 
@@ -228,17 +231,6 @@ extension JamfPro {
         /// The UDID, wherever the answer put it.
         public var udid: String? { topLevelUDID ?? general?.udid ?? hardware?.udid }
         public var serialNumber: String? { hardware?.serialNumber }
-
-        public init(id: String? = nil, deviceType: String? = nil, udid: String? = nil, general: General? = nil,
-                    hardware: Hardware? = nil, security: Security? = nil, userAndLocation: UserAndLocation? = nil) {
-            self.id = id
-            self.deviceType = deviceType
-            topLevelUDID = udid
-            self.general = general
-            self.hardware = hardware
-            self.security = security
-            self.userAndLocation = userAndLocation
-        }
 
         public init(from decoder: any Decoder) throws {
             let c = try decoder.container(keyedBy: AnyKey.self)
@@ -277,7 +269,7 @@ extension JamfPro {
         }
     }
 
-    /// A department, building or site ID; nil for Jamf Pro's "none" ("-1").
+    /// A department, building or site ID; nil for Jamf Pro’s "none" ("-1").
     static func reference(_ id: String?) -> String? {
         id == "-1" ? nil : id
     }
@@ -286,8 +278,9 @@ extension JamfPro {
 // MARK: - Results
 
 extension JamfPro {
-    /// `v2/mobile-devices/{id}/detail`: one record, its general values at the
-    /// top level (`name`, `assetTag`, …; `ios.supervised`, `site.id`).
+    /// `v2/mobile-devices/{id}`: one record, its general values at the top
+    /// level (`name`, `udid`, …; `assetTag`, `ios.supervised` and `site.id`
+    /// when the answer has them).
     struct MobileDeviceDetail: Decodable {
         var general: MobileDevice.General
 
@@ -307,29 +300,18 @@ extension JamfPro {
         }
     }
 
-    /// The result of looking up one device.
-    public enum Match<Record: Sendable & Hashable>: Sendable, Hashable {
-        /// No record has this serial number or UDID.
-        case none
-        case one(Record)
-        /// Several records have it; which one is meant is unclear.
-        case several(Int)
-
-        public var record: Record? {
-            if case .one(let record) = self { return record }
-            return nil
-        }
-    }
+    @available(*, deprecated, renamed: "DeviceMatch")
+    public typealias Match<Record: Sendable & Hashable> = DeviceMatch<Record>
 
     /// The result of looking up many devices at once.
     public struct Batch<Record: Sendable>: Sendable {
         /// Found records, by serial number in capitals. With several records
         /// for one serial, the first.
         public var records: [String: Record]
-        /// Serials that couldn't be looked up, by serial number in capitals.
-        public var failures: [String: JamfPlatformError]
+        /// Serials that couldn’t be looked up, by serial number in capitals.
+        public var failures: [String: JamfPlatform.APIError]
 
-        public init(records: [String: Record] = [:], failures: [String: JamfPlatformError] = [:]) {
+        public init(records: [String: Record] = [:], failures: [String: JamfPlatform.APIError] = [:]) {
             self.records = records
             self.failures = failures
         }
@@ -339,13 +321,13 @@ extension JamfPro {
     public enum Recording: Sendable, Hashable {
         /// The default bodies rule: the answer only when it is an error.
         case errorsOnly
-        /// Also a successful answer, trimmed to the record's ID, UDID and the
+        /// Also a successful answer, trimmed to the record’s ID, UDID and the
         /// sections asked for. User and location are hidden whole, as every
         /// personal block is.
         case results
     }
 
-    /// Keeps a page's `totalCount` and, per record, only what says which
+    /// Keeps a page’s `totalCount` and, per record, only what says which
     /// record it is and the sections asked for.
     static func recordedInventory(sections: [InventorySection]) -> RecordedJSONFilter {
         let allowed = Set(["id", "udid", "mobileDeviceId", "deviceType"]).union(sections.map(\.key))
@@ -368,7 +350,7 @@ extension JamfPro {
     public static let mobileDeviceSections: [InventorySection] = [.general, .hardware, .userAndLocation]
 
     /// Lookups ask for at most this many serials per request.
-    public static let batchSize = 50
+    static let batchSize = 50
     /// And send at most this many requests at once.
     static let batchWindow = 4
 }
@@ -399,11 +381,11 @@ extension JamfPlatform.Client {
     /// A record counts only when its serial is the one asked for (ignoring
     /// case). Needs “Read Computers”.
     ///
-    /// - Throws: `JamfPlatformError`, `.invalidIdentifier` before anything
+    /// - Throws: `JamfPlatform.APIError`, `.invalidIdentifier` before anything
     ///   is sent when the serial has other characters than letters, digits
     ///   and hyphens.
     public func computer(serial: String, sections: [JamfPro.InventorySection] = JamfPro.computerSections,
-                         recording: JamfPro.Recording = .errorsOnly) async throws -> JamfPro.Match<JamfPro.Computer> {
+                         recording: JamfPro.Recording = .errorsOnly) async throws -> DeviceMatch<JamfPro.Computer> {
         let safe = try JamfPro.validatedIdentifier(serial)
         let records: [JamfPro.Computer] = try await inventory(.computers, filter: "\(InventoryList.computers.serialField)==\"\(safe)\"",
                                                               sections: sections, recording: recording)
@@ -412,7 +394,7 @@ extension JamfPlatform.Client {
 
     /// The computer with this UDID. Needs “Read Computers”.
     public func computer(udid: String, sections: [JamfPro.InventorySection] = JamfPro.computerSections,
-                         recording: JamfPro.Recording = .errorsOnly) async throws -> JamfPro.Match<JamfPro.Computer> {
+                         recording: JamfPro.Recording = .errorsOnly) async throws -> DeviceMatch<JamfPro.Computer> {
         let safe = try JamfPro.validatedIdentifier(udid)
         let records: [JamfPro.Computer] = try await inventory(.computers, filter: "udid==\"\(safe)\"",
                                                               sections: sections, recording: recording)
@@ -422,7 +404,7 @@ extension JamfPlatform.Client {
     /// The mobile device with this serial number (`v2/mobile-devices/detail`).
     /// Needs “Read Mobile Devices”.
     public func mobileDevice(serial: String, sections: [JamfPro.InventorySection] = JamfPro.mobileDeviceSections,
-                             recording: JamfPro.Recording = .errorsOnly) async throws -> JamfPro.Match<JamfPro.MobileDevice> {
+                             recording: JamfPro.Recording = .errorsOnly) async throws -> DeviceMatch<JamfPro.MobileDevice> {
         let safe = try JamfPro.validatedIdentifier(serial)
         let records: [JamfPro.MobileDevice] = try await inventory(.mobileDevices, filter: "serialNumber==\"\(safe)\"",
                                                                   sections: sections, recording: recording)
@@ -431,33 +413,40 @@ extension JamfPlatform.Client {
 
     /// The mobile device with this UDID. Needs “Read Mobile Devices”.
     public func mobileDevice(udid: String, sections: [JamfPro.InventorySection] = JamfPro.mobileDeviceSections,
-                             recording: JamfPro.Recording = .errorsOnly) async throws -> JamfPro.Match<JamfPro.MobileDevice> {
+                             recording: JamfPro.Recording = .errorsOnly) async throws -> DeviceMatch<JamfPro.MobileDevice> {
         let safe = try JamfPro.validatedIdentifier(udid)
         let records: [JamfPro.MobileDevice] = try await inventory(.mobileDevices, filter: "udid==\"\(safe)\"",
                                                                   sections: sections, recording: recording)
         return try await completingGeneral(Self.match(records, safe) { $0.udid }, sections: sections)
     }
 
-    /// A record that never enrolled has device type "Unknown", and Jamf's
+    /// A record that never enrolled has device type "Unknown", and Jamf’s
     /// device list leaves out its whole general section (name, asset tag, …);
-    /// the single-record view still has them (seen on Jamf Pro 11.33, 0.12.3).
-    /// So a lookup that found one such record reads it once more by ID.
-    private func completingGeneral(_ match: JamfPro.Match<JamfPro.MobileDevice>,
-                                   sections: [JamfPro.InventorySection]) async throws -> JamfPro.Match<JamfPro.MobileDevice> {
+    /// the single record still has them (seen on Jamf Pro 11.33). So a lookup
+    /// that found one such record reads it once more by ID. It reads
+    /// `v2/mobile-devices/{id}`, never `…/detail`: that one carries the
+    /// device’s unlock token, and a lookup never reads it.
+    private func completingGeneral(_ match: DeviceMatch<JamfPro.MobileDevice>,
+                                   sections: [JamfPro.InventorySection]) async throws -> DeviceMatch<JamfPro.MobileDevice> {
         guard sections.contains(.general), case .one(var record) = match, record.general == nil, let id = record.id else { return match }
-        let response = try await send(HTTPRequest(path: "pro/v2/mobile-devices/\(JamfPlatform.pathSegment(id))/detail"),
-                                      privilege: .readMobileDevices)
+        let response = try await sendThrowing(Self.singleMobileDevice(id), privilege: .readMobileDevices)
         guard let detail = try? JSONDecoder().decode(JamfPro.MobileDeviceDetail.self, from: response.data) else { return match }
         record.general = detail.general
         return .one(record)
     }
 
+    /// One mobile device by ID, without the unlock token.
+    private static func singleMobileDevice(_ id: String) -> HTTPRequest {
+        HTTPRequest(path: "pro/v2/mobile-devices/\(JamfPlatform.pathSegment(id))")
+    }
+
     /// Computers by serial number, many at once: 50 serials per request,
     /// 4 requests at a time. When Jamf Pro refuses a list filter (HTTP 400),
-    /// that group is looked up one serial at a time. A serial with other
+    /// that group is looked up one serial at a time, unless the first of
+    /// those fails too: then the whole group fails. A serial with other
     /// characters than letters, digits and hyphens fails without being sent.
     ///
-    /// - Throws: `CancellationError`, or the secret's own error (e.g. none
+    /// - Throws: `CancellationError`, or the secret’s own error (e.g. none
     ///   saved); every Jamf error is a failure of the serials concerned.
     public func computers(serials: [String], sections: [JamfPro.InventorySection] = JamfPro.computerSections,
                           recording: JamfPro.Recording = .errorsOnly) async throws -> JamfPro.Batch<JamfPro.Computer> {
@@ -466,7 +455,7 @@ extension JamfPlatform.Client {
 
     /// Mobile devices by serial number, many at once, as `computers(serials:)`.
     /// A record that never enrolled is read once more by ID for its general
-    /// section, as in `mobileDevice(serial:)` (0.12.4).
+    /// section, as in `mobileDevice(serial:)`.
     public func mobileDevices(serials: [String], sections: [JamfPro.InventorySection] = JamfPro.mobileDeviceSections,
                               recording: JamfPro.Recording = .errorsOnly) async throws -> JamfPro.Batch<JamfPro.MobileDevice> {
         var batch: JamfPro.Batch<JamfPro.MobileDevice> = try await self.batch(.mobileDevices, serials: serials, sections: sections,
@@ -474,7 +463,7 @@ extension JamfPlatform.Client {
         guard sections.contains(.general) else { return batch }
         let incomplete = batch.records.filter { $0.value.general == nil && $0.value.id != nil }
         guard !incomplete.isEmpty else { return batch }
-        // A few at a time, like the list reads. A detail that can't be read
+        // A few at a time, like the list reads. One that can’t be read
         // leaves the record as the list gave it: found, without a name.
         let keys = Array(incomplete.keys)
         try await withThrowingTaskGroup(of: (String, JamfPro.MobileDevice.General?).self) { group in
@@ -486,8 +475,7 @@ extension JamfPlatform.Client {
                 let id = incomplete[key]?.id ?? ""
                 group.addTask {
                     do {
-                        let response = try await self.send(HTTPRequest(path: "pro/v2/mobile-devices/\(JamfPlatform.pathSegment(id))/detail"),
-                                                           privilege: .readMobileDevices)
+                        let response = try await self.sendThrowing(Self.singleMobileDevice(id), privilege: .readMobileDevices)
                         return (key, try? JSONDecoder().decode(JamfPro.MobileDeviceDetail.self, from: response.data).general)
                     } catch is CancellationError {
                         throw CancellationError()
@@ -507,28 +495,28 @@ extension JamfPlatform.Client {
 
     // MARK: Asset tags
 
-    /// Sets a computer's asset tag (`v4/computers-inventory-detail/{id}`); an
+    /// Sets a computer’s asset tag (`v4/computers-inventory-detail/{id}`); an
     /// empty tag clears it. Safe to repeat. Needs “Update Computers”.
     public func setAssetTag(_ assetTag: String, computerID: String) async throws {
         let body = try JSONSerialization.data(withJSONObject: ["general": ["assetTag": assetTag]])
-        _ = try await send(HTTPRequest(method: "PATCH", path: "pro/v4/computers-inventory-detail/\(JamfPlatform.pathSegment(computerID))",
-                                       body: body, safeToRepeat: true),
-                           privilege: .updateComputers)
+        _ = try await sendThrowing(HTTPRequest(method: "PATCH", path: "pro/v4/computers-inventory-detail/\(JamfPlatform.pathSegment(computerID))",
+                                               body: body, repeating: .safe),
+                                   privilege: .updateComputers)
     }
 
-    /// Sets a mobile device's asset tag (`v2/mobile-devices/{id}`); an empty
+    /// Sets a mobile device’s asset tag (`v2/mobile-devices/{id}`); an empty
     /// tag clears it. Safe to repeat. Needs “Update Mobile Devices”.
     public func setAssetTag(_ assetTag: String, mobileDeviceID: String) async throws {
         let body = try JSONSerialization.data(withJSONObject: ["assetTag": assetTag])
-        _ = try await send(HTTPRequest(method: "PATCH", path: "pro/v2/mobile-devices/\(JamfPlatform.pathSegment(mobileDeviceID))",
-                                       body: body, safeToRepeat: true),
-                           privilege: .updateMobileDevices)
+        _ = try await sendThrowing(HTTPRequest(method: "PATCH", path: "pro/v2/mobile-devices/\(JamfPlatform.pathSegment(mobileDeviceID))",
+                                               body: body, repeating: .safe),
+                                   privilege: .updateMobileDevices)
     }
 
     // MARK: Private
 
     private static func match<Record>(_ records: [Record], _ wanted: String,
-                                      _ identifier: (Record) -> String?) -> JamfPro.Match<Record> {
+                                      _ identifier: (Record) -> String?) -> DeviceMatch<Record> {
         let exact = records.filter { identifier($0)?.caseInsensitiveCompare(wanted) == .orderedSame }
         switch exact.count {
         case 0: return .none
@@ -549,12 +537,12 @@ extension JamfPlatform.Client {
                 query: [URLQueryItem(name: "page", value: String(page)), URLQueryItem(name: "page-size", value: String(pageSize))] + query,
                 recordsBodies: recording == .results,
                 recordedJSON: recording == .results ? JamfPro.recordedInventory(sections: sections) : nil)
-            let response = try await self.send(request, privilege: list.privilege)
+            let response = try await self.sendThrowing(request, privilege: list.privilege)
             let body: InventoryPage<Record>
             do {
                 body = try JSONDecoder().decode(InventoryPage<Record>.self, from: response.data)
             } catch {
-                throw self.failure(JamfPlatformError(.invalidResponse("\(list.path) could not be read: \(error.localizedDescription)")))
+                throw self.failure(JamfPlatform.APIError(.invalidResponse("\(list.path) couldn’t be read: \(error.localizedDescription)")))
             }
             let records = body.results.compactMap(\.value)
             return JamfPlatform.Page(results: records, totalCount: body.totalCount,
@@ -573,7 +561,7 @@ extension JamfPlatform.Client {
             guard !key.isEmpty, !wanted.contains(key), result.failures[key] == nil else { continue }
             do {
                 wanted.append(try JamfPro.validatedIdentifier(key))
-            } catch let error as JamfPlatformError {
+            } catch let error as JamfPlatform.APIError {
                 result.failures[key] = error
             }
         }
@@ -581,7 +569,7 @@ extension JamfPlatform.Client {
             Array(wanted[$0..<min($0 + JamfPro.batchSize, wanted.count)])
         }
 
-        typealias ChunkResult = (records: [String: Record], failures: [String: JamfPlatformError])
+        typealias ChunkResult = (records: [String: Record], failures: [String: JamfPlatform.APIError])
         @Sendable func read(_ chunk: [String]) async throws -> ChunkResult {
             func keyed(_ records: [Record]) -> [String: Record] {
                 var found = [String: Record]()
@@ -595,21 +583,26 @@ extension JamfPlatform.Client {
             do {
                 let records: [Record] = try await inventory(list, filter: filter, sections: sections, recording: recording)
                 return (keyed(records), [:])
-            } catch let error as JamfPlatformError where error.status == 400 {
-                // The list filter was refused: one serial at a time.
+            } catch let error as JamfPlatform.APIError where error.status == 400 {
+                // The list filter was refused: one serial at a time. The first
+                // is a probe: when it fails too, the 400 wasn’t about the list
+                // filter, and the others fail with it without being sent.
                 var found = [String: Record]()
-                var failed = [String: JamfPlatformError]()
-                for one in chunk {
+                var failed = [String: JamfPlatform.APIError]()
+                for (index, one) in chunk.enumerated() {
                     do {
                         let records: [Record] = try await inventory(list, filter: "\(list.serialField)==\"\(one)\"",
                                                                     sections: sections, recording: recording)
                         found.merge(keyed(records)) { first, _ in first }
-                    } catch let error as JamfPlatformError {
+                    } catch let error as JamfPlatform.APIError {
+                        guard index > 0 else {
+                            return ([:], Dictionary(uniqueKeysWithValues: chunk.map { ($0, error) }))
+                        }
                         failed[one] = error
                     }
                 }
                 return (found, failed)
-            } catch let error as JamfPlatformError {
+            } catch let error as JamfPlatform.APIError {
                 return ([:], Dictionary(uniqueKeysWithValues: chunk.map { ($0, error) }))
             }
         }

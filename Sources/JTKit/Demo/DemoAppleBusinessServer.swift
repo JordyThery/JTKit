@@ -1,9 +1,9 @@
 import CryptoKit
 import Foundation
 
-/// Apple's sign-in for Apple Business and School Manager
+/// Apple’s sign-in for Apple Business and School Manager
 /// (`account.apple.com`): it checks the signed client assertion against the
-/// public key registered for the client ID, as Apple does, so JTKit's real
+/// public key registered for the client ID, as Apple does, so JTKit’s real
 /// sign-in code runs. Tokens carry their scope; the API servers accept only
 /// their own.
 public nonisolated final class DemoAppleSignInServer: DemoServer, @unchecked Sendable {
@@ -41,7 +41,7 @@ public nonisolated final class DemoAppleSignInServer: DemoServer, @unchecked Sen
         }
     }
 
-    /// An ES256 JWT for this client, addressed to Apple's sign-in, signed by `key`'s private key.
+    /// An ES256 JWT for this client, addressed to Apple’s sign-in, signed by `key`'s private key.
     static func verify(_ jwt: String, clientID: String, key: P256.Signing.PublicKey) -> Bool {
         let parts = jwt.split(separator: ".", omittingEmptySubsequences: false).map(String.init)
         guard parts.count == 3,
@@ -63,7 +63,7 @@ public nonisolated final class DemoAppleSignInServer: DemoServer, @unchecked Sen
 }
 
 /// One Apple Business Manager or Apple School Manager organization of
-/// `DemoWorld` (Contoso or Contoso Academy) on Apple's own address: devices,
+/// `DemoWorld` (Contoso or Contoso Academy) on Apple’s own address: devices,
 /// the organization read, MDM servers and their devices, AppleCare,
 /// Activation Lock, the assigned server, built-in management (none here),
 /// audit events (Business only), and the writes as activities. A write
@@ -135,7 +135,7 @@ public nonisolated final class DemoAppleBusinessServer: DemoServer, @unchecked S
             let path = request.pathSegments
             guard path.first == "v1" else { return Self.notFound() }
             if scenario == .missingPermission {
-                return Self.error(403, "FORBIDDEN", "Forbidden", "This API account can't read devices. (demo mode)")
+                return Self.error(403, "FORBIDDEN", "Forbidden", "This API account can’t read devices. (demo mode)")
             }
             switch (request.method, Array(path.dropFirst())) {
             case ("GET", ["orgDevices"]):
@@ -254,7 +254,7 @@ public nonisolated final class DemoAppleBusinessServer: DemoServer, @unchecked S
         return DemoJSON.response(200, ["data": events, "meta": ["paging": ["limit": 100]]])
     }
 
-    /// Apple's `limit` and `links.next` paging, on this organization's address.
+    /// Apple’s `limit` and `links.next` paging, on this organization’s address.
     private func list(_ items: [[String: Any]], _ request: DemoRequest) -> DemoResponse {
         let limit = min(Int(request.query["limit"] ?? "") ?? 100, pageSize)
         let start = Int(request.query["cursor"] ?? "") ?? 0
@@ -277,7 +277,7 @@ public nonisolated final class DemoAppleBusinessServer: DemoServer, @unchecked S
         guard let data = DemoJSON.object(body)?["data"] as? [String: Any],
               let attributes = data["attributes"] as? [String: Any],
               let type = attributes["activityType"] as? String else {
-            return Self.error(400, "PARAMETER_ERROR.INVALID", "Invalid request", "The activity can't be read.")
+            return Self.error(400, "PARAMETER_ERROR.INVALID", "Invalid request", "The activity can’t be read.")
         }
         let relationships = data["relationships"] as? [String: Any] ?? [:]
         let serials = (((relationships["devices"] as? [String: Any])?["data"]) as? [[String: Any]] ?? [])
@@ -288,7 +288,7 @@ public nonisolated final class DemoAppleBusinessServer: DemoServer, @unchecked S
             return Self.error(400, "PARAMETER_ERROR.REQUIRED", "Missing devices", "Choose at least one device.")
         }
         if type == "RELEASE_DEVICES", service != .business {
-            return Self.error(400, "PARAMETER_ERROR.INVALID", "Invalid activity type", "Apple School Manager can't release devices.")
+            return Self.error(400, "PARAMETER_ERROR.INVALID", "Invalid activity type", "Apple School Manager can’t release devices.")
         }
         if let server, !DemoWorld.mdmServers(in: organization).contains(where: { $0.id == server }) {
             return Self.error(404, "NOT_FOUND", "MDM server not found", "No such MDM server.")

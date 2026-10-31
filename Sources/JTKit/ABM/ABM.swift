@@ -1,6 +1,6 @@
 import Foundation
 
-/// Apple Business Manager and Apple School Manager (ROADMAP step 9): the same
+/// Apple Business Manager and Apple School Manager: the same
 /// API behind two addresses, with the same paths, device records and sign-in.
 /// Only the address, the sign-in scope and Release (Business only) differ.
 public nonisolated enum ABM {
@@ -11,7 +11,7 @@ public nonisolated enum ABM {
     public static let rateLimit = RateLimit(requests: 18, per: 60,
                                             explanation: "Apple allows about 20 requests a minute for each organization")
 
-    /// The limit for a connection: Apple's for every real organization, none
+    /// The limit for a connection: Apple’s for every real organization, none
     /// for a demo one (`Connection.isDemo`), whose requests never reach Apple.
     /// Decided by the connection, never by the demo switch, so a real
     /// organization keeps the limit while demo mode is on.
@@ -22,8 +22,8 @@ public nonisolated enum ABM {
     public static let maxPages = 1_000
     /// Apple rejects a migration deadline further out than this.
     public static let maximumMigrationDeadline: TimeInterval = 90 * 24 * 60 * 60
-    /// How long a write is watched before it counts as still processing
-    /// (decided by Jordy): checks from 2 s, growing to 10 s, for 2 minutes.
+    /// How long a write is watched before it counts as still processing:
+    /// checks from 2 s, growing to 10 s, for 2 minutes.
     public static let activityWatch = JamfPlatform.PollingPolicy(timeLimit: .seconds(120))
 
     public enum Service: String, Sendable, Hashable, CaseIterable {
@@ -33,7 +33,7 @@ public nonisolated enum ABM {
         /// As the activity log and messages name it.
         public var label: String {
             switch self {
-            case .business: "Apple Business"
+            case .business: "Apple Business Manager"
             case .school: "Apple School Manager"
             }
         }
@@ -76,24 +76,24 @@ public nonisolated enum ABM {
         }
     }
 
-    /// The recorder for one organization's requests: service "Apple
-    /// Business" or "Apple School Manager", the organization's name as the
+    /// The recorder for one organization’s requests: service "Apple
+    /// Business" or "Apple School Manager", the organization’s name as the
     /// connection.
-    public static func recorder(_ service: Service, session: URLSession = .shared, log: ActivityLog?,
+    public static func recorder(_ service: Service, session: URLSession, log: ActivityLog?,
                                 connection: String? = nil) -> RequestRecorder {
         RequestRecorder(session: session, log: log, service: service.label,
                         connection: connection.flatMap { $0.isEmpty ? nil : $0 })
     }
 
     /// A serial number as it may go into an address or a query: trimmed,
-    /// lowercase letters made uppercase (decided by Jordy), and only letters
-    /// and digits. Apple's serial numbers have nothing else.
+    /// lowercase letters made uppercase, and only letters
+    /// and digits. Apple’s serial numbers have nothing else.
     ///
-    /// - Throws: `ABM.Error.Kind.invalidSerial` for anything else.
-    public static func checkedSerial(_ serial: String) throws -> String {
+    /// - Throws: `ABM.APIError.Kind.invalidSerial` for anything else.
+    static func checkedSerial(_ serial: String) throws -> String {
         let trimmed = serial.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
         guard !trimmed.isEmpty, trimmed.unicodeScalars.allSatisfy({ $0.isASCII && CharacterSet.alphanumerics.contains($0) }) else {
-            throw ABM.Error(.invalidSerial(serial))
+            throw ABM.APIError(.invalidSerial(serial))
         }
         return trimmed
     }

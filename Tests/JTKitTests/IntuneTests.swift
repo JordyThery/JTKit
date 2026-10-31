@@ -3,7 +3,7 @@ import Testing
 @testable import JTKit
 import JTKitTestSupport
 
-// Intune devices and commands (ROADMAP step 8, 0.9.1), from Checkpoint.
+// Intune devices and commands.
 
 @MainActor
 private func intuneClient(_ server: MockServer, log: ActivityLog = ActivityLog(), sleeps: SleepLog = SleepLog()) -> Graph.Client {
@@ -28,20 +28,20 @@ private func target(_ id: String, _ kind: MDMCommand.DeviceKind = .mobileDevice)
 @Suite("Intune managed devices")
 struct IntuneManagedDeviceTests {
 
-    private func device(_ json: String) throws -> IntuneManagedDevice {
-        try JSONDecoder().decode(IntuneManagedDevice.self, from: Data(json.utf8))
+    private func device(_ json: String) throws -> Graph.ManagedDevice {
+        try JSONDecoder().decode(Graph.ManagedDevice.self, from: Data(json.utf8))
     }
 
     @Test("Every field is read; only the ID is required")
     func decoding() throws {
         let mac = try device(#"{"id":"i-1","serialNumber":"C02","deviceName":"Lab Mac","operatingSystem":"macOS","osVersion":"15.1","enrolledDateTime":"2026-01-02T03:04:05Z","lastSyncDateTime":"2026-10-25T08:00:00.1234567Z","managementCertificateExpirationDate":"2027-01-02T03:04:05Z","isEncrypted":true,"isSupervised":false,"managementAgent":"mdm","complianceState":"compliant","deviceEnrollmentType":"appleBulkWithUser"}"#)
-        #expect(mac == IntuneManagedDevice(id: "i-1", serialNumber: "C02", deviceName: "Lab Mac", operatingSystem: "macOS",
+        #expect(mac == Graph.ManagedDevice(id: "i-1", serialNumber: "C02", deviceName: "Lab Mac", operatingSystem: "macOS",
                                            osVersion: "15.1", enrolledDateTime: "2026-01-02T03:04:05Z",
                                            lastSyncDateTime: "2026-10-25T08:00:00.1234567Z",
                                            managementCertificateExpirationDate: "2027-01-02T03:04:05Z",
                                            isEncrypted: true, isSupervised: false, managementAgent: "mdm",
                                            complianceState: "compliant", deviceEnrollmentType: "appleBulkWithUser"))
-        #expect(try device(#"{"id":"i-2"}"#) == IntuneManagedDevice(id: "i-2"))
+        #expect(try device(#"{"id":"i-2"}"#) == Graph.ManagedDevice(id: "i-2"))
         #expect(throws: (any Error).self) { try device(#"{"serialNumber":"C02"}"#) }
     }
 
@@ -55,22 +55,22 @@ struct IntuneManagedDeviceTests {
     func kind() {
         for (os, kind) in [("macOS", MDMCommand.DeviceKind.computer), ("Windows", .computer), ("iOS", .mobileDevice),
                            ("iPadOS", .mobileDevice), ("Android", .mobileDevice)] {
-            #expect(IntuneManagedDevice(id: "1", operatingSystem: os).kind == kind)
+            #expect(Graph.ManagedDevice(id: "1", operatingSystem: os).kind == kind)
         }
-        #expect(IntuneManagedDevice(id: "1").kind == .mobileDevice)
-        #expect(IntuneManagedDevice(id: "1", operatingSystem: "iPadOS").isApplePlatform)
-        #expect(!IntuneManagedDevice(id: "1", operatingSystem: "macOS").isApplePlatform)
+        #expect(Graph.ManagedDevice(id: "1").kind == .mobileDevice)
+        #expect(Graph.ManagedDevice(id: "1", operatingSystem: "iPadOS").isApplePlatform)
+        #expect(!Graph.ManagedDevice(id: "1", operatingSystem: "macOS").isApplePlatform)
     }
 
     @Test("ADE from the enrollment type; managed from the agent")
     func derived() {
-        #expect(IntuneManagedDevice(id: "1", deviceEnrollmentType: "appleBulkWithoutUser").enrolledViaADE == true)
-        #expect(IntuneManagedDevice(id: "1", deviceEnrollmentType: "userEnrollment").enrolledViaADE == false)
-        #expect(IntuneManagedDevice(id: "1").enrolledViaADE == nil)
-        #expect(IntuneManagedDevice(id: "1", managementAgent: "easMdm").isManaged == true)
-        #expect(IntuneManagedDevice(id: "1", managementAgent: "eas").isManaged == false)
-        #expect(IntuneManagedDevice(id: "1", managementAgent: "").isManaged == nil)
-        #expect(IntuneManagedDevice(id: "i-1").consoleURL?.absoluteString
+        #expect(Graph.ManagedDevice(id: "1", deviceEnrollmentType: "appleBulkWithoutUser").enrolledViaADE == true)
+        #expect(Graph.ManagedDevice(id: "1", deviceEnrollmentType: "userEnrollment").enrolledViaADE == false)
+        #expect(Graph.ManagedDevice(id: "1").enrolledViaADE == nil)
+        #expect(Graph.ManagedDevice(id: "1", managementAgent: "easMdm").isManaged == true)
+        #expect(Graph.ManagedDevice(id: "1", managementAgent: "eas").isManaged == false)
+        #expect(Graph.ManagedDevice(id: "1", managementAgent: "").isManaged == nil)
+        #expect(Graph.ManagedDevice(id: "i-1").consoleURL?.absoluteString
                 == "https://intune.microsoft.com/#view/Microsoft_Intune_ManagedDevices/ManagedDeviceMenu.MenuView/~/overview/managedDeviceId/i-1")
     }
 
@@ -80,7 +80,7 @@ struct IntuneManagedDeviceTests {
         ("", nil),
     ])
     func compliance(state: String, words: String?) {
-        #expect(IntuneManagedDevice(id: "1", complianceState: state).complianceSummary == words)
+        #expect(Graph.ManagedDevice(id: "1", complianceState: state).complianceSummary == words)
     }
 }
 
@@ -101,7 +101,7 @@ struct IntuneDeviceListTests {
         #expect(devices.map(\.id) == ["a", "b"])
         let first = try #require(server.requests.first)
         #expect(first.path == "/v1.0/deviceManagement/managedDevices")
-        #expect(first.queryValue("$select") == IntuneManagedDevice.fields.joined(separator: ","))
+        #expect(first.queryValue("$select") == Graph.ManagedDevice.fields.joined(separator: ","))
         #expect(first.queryValue("$top") == "1000")
         #expect(server.requests.last?.queryValue("$skiptoken") == "2")
     }
@@ -131,7 +131,7 @@ struct IntuneDeviceListTests {
         let server = MockServer { request in
             page([#"{"id":"a"}"#], next: "https://evil.example.com/v1.0/deviceManagement/managedDevices?$skiptoken=2")
         }
-        await #expect(throws: GraphError.self) { _ = try await intuneClient(server).intuneDevices() }
+        await #expect(throws: Graph.APIError.self) { _ = try await intuneClient(server).intuneDevices() }
         #expect(server.requests.count == 1)
     }
 
@@ -150,7 +150,7 @@ struct IntuneDeviceListTests {
     @Test("Test Connection reads one device ID")
     func testConnection() async throws {
         let server = MockServer { _ in page([]) }
-        try await intuneClient(server).intuneTestConnection()
+        try await intuneClient(server).testConnection()
         let request = try #require(server.requests.only)
         #expect(request.queryValue("$select") == "id" && request.queryValue("$top") == "1")
         #expect(request.queryValue("$count") == nil)
@@ -170,14 +170,14 @@ struct IntuneCommandTests {
         #expect(Set(computer) == [.updateInventory, .restartMobile, .shutDownMobile, .wipeComputer, .unmanage, .deleteRecord])
         #expect(Set(mobile) == [.updateInventory, .lockMobile, .clearPasscode, .restartMobile, .shutDownMobile,
                                 .wipeMobile, .unmanage, .deleteRecord])
-        // Delete Record isn't a Jamf command
+        // Delete Record isn’t a Jamf command
         for product in [MDMCommand.Product.jamfPro, .jamfSchool] {
             #expect(!MDMCommand.deleteRecord.applies(to: .computer, on: product))
             #expect(!MDMCommand.deleteRecord.applies(to: .mobileDevice, on: product))
         }
     }
 
-    @Test("Intune's own names for Sync and Retire; the others keep theirs")
+    @Test("Intune’s own names for Sync and Retire; the others keep theirs")
     func titles() {
         #expect(MDMCommand.updateInventory.title(on: .intune) == "Sync Device")
         #expect(MDMCommand.unmanage.title(on: .intune) == "Retire Device")
@@ -188,7 +188,7 @@ struct IntuneCommandTests {
         }
     }
 
-    @Test("Intune's own texts, not Jamf Pro's")
+    @Test("Intune’s own texts, not Jamf Pro’s")
     func texts() {
         for command in MDMCommand.allCases where command.applies(to: .mobileDevice, on: .intune) || command.applies(to: .computer, on: .intune) {
             let text = command.consequence(on: .intune)
@@ -200,7 +200,7 @@ struct IntuneCommandTests {
         #expect(MDMCommand.updateInventory.consequence(on: .jamfPro) == "The device will be asked to submit a fresh inventory report.")
     }
 
-    @Test("Wipe, Retire and Delete Record can't be undone; no PIN on Intune")
+    @Test("Wipe, Retire and Delete Record can’t be undone; no PIN on Intune")
     func rules() {
         #expect(Set(MDMCommand.allCases.filter { !$0.canBeUndone }) == [.wipeComputer, .wipeMobile, .unmanage, .deleteRecord])
         #expect(MDMCommand.allCases.allSatisfy { !$0.needsPIN(on: .intune) })
@@ -225,7 +225,7 @@ struct IntuneCommandTests {
         #expect(two.connectionLine == nil && !two.needsTyping)
     }
 
-    @Test("Each command's Graph request", arguments: [
+    @Test("Each command’s Graph request", arguments: [
         (MDMCommand.updateInventory, "POST", "syncDevice"), (.restartMobile, "POST", "rebootNow"),
         (.shutDownMobile, "POST", "shutDown"), (.lockMobile, "POST", "remoteLock"),
         (.clearPasscode, "POST", "resetPasscode"), (.unmanage, "POST", "retire"),
@@ -241,22 +241,63 @@ struct IntuneCommandTests {
         #expect(request.bodyString == (command == .wipeMobile ? "{}" : ""))
     }
 
+    @Test("An Intune device ID stays one path segment: ?, # and / are refused before sending, other characters encoded")
+    func deviceIDInPath() async throws {
+        let server = MockServer { _ in MockResponse(status: 204, body: Data()) }
+        let client = try intuneClient(server)
+        for id in ["i-1?x=1", "i-1#x", "../other", "i-1/wipe", ""] {
+            do {
+                try await client.perform(.restartMobile, intuneDeviceID: id)
+                Issue.record("\(id) was sent")
+            } catch is MDMCommand.Refusal {
+            }
+        }
+        #expect(server.requests.isEmpty)
+
+        try await client.perform(.restartMobile, intuneDeviceID: "i 1%")
+        #expect(server.requests.only?.url.absoluteString.hasSuffix("/managedDevices/i%201%25/rebootNow") == true)
+    }
+
     @Test("The permission table: device actions need PrivilegedOperations.All, Delete Record ReadWrite.All")
     func permissionTable() throws {
         for command in MDMCommand.allCases {
-            guard let request = command.intuneRequest(deviceID: "i-1") else {
-                #expect(command.intunePermission == nil)
-                continue
-            }
+            guard let request = command.intuneRequest(deviceID: "i-1") else { continue }
             let expected: Graph.Permission = command == .deleteRecord ? .managedDevicesReadWrite : .managedDevicesPrivileged
-            #expect(command.intunePermission == expected, "\(command)")
-            // the table the error hints read gives the same
+            // the table the error hints read
             #expect(Graph.Permission.required(method: request.method, path: request.path) == expected, "\(command)")
         }
         #expect(Graph.Permission.required(method: "GET", path: "deviceManagement/managedDevices") == .managedDevicesRead)
     }
 
-    @Test("A 403 names the command's permission", arguments: MDMCommand.allCases.filter { $0.intuneRequest(deviceID: "") != nil })
+    @Test("Retire, Wipe and Delete Record take the answered confirmation of exactly that command on Intune")
+    func approvals() async throws {
+        let server = MockServer { _ in .json(204, "") }
+        let client = intuneClient(server)
+        let devices = [target("i-1"), target("i-2")]
+        func approval(_ command: MDMCommand, _ targets: [MDMCommand.Target], on product: MDMCommand.Product = .intune) throws -> MDMCommand.Confirmation.Approval {
+            try MDMCommand.Confirmation(command, plan: command.plan(for: targets, on: product), on: product, connectionName: "Contoso")
+                .approve(typedCount: "\(targets.count)")
+        }
+        await #expect(throws: MDMCommand.Refusal.self) { _ = try await client.send(.wipeMobile, to: devices, approval: nil) }
+        await #expect(throws: MDMCommand.Refusal.self) { try await client.perform(.deleteRecord, intuneDeviceID: "i-1", approval: nil) }
+        await #expect(throws: MDMCommand.Refusal.self) {
+            try await client.perform(.deleteRecord, intuneDeviceID: "i-1", approval: try approval(.unmanage, [devices[0]]))
+        }
+        await #expect(throws: MDMCommand.Refusal.self) {
+            _ = try await client.send(.wipeMobile, to: devices, approval: try approval(.wipeMobile, devices, on: .jamfPro))
+        }
+        await #expect(throws: MDMCommand.Refusal.self) {
+            _ = try await client.send(.wipeMobile, to: devices, approval: try approval(.wipeMobile, [devices[0]]))
+        }
+        #expect(server.requests.isEmpty)
+
+        #expect(try await client.send(.wipeMobile, to: devices, approval: try approval(.wipeMobile, devices)).sent == devices)
+        try await client.perform(.deleteRecord, intuneDeviceID: "i-1", approval: try approval(.deleteRecord, [devices[0]]))
+        try await client.perform(.restartMobile, intuneDeviceID: "i-1", approval: nil)
+        #expect(server.requests.count == 4)
+    }
+
+    @Test("A 403 names the command’s permission", arguments: MDMCommand.allCases.filter { $0.intuneRequest(deviceID: "") != nil })
     func forbiddenCommand(command: MDMCommand) async throws {
         let server = MockServer { _ in forbidden }
         do {
@@ -264,7 +305,8 @@ struct IntuneCommandTests {
             Issue.record("Expected an error")
         } catch {
             let message = error.localizedDescription
-            let expected = try #require(command.intunePermission).name(for: .application)
+            let permission: Graph.Permission = command == .deleteRecord ? .managedDevicesReadWrite : .managedDevicesPrivileged
+            let expected = permission.name(for: .application)
             #expect(message.contains("“\(expected)”"), "\(command): \(message)")
             let other = command == .deleteRecord ? "PrivilegedOperations" : "ReadWrite"
             #expect(!message.contains(other), "\(command)")
@@ -296,7 +338,7 @@ struct IntuneCommandTests {
         #expect(server.requests.count == 2 && result.isComplete)
     }
 
-    @Test("Devices of the wrong kind are skipped; a failed device doesn't stop the others")
+    @Test("Devices of the wrong kind are skipped; a failed device doesn’t stop the others")
     func perDevice() async throws {
         let server = MockServer { request in
             request.path.contains("/i-2/") ? .json(404, #"{"error":{"code":"ResourceNotFound","message":"Not found."}}"#) : MockResponse(status: 204, body: Data())
@@ -310,7 +352,7 @@ struct IntuneCommandTests {
         #expect(server.requests.count == 3)
     }
 
-    @Test("A command Intune doesn't have is refused before anything is sent",
+    @Test("A command Intune doesn’t have is refused before anything is sent",
           arguments: [MDMCommand.lockComputer, .blankPush, .renewProfile, .redeployFramework])
     func notIntune(command: MDMCommand) async throws {
         let server = MockServer { _ in MockResponse(status: 204, body: Data()) }
@@ -318,7 +360,7 @@ struct IntuneCommandTests {
         #expect(server.requests.isEmpty)
     }
 
-    @Test("The result and its Action entry use Intune's name")
+    @Test("The result and its Action entry use Intune’s name")
     func entry() async throws {
         let log = ActivityLog()
         let server = MockServer { _ in MockResponse(status: 204, body: Data()) }
@@ -328,7 +370,7 @@ struct IntuneCommandTests {
         #expect(log.entries.last?.detail == "Sent Sync Device to 1 device")
     }
 
-    @Test("Delete Record isn't sent to Jamf Pro")
+    @Test("Delete Record isn’t sent to Jamf Pro")
     func notJamfPro() {
         let plan = MDMCommand.deleteRecord.plan(for: [target("7", .computer)], on: .jamfPro)
         #expect(plan.receiving.isEmpty)

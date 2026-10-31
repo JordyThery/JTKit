@@ -1,17 +1,17 @@
 import Foundation
 
-/// JTKit: shared code for Jordy Thery's Mac admin apps.
+/// JTKit: shared code for Jordy Thery’s Mac admin apps.
 ///
-/// Components are added one at a time; see CLAUDE.md for the plan.
+/// See ROADMAP.md for the plan.
 public enum JTKit {
     /// Version of this package. Keep in sync with the git tag.
-    public static let version = "0.12.7"
+    public static let version = "0.13.0"
 
     /// "AppName/version", sent as the User-Agent of every request JTKit makes
-    /// unless the request sets its own. The name is the app's bundle name
-    /// without spaces (a User-Agent product name can't contain any), e.g.
+    /// unless the request sets its own. The name is the app’s bundle name
+    /// without spaces (a User-Agent product name can’t contain any), e.g.
     /// "JamfMigrator/1.0.5".
-    public static let userAgent: String = userAgent(info: Bundle.main.infoDictionary ?? [:])
+    static let userAgent: String = userAgent(info: Bundle.main.infoDictionary ?? [:])
 
     static func userAgent(info: [String: Any]) -> String {
         let name = info["CFBundleName"] as? String ?? ProcessInfo.processInfo.processName
@@ -21,7 +21,7 @@ public enum JTKit {
 }
 
 extension URLRequest {
-    /// The request with JTKit's User-Agent, unless it already has one.
+    /// The request with JTKit’s User-Agent, unless it already has one.
     nonisolated func withDefaultUserAgent() -> URLRequest {
         guard value(forHTTPHeaderField: "User-Agent") == nil else { return self }
         var request = self

@@ -10,7 +10,7 @@ private func demoMode(scenario: String? = nil) -> DemoMode {
     return DemoMode(key: "demoMode", defaults: defaults, arguments: arguments)
 }
 
-/// JTKit's real Jamf Pro client for one of the two demo tenants, as JamfMigrator builds it.
+/// JTKit’s real Jamf Pro client for one of the two demo tenants, as JamfMigrator builds it.
 @MainActor
 private func client(_ demo: DemoMode, _ connection: Connection) throws -> JamfPlatform.Client {
     let source = try #require(demo.source(for: connection))
@@ -37,14 +37,14 @@ private func object(_ response: HTTPResponse) throws -> [String: Any] {
 private func status(_ work: () async throws -> HTTPResponse) async -> Int? {
     do {
         return try await work().status
-    } catch let error as JamfPlatformError {
+    } catch let error as JamfPlatform.APIError {
         return error.status
     } catch {
         return nil
     }
 }
 
-@Suite("Demo Jamf Pro object store (JamfMigrator's two tenants)")
+@Suite("Demo Jamf Pro object store (JamfMigrator’s two tenants)")
 @MainActor
 struct DemoJamfProObjectsTests {
 
@@ -134,6 +134,25 @@ struct DemoJamfProObjectsTests {
         #expect(group["name"] as? String == "All Managed iPads" && group["description"] as? String == "Every iPad")
         _ = try await send(dest, "DELETE", "pro/v1/departments/\(id)")
         #expect(demo.jamfProDestinationServer.objects?.names(at: "api/v1/departments") == [])
+    }
+
+    @Test("The group list by platform ID splits device type and group type, as the Platform API does")
+    func platformGroupList() async throws {
+        let demo = demoMode()
+        let source = try client(demo, .demoJamfProSource)
+        let entries = try await source.allPages("pro/v2/groups", pageSize: 200) { entry -> [String: String]? in
+            ["deviceType": entry["deviceType"]?.stringValue ?? "", "groupType": entry["groupType"]?.stringValue ?? "",
+             "id": entry["groupPlatformId"]?.stringValue ?? "", "jamfProID": entry["groupJamfProId"]?.stringValue ?? ""]
+        }
+        #expect(!entries.isEmpty)
+        #expect(Set(entries.map { $0["deviceType"] ?? "" }) == ["COMPUTER", "MOBILE"])
+        #expect(Set(entries.map { $0["groupType"] ?? "" }) == ["SMART", "STATIC"])
+        #expect(entries.allSatisfy { UUID(uuidString: $0["id"] ?? "") != nil && !($0["jamfProID"] ?? "").isEmpty })
+        // the same values JTKit’s Platform device-group model knows
+        for entry in entries {
+            #expect(JamfPlatform.DeviceGroup.DeviceType(rawValue: entry["deviceType"] ?? "") != .other(entry["deviceType"] ?? ""))
+            #expect(JamfPlatform.DeviceGroup.GroupType(rawValue: entry["groupType"] ?? "") != .other(entry["groupType"] ?? ""))
+        }
     }
 
     @Test("Settings pages: read and updated, PATCH merges, passwords never read back")
