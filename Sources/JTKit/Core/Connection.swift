@@ -17,7 +17,7 @@ public nonisolated enum ConnectionService: String, Codable, CaseIterable, Identi
         case .jamfPro: "Jamf Pro"
         case .jamfSchool: "Jamf School"
         case .intune: "Intune"
-        case .appleBusinessManager: "Apple Business Manager"
+        case .appleBusinessManager: "Apple Business"
         case .appleSchoolManager: "Apple School Manager"
         }
     }
@@ -56,7 +56,7 @@ public nonisolated enum SignInMethod: String, Codable, CaseIterable, Identifiabl
     case entraClientSecret
     /// Interactive Microsoft sign-in. No secret is stored; the app signs in.
     case microsoftInteractive
-    /// Apple Business/School Manager: client ID, key ID and a private key.
+    /// Apple Business or Apple School Manager: client ID, key ID and a private key.
     case applePrivateKey
 
     public var id: String { rawValue }
@@ -168,7 +168,7 @@ public nonisolated struct Connection: Identifiable, Codable, Hashable, Sendable 
     public var username: String
     /// Intune: the Entra tenant ID or verified domain.
     public var tenantID: String
-    /// Apple Business/School Manager: the key ID.
+    /// Apple Business or Apple School Manager: the key ID.
     public var keyID: String
 
     public var protect: JamfProtectSettings?

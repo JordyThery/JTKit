@@ -170,7 +170,7 @@ extension JamfPlatform.Client {
 
     private func result(of check: JamfPlatform.PermissionCheck) async -> JamfPlatform.PermissionResult {
         do {
-            let response = try await sendThrowing(HTTPRequest(path: check.path, query: check.query))
+            let response = try await send(HTTPRequest(path: check.path, query: check.query))
             return Self.result(status: response.status)
         } catch let error as JamfPlatform.APIError {
             guard let status = error.status else { return .unreachable(error.message()) }

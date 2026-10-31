@@ -301,7 +301,7 @@ public nonisolated enum DemoJamfProObjectSamples {
             ]],
             "v3/computer-prestages": [computerPreStage(id: 1, ade: "1", versionLock: 3)],
             "v3/mobile-device-prestages": [mobilePreStage(id: 1, ade: "1", versionLock: 2)],
-            "v1/device-enrollments": [["id": "1", "name": "Contoso ABM", "supervisionIdentityId": "-1", "siteId": "-1",
+            "v1/device-enrollments": [["id": "1", "name": "Contoso Apple Business", "supervisionIdentityId": "-1", "siteId": "-1",
                                        "serverName": "Contoso Jamf Pro (Source)", "serverUuid": DemoSamples.uuid(0x7301),
                                        "tokenExpirationDate": "2027-06-30"]],
         ]
@@ -340,7 +340,7 @@ public nonisolated enum DemoJamfProObjectSamples {
                                                       "criteria": [["name": "Model", "priority": 0, "andOr": "and",
                                                                     "searchType": "like", "value": "iPad",
                                                                     "openingParen": false, "closingParen": false]]]],
-            "v1/device-enrollments": [["id": "4", "name": "Contoso ABM (Destination)", "supervisionIdentityId": "-1",
+            "v1/device-enrollments": [["id": "4", "name": "Contoso Apple Business (Destination)", "supervisionIdentityId": "-1",
                                        "siteId": "-1", "serverName": "Contoso Jamf Pro (Destination)",
                                        "serverUuid": DemoSamples.uuid(0x7302), "tokenExpirationDate": "2027-06-30"]],
         ]
@@ -365,7 +365,7 @@ public nonisolated enum DemoJamfProObjectSamples {
          "iconId": NSNull(), "brandingHeaderImageId": NSNull()]
     }
 
-    /// Stands in for the public key Apple Business Manager asks for; not a real certificate.
+    /// Stands in for the public key Apple Business asks for; not a real certificate.
     static let adePublicKey = "-----BEGIN CERTIFICATE-----\nQ29udG9zbyBkZW1vIGtleSwgbm90IGEgcmVhbCBjZXJ0aWZpY2F0ZQ==\n-----END CERTIFICATE-----\n"
 
     /// A date a year from today, as Jamf writes token expiry dates.

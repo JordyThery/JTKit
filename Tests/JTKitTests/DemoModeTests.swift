@@ -404,8 +404,8 @@ struct DemoModeSwitchTests {
         #expect(!demo.requestSwitch(to: true) && demo.isOn, "no question set: switches")
         #expect(!demo.requestSwitch(to: true), "already on: nothing to ask")
 
-        var unsaved = true
-        demo.asksBeforeSwitching = { unsaved }
+        let unsaved = Locked(true)
+        demo.asksBeforeSwitching = { unsaved.value }
         #expect(demo.requestSwitch(to: false))
         #expect(demo.isOn && demo.pendingSwitch == false, "waits")
         demo.cancelSwitch()
@@ -416,7 +416,7 @@ struct DemoModeSwitchTests {
         #expect(!demo.isOn && demo.pendingSwitch == nil, "discard switches")
         #expect(defaults.object(forKey: "demoMode") as? Bool == false)
 
-        unsaved = false
+        unsaved.value = false
         #expect(!demo.requestSwitch(to: true) && demo.isOn, "nothing unsaved: switches")
         demo.confirmSwitch()
         #expect(demo.isOn, "confirming without a waiting switch does nothing")

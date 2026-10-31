@@ -199,14 +199,14 @@ extension JamfPlatform.Client {
         let path = "pro/v2/\(family.pathComponent)/\(JamfPlatform.pathSegment(id))/scope"
         let lock = try await decoded(Scope.self, HTTPRequest(path: path), privileges: [family.readPrivilege]).versionLock
         let body = try JSONSerialization.data(withJSONObject: ["serialNumbers": serials, "versionLock": lock] as [String: Any])
-        _ = try await sendThrowing(HTTPRequest(method: "POST", path: removing ? path + "/delete-multiple" : path, body: body),
+        _ = try await send(HTTPRequest(method: "POST", path: removing ? path + "/delete-multiple" : path, body: body),
                                    privilege: family.updatePrivilege)
     }
 
     // MARK: Automated Device Enrollment
 
     /// The Apple service ID (`serverUuid`) of every ADE token: the ID Apple
-    /// Business or School Manager gives the matching device management service.
+    /// Business or Apple School Manager gives the matching device management service.
     public func deviceEnrollmentServerIDs() async throws -> Set<String> {
         Set(try await allPages("pro/v1/device-enrollments", privilege: .readDeviceEnrollmentProgramInstances) { item in
             Self.text(item["serverUuid"]) ?? ""
@@ -248,7 +248,7 @@ extension JamfPlatform.Client {
             let complianceVendor: String?
         }
         let family = kind == .computer ? "computer" : "mobile"
-        let response = try await sendThrowing(HTTPRequest(
+        let response = try await send(HTTPRequest(
             path: "pro/v1/conditional-access/device-compliance-information/\(family)/\(JamfPlatform.pathSegment(id))",
             recordsBodies: true), privilege: .readDeviceComplianceInformation)
         // a list by contract; one object is accepted too
@@ -305,7 +305,7 @@ extension JamfPlatform.Client {
     /// Every site; the full-access site ("-1") isn’t listed. Jamf Pro answers
     /// with a list or a page.
     public func sites() async throws -> [JamfPro.Site] {
-        let response = try await sendThrowing(HTTPRequest(path: "pro/v1/sites"), privilege: .readSites)
+        let response = try await send(HTTPRequest(path: "pro/v1/sites"), privilege: .readSites)
         let json = try? LosslessJSON(data: response.data)
         let items = json?.arrayValue ?? json?["results"]?.arrayValue ?? []
         return items.compactMap { item in
@@ -317,14 +317,14 @@ extension JamfPlatform.Client {
     /// Moves a computer to a site ("-1" for none). Safe to repeat.
     public func setSite(_ siteID: String, computerID: String) async throws {
         let body = try JSONSerialization.data(withJSONObject: ["general": ["siteId": siteID]])
-        _ = try await sendThrowing(HTTPRequest(method: "PATCH", path: "pro/v4/computers-inventory-detail/\(JamfPlatform.pathSegment(computerID))",
+        _ = try await send(HTTPRequest(method: "PATCH", path: "pro/v4/computers-inventory-detail/\(JamfPlatform.pathSegment(computerID))",
                                                body: body, repeating: .safe), privilege: .updateComputers)
     }
 
     /// Moves a mobile device to a site ("-1" for none). Safe to repeat.
     public func setSite(_ siteID: String, mobileDeviceID: String) async throws {
         let body = try JSONSerialization.data(withJSONObject: ["siteId": siteID])
-        _ = try await sendThrowing(HTTPRequest(method: "PATCH", path: "pro/v2/mobile-devices/\(JamfPlatform.pathSegment(mobileDeviceID))",
+        _ = try await send(HTTPRequest(method: "PATCH", path: "pro/v2/mobile-devices/\(JamfPlatform.pathSegment(mobileDeviceID))",
                                                body: body, repeating: .safe), privilege: .updateMobileDevices)
     }
 
@@ -353,7 +353,7 @@ extension JamfPlatform.Client {
     }
 
     func decoded<T: Decodable>(_ type: T.Type, _ request: HTTPRequest, privileges: [JamfPro.Privilege]) async throws -> T {
-        let response = try await sendThrowing(request, privileges: privileges)
+        let response = try await send(request, privileges: privileges)
         do {
             return try JSONDecoder().decode(type, from: response.data)
         } catch {

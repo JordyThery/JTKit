@@ -23,9 +23,6 @@ extension Acknowledgement {
         )
     }
 
-    @available(*, deprecated, renamed: "msalLicense")
-    public static var msalLicence: String { msalLicense }
-
     /// MSAL’s `LICENSE` file at version 2.16.0, unchanged.
     public static let msalLicense = """
         MIT License

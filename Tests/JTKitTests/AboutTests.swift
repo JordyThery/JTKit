@@ -66,18 +66,6 @@ struct AcknowledgementTests {
         #expect(Acknowledgement(name: "X", license: text).license == text)
     }
 
-    /// The British spellings still build, for apps not yet updated.
-    @Test @available(*, deprecated)
-    func britishSpellingsStillWork() {
-        let old = Acknowledgement(name: "X", licence: "Copyright (c) 2026 Someone\n\nMIT", licenceName: "MIT License")
-        #expect(old.license == "Copyright (c) 2026 Someone\n\nMIT")
-        #expect(old.licenceName == "MIT License")
-        #expect(old.licence == old.license)
-        var copyright = AboutCopyright(year: "2026", holder: "Someone", licence: "Apache License 2.0")
-        #expect(copyright.license == "Apache License 2.0")
-        copyright.licence = "MIT License"
-        #expect(copyright.text == "© 2026 Someone. Released under the MIT License.")
-    }
 }
 
 @Suite("Update settings", .serialized)

@@ -87,42 +87,6 @@ public nonisolated struct HTTPRequest: Sendable {
         self.serverErrorIsAnAnswer = serverErrorIsAnAnswer
     }
 
-    @available(*, deprecated, message: "Use repeating: .safe, or .safeNotFoundIsDone for notFoundAfterRepeatIsDone.")
-    public init(
-        method: String = "GET",
-        path: String,
-        query: [URLQueryItem] = [],
-        body: Data? = nil,
-        accept: String? = nil,
-        contentType: String? = nil,
-        headers: [String: String] = [:],
-        safeToRepeat: Bool,
-        recordsBodies: Bool = false,
-        recordedJSON: RecordedJSONFilter? = nil,
-        withholdsContents: Bool = false,
-        encodedQuery: String? = nil,
-        notFoundAfterRepeatIsDone: Bool = false,
-        serverErrorIsAnAnswer: Bool = false
-    ) {
-        self.init(method: method, path: path, query: query, body: body, accept: accept, contentType: contentType,
-                  headers: headers,
-                  repeating: notFoundAfterRepeatIsDone ? .safeNotFoundIsDone : safeToRepeat ? .safe : .standard,
-                  recordsBodies: recordsBodies, recordedJSON: recordedJSON, withholdsContents: withholdsContents,
-                  encodedQuery: encodedQuery, serverErrorIsAnAnswer: serverErrorIsAnAnswer)
-    }
-
-    @available(*, deprecated, renamed: "repeating")
-    public var safeToRepeat: Bool {
-        get { repeating != .standard }
-        set { repeating = newValue ? (repeating == .standard ? .safe : repeating) : .standard }
-    }
-
-    @available(*, deprecated, renamed: "repeating")
-    public var notFoundAfterRepeatIsDone: Bool {
-        get { repeating == .safeNotFoundIsDone }
-        set { repeating = newValue ? .safeNotFoundIsDone : (repeating == .safeNotFoundIsDone ? .safe : repeating) }
-    }
-
     /// GET and HEAD.
     public var isRead: Bool {
         ["GET", "HEAD"].contains(method.uppercased())
@@ -250,13 +214,13 @@ public nonisolated struct RetryRules: Sendable, Hashable {
     public let fixedWaits: [TimeInterval]?
     /// Every network error counts as a short drop worth another try (for
     /// reads and edits safe to repeat), not only the usual few: Apple
-    /// Business and School Manager answer their limit by dropping the
+    /// Business and Apple School Manager answer their limit by dropping the
     /// connection, in more than one way.
     public let everyNetworkErrorIsADrop: Bool
 
     public static let standard = RetryRules()
 
-    /// Apple Business and School Manager: 5, 15
+    /// Apple Business and Apple School Manager: 5, 15
     /// and 45 s, because once Apple’s quota is spent it stays quiet for a
     /// while and a short retry only spends another request.
     public static let appleBusiness = RetryRules(fixedWaits: [5, 15, 45], everyNetworkErrorIsADrop: true)
@@ -308,7 +272,7 @@ public nonisolated struct RetryRules: Sendable, Hashable {
 }
 
 /// At most so many requests in any rolling window, every attempt counted
-/// (Apple Business and School Manager: 18 a minute per organization). A
+/// (Apple Business and Apple School Manager: 18 a minute per organization). A
 /// request that would go over waits, written to the activity log; Cancel
 /// stops the wait.
 public nonisolated struct RateLimit: Sendable, Hashable {
@@ -398,7 +362,7 @@ actor HTTPClient {
     ///     Graph: 4); the others wait in order. A request keeps its turn while
     ///     it waits to be retried. Nil: no limit.
     ///   - rateLimit: at most so many requests in a rolling window (Apple
-    ///     Business and School Manager). Nil: no limit.
+    ///     Business and Apple School Manager). Nil: no limit.
     ///   - sleep, random, now: injectable for tests.
     public init(
         baseURL: URL,

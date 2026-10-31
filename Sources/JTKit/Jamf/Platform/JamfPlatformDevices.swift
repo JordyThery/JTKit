@@ -81,7 +81,7 @@ extension JamfPlatform.Client {
         struct Page: Decodable { let results: [Tolerant<JamfPlatform.Device>]? }
         let response: HTTPResponse
         do {
-            response = try await sendThrowing(HTTPRequest(path: "devices/v1/devices",
+            response = try await send(HTTPRequest(path: "devices/v1/devices",
                                                           query: [URLQueryItem(name: "filter", value: "serialNumber==\"\(safe)\"")],
                                                           recordsBodies: true))
         } catch let error as JamfPlatform.APIError where error.status == 404 && error.hasCode(.notFound) {
@@ -122,7 +122,7 @@ extension JamfPlatform.Client {
         }
         let response: HTTPResponse
         do {
-            response = try await sendThrowing(HTTPRequest(
+            response = try await send(HTTPRequest(
                 path: "ddm/report/v1/devices/\(JamfPlatform.pathSegment(deviceID))/declarations",
                 // the filter field is declarationType; the answer calls it type
                 query: [URLQueryItem(name: "filter", value: "declarationType==CONFIGURATION"),
@@ -158,7 +158,7 @@ extension JamfPlatform.Client {
 
     private func deviceAction(_ deviceID: String, _ action: String, verb: String, privilege: JamfPro.Privilege) async throws {
         do {
-            _ = try await sendThrowing(HTTPRequest(method: "POST",
+            _ = try await send(HTTPRequest(method: "POST",
                                            path: "device-actions/v1/devices/\(JamfPlatform.pathSegment(deviceID))/\(action)"),
                                privilege: privilege)
         } catch let error as JamfPlatform.APIError where error.status == 422 {

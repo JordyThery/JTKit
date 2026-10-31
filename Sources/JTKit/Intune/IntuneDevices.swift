@@ -139,9 +139,6 @@ extension Graph {
     }
 }
 
-@available(*, deprecated, renamed: "Graph.ManagedDevice")
-public typealias IntuneManagedDevice = Graph.ManagedDevice
-
 // MARK: - Calls
 
 extension Graph.Client {
@@ -177,11 +174,6 @@ extension Graph.Client {
         _ = try await getRaw("deviceManagement/managedDevices?$select=id&$top=1", version: .v1)
     }
 
-    @available(*, deprecated, renamed: "testConnection()")
-    public func intuneTestConnection() async throws {
-        try await testConnection()
-    }
-
     /// Sends a command to one Intune device. Not repeated after a server
     /// error or a dropped connection, only after a 429; Delete Record is
     /// repeated (deleting twice does no harm).
@@ -198,11 +190,6 @@ extension Graph.Client {
     public func perform(_ command: MDMCommand, intuneDeviceID id: String,
                         approval: MDMCommand.Confirmation.Approval?) async throws {
         try command.check(approval, on: .intune, receiving: nil)
-        try await performCommand(command, intuneDeviceID: id)
-    }
-
-    @available(*, deprecated, message: "Confirm with MDMCommand.Confirmation and pass its approve(...) to perform(_:intuneDeviceID:approval:).")
-    public func perform(_ command: MDMCommand, intuneDeviceID id: String) async throws {
         try await performCommand(command, intuneDeviceID: id)
     }
 
@@ -236,11 +223,6 @@ extension Graph.Client {
             try command.check(approval, on: .intune, receiving: command.plan(for: targets, on: .intune).receiving.count)
         }
         return try await sendCommand(command, to: targets)
-    }
-
-    @available(*, deprecated, message: "Confirm with MDMCommand.Confirmation and pass its approve(...) to send(_:to:approval:).")
-    public func send(_ command: MDMCommand, to targets: [MDMCommand.Target]) async throws -> MDMCommand.Result {
-        try await sendCommand(command, to: targets)
     }
 
     private func sendCommand(_ command: MDMCommand, to targets: [MDMCommand.Target]) async throws -> MDMCommand.Result {

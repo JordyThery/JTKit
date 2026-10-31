@@ -1,5 +1,41 @@
 # Changelog
 
+## 1.0.0 (2026-10-31)
+The first stable release: semantic versioning from here (patch: fixes, minor: additions, major: breaking changes), and no deprecated API. Apps must have cleared every deprecation warning before moving to 1.0.0; all eight have, on 0.13.3.
+- Deprecated API removed (26 declarations), each with its replacement:
+  `licence` / `licenceName` / `init(…licence:…)` of `Acknowledgement` and
+  `AboutCopyright` → `license` / `licenseName` / `init(…license:…)`;
+  `Acknowledgement.msalLicence` → `msalLicense`; `JamfTokenProvider`,
+  `JamfPlatformError`, `JamfSchoolError`, `EntraTokenProvider`,
+  `GraphError`, `IntuneManagedDevice`, `JamfPro.Match` →
+  `JamfPlatform.TokenProvider`, `JamfPlatform.APIError`,
+  `JamfSchool.APIError`, `Graph.TokenProvider`, `Graph.APIError`,
+  `Graph.ManagedDevice`, `DeviceMatch`; `ABM.Client.verify()` and
+  `intuneTestConnection()` → `testConnection()`; `HTTPRequest`’s
+  `safeToRepeat:` / `notFoundAfterRepeatIsDone:` init and properties →
+  `repeating:` (`.safe`, `.safeNotFoundIsDone`); the command senders without
+  a confirmation (`send(_:to:pin:)` on Jamf Pro, `send(_:to:)` on Jamf
+  School and Intune, `perform(_:intuneDeviceID:)`) →
+  `send(_:to:approval:)` / `perform(_:intuneDeviceID:approval:)` with
+  `MDMCommand.Confirmation.approve(...)`; `JamfPlatform.Client.ErrorStatus`
+  `.returned` → read the thrown `JamfPlatform.APIError`’s status (the
+  `errorStatus:` parameter is gone with it); `Ledger.markRemoved` → only a
+  delete’s read-back marks an object removed; `LiveCheckRun.legacyPrefixes`
+  and `isLegacyTestObject` → gone (the one-time sweep is over).
+- “Apple Business”: Apple renamed Apple Business Manager, so every text
+  JTKit shows names it “Apple Business” (`ABM.Service.label` and `portal`,
+  `Connection.Service.displayName`, the activity log’s service, error,
+  refusal and rate-limit texts, the connections editor, demo data); Apple
+  School Manager keeps its name. Code names, Codable values and addresses
+  are unchanged. Apps whose tests expect “Apple Business Manager” from JTKit
+  update those expectations when they move to 1.0.0.
+- UI tests: a failing test gets a screenshot of the app’s frontmost window
+  (the whole app or the screen when there is none), “Window at failure”,
+  attached once and kept only on failure (`.deleteOnSuccess`); the
+  labels-only element dump stays. Smoke tests run in demo mode, so it shows
+  sample data only.
+- Tests use a made-up Jamf School Network ID (999001).
+
 ## 0.13.3 (2026-10-31)
 A Jamf Pro lookup fix, found in Serial Number Reader’s release check. No app has to change.
 - A never-enrolled mobile device (Jamf’s device list leaves out its general

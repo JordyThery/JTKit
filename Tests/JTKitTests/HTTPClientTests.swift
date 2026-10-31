@@ -143,20 +143,13 @@ struct HTTPClientTests {
         #expect(safeEdit.requests.count == 2)
     }
 
-    @Test("One repeat policy: the old two flags map onto it")
-    @available(*, deprecated)
+    @Test("One repeat policy: reads repeat, edits only when marked")
     func repeatPolicy() {
         #expect(HTTPRequest(path: "x").repeating == .standard)
-        #expect(HTTPRequest(method: "PUT", path: "x", safeToRepeat: true).repeating == .safe)
-        #expect(HTTPRequest(method: "DELETE", path: "x", safeToRepeat: true, notFoundAfterRepeatIsDone: true).repeating == .safeNotFoundIsDone)
-        var request = HTTPRequest(method: "DELETE", path: "x")
-        request.notFoundAfterRepeatIsDone = true
-        #expect(request.repeating == .safeNotFoundIsDone && request.safeToRepeat)
-        request.notFoundAfterRepeatIsDone = false
-        #expect(request.repeating == .safe)
-        request.safeToRepeat = false
-        #expect(request.repeating == .standard && !request.isRepeatable)
         #expect(HTTPRequest(path: "x").isRepeatable)
+        #expect(!HTTPRequest(method: "DELETE", path: "x").isRepeatable)
+        #expect(HTTPRequest(method: "DELETE", path: "x", repeating: .safeNotFoundIsDone).isRepeatable)
+        #expect(HTTPRequest(method: "PUT", path: "x", repeating: .safe).isRepeatable)
     }
 
     @Test("Short network drops are retried for reads only")

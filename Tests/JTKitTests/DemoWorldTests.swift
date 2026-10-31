@@ -173,7 +173,7 @@ struct DemoJamfProServerTests {
     func singleMobileDevice() async throws {
         let iPhone = try #require(DemoWorld.devices.last)
         let client = try jamfPro(demoMode())
-        let response = try await client.sendThrowing(HTTPRequest(path: "pro/v2/mobile-devices/\(iPhone.number)"))
+        let response = try await client.send(HTTPRequest(path: "pro/v2/mobile-devices/\(iPhone.number)"))
         let detail = try JSONDecoder().decode(JamfPro.MobileDeviceDetail.self, from: response.data)
         #expect(detail.general.displayName == iPhone.name && detail.general.udid == iPhone.udid)
         #expect(detail.general.assetTag == nil && detail.general.siteID == "2")
@@ -183,7 +183,7 @@ struct DemoJamfProServerTests {
 
         let mac = try #require(DemoWorld.devices(managedBy: .jamfPro).first { $0.isComputer })
         await #expect(throws: JamfPlatform.APIError.self) {
-            _ = try await client.sendThrowing(HTTPRequest(path: "pro/v2/mobile-devices/\(mac.number)"))
+            _ = try await client.send(HTTPRequest(path: "pro/v2/mobile-devices/\(mac.number)"))
         }
     }
 
@@ -192,7 +192,7 @@ struct DemoJamfProServerTests {
         let iPhone = try #require(DemoWorld.devices.last)
         let client = try jamfPro(demoMode())
         func general(_ id: Int, _ client: JamfPlatform.Client) async throws -> HTTPResponse {
-            try await client.sendThrowing(HTTPRequest(path: "proclassic/mobiledevices/id/\(id)/subset/General", accept: "application/json"))
+            try await client.send(HTTPRequest(path: "proclassic/mobiledevices/id/\(id)/subset/General", accept: "application/json"))
         }
         let response = try await general(iPhone.number, client)
         #expect(try JSONDecoder().decode(JamfPro.ClassicMobileDeviceGeneral.self, from: response.data).assetTag == iPhone.assetTag)
@@ -251,15 +251,15 @@ struct DemoJamfProServerTests {
         let client = try jamfPro(demo)
         let mac = DemoWorld.devices(managedBy: .jamfPro).first { $0.isComputer }!
         let iPad = DemoWorld.devices(managedBy: .jamfPro).first { $0.family == .iPad }!
-        #expect(sent(try await client.send(.lockComputer, to: [target(mac)], pin: "123456")))
-        #expect(sent(try await client.send(.restartMobile, to: [target(iPad)])))
-        #expect(sent(try await client.send(.clearPasscode, to: [target(iPad)])))
-        #expect(sent(try await client.send(.renewProfile, to: [target(mac)])))
+        #expect(sent(try await client.sendConfirmed(.lockComputer, to: [target(mac)], pin: "123456")))
+        #expect(sent(try await client.sendConfirmed(.restartMobile, to: [target(iPad)])))
+        #expect(sent(try await client.sendConfirmed(.clearPasscode, to: [target(iPad)])))
+        #expect(sent(try await client.sendConfirmed(.renewProfile, to: [target(mac)])))
         #expect(demo.jamfProServer.commands.map(\.command).contains("DEVICE_LOCK"))
 
         try await client.setAssetTag("CT-NEW", computerID: "\(mac.number)")
         #expect(try await client.computers(serials: [mac.serial]).records[mac.serial]?.general?.assetTag == "CT-NEW")
-        #expect(sent(try await client.send(.unmanage, to: [target(iPad)])))
+        #expect(sent(try await client.sendConfirmed(.unmanage, to: [target(iPad)])))
         #expect(demo.jamfProServer.isManaged(serial: iPad.serial) == false)
         try await client.deleteComputer(id: "\(mac.number)")
         #expect(try await client.computers(serials: [mac.serial]).records.isEmpty)
@@ -300,7 +300,7 @@ struct DemoJamfSchoolServerTests {
         let client = try jamfSchool(demo)
         let device = DemoWorld.devices(managedBy: .jamfSchool)[0]
         let target = MDMCommand.Target(serial: device.serial, recordID: device.udid, kind: .mobileDevice, udid: device.udid)
-        #expect(sent(try await client.send(.updateInventory, to: [target])))
+        #expect(sent(try await client.sendConfirmed(.updateInventory, to: [target])))
         #expect(demo.jamfSchoolServer.commands.map(\.action) == ["refresh"])
         try await client.setAssetTag("CA-7", udid: device.udid)
         #expect(demo.jamfSchoolServer.assetTag(serial: device.serial) == "CA-7")
@@ -338,9 +338,9 @@ struct DemoIntuneServerTests {
         let client = try intune(demo)
         let device = DemoWorld.devices(managedBy: .intune)[0]
         let target = MDMCommand.Target(serial: device.serial, recordID: device.intuneID, kind: .mobileDevice)
-        #expect(sent(try await client.send(.restartMobile, to: [target])))
+        #expect(sent(try await client.sendConfirmed(.restartMobile, to: [target])))
         #expect(demo.intuneServer.actions.map(\.action) == ["rebootNow"])
-        try await client.perform(.deleteRecord, intuneDeviceID: device.intuneID)
+        try await client.performConfirmed(.deleteRecord, intuneDeviceID: device.intuneID)
         #expect(!demo.intuneServer.hasRecord(serial: device.serial))
     }
 
@@ -355,7 +355,7 @@ struct DemoIntuneServerTests {
     }
 }
 
-@Suite("Demo Apple Business and School Manager")
+@Suite("Demo Apple Business and Apple School Manager")
 @MainActor
 struct DemoAppleBusinessServerTests {
     @Test("Signs in with the launch’s key and reads Contoso as DemoWorld has it")

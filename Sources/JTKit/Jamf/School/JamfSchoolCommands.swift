@@ -42,11 +42,6 @@ extension JamfSchool.Client {
         return try await sendCommand(command, to: targets)
     }
 
-    @available(*, deprecated, message: "Confirm with MDMCommand.Confirmation and pass its approve(...) to send(_:to:approval:).")
-    public func send(_ command: MDMCommand, to targets: [MDMCommand.Target]) async throws -> MDMCommand.Result {
-        try await sendCommand(command, to: targets)
-    }
-
     private func sendCommand(_ command: MDMCommand, to targets: [MDMCommand.Target]) async throws -> MDMCommand.Result {
         let action: String
         let form: String?

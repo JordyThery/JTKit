@@ -253,6 +253,3 @@ extension Graph {
         }
     }
 }
-
-@available(*, deprecated, renamed: "Graph.APIError")
-public typealias GraphError = Graph.APIError

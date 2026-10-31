@@ -233,7 +233,7 @@ struct IntuneCommandTests {
     ])
     func requests(command: MDMCommand, method: String, action: String) async throws {
         let server = MockServer { _ in MockResponse(status: 204, body: Data()) }
-        let result = try await intuneClient(server).send(command, to: [target("i-1")])
+        let result = try await intuneClient(server).sendConfirmed(command, to: [target("i-1")])
         #expect(result.isComplete)
         let request = try #require(server.requests.only)
         #expect(request.method == method)
@@ -244,17 +244,17 @@ struct IntuneCommandTests {
     @Test("An Intune device ID stays one path segment: ?, # and / are refused before sending, other characters encoded")
     func deviceIDInPath() async throws {
         let server = MockServer { _ in MockResponse(status: 204, body: Data()) }
-        let client = try intuneClient(server)
+        let client = intuneClient(server)
         for id in ["i-1?x=1", "i-1#x", "../other", "i-1/wipe", ""] {
             do {
-                try await client.perform(.restartMobile, intuneDeviceID: id)
+                try await client.performConfirmed(.restartMobile, intuneDeviceID: id)
                 Issue.record("\(id) was sent")
             } catch is MDMCommand.Refusal {
             }
         }
         #expect(server.requests.isEmpty)
 
-        try await client.perform(.restartMobile, intuneDeviceID: "i 1%")
+        try await client.performConfirmed(.restartMobile, intuneDeviceID: "i 1%")
         #expect(server.requests.only?.url.absoluteString.hasSuffix("/managedDevices/i%201%25/rebootNow") == true)
     }
 
@@ -301,7 +301,7 @@ struct IntuneCommandTests {
     func forbiddenCommand(command: MDMCommand) async throws {
         let server = MockServer { _ in forbidden }
         do {
-            try await intuneClient(server).perform(command, intuneDeviceID: "i-1")
+            try await intuneClient(server).performConfirmed(command, intuneDeviceID: "i-1")
             Issue.record("Expected an error")
         } catch {
             let message = error.localizedDescription
@@ -316,17 +316,17 @@ struct IntuneCommandTests {
     @Test("Not repeated after a server error or a dropped connection; a 429 is", arguments: [MDMCommand.wipeMobile, .restartMobile])
     func repeats(command: MDMCommand) async throws {
         let serverError = MockServer { _ in .json(503, "{}") }
-        let failed = try await intuneClient(serverError).send(command, to: [target("i-1")])
+        let failed = try await intuneClient(serverError).sendConfirmed(command, to: [target("i-1")])
         #expect(serverError.requests.count == 1)
         #expect(failed.sent.isEmpty)
 
         let dropped = MockServer { _ in throw URLError(.networkConnectionLost) }
-        _ = try await intuneClient(dropped).send(command, to: [target("i-1")])
+        _ = try await intuneClient(dropped).sendConfirmed(command, to: [target("i-1")])
         #expect(dropped.requests.count == 1)
 
         let calls = Counter()
         let throttled = MockServer { _ in calls.next() == 1 ? .json(429, "{}", headers: ["Retry-After": "0"]) : MockResponse(status: 204, body: Data()) }
-        let result = try await intuneClient(throttled).send(command, to: [target("i-1")])
+        let result = try await intuneClient(throttled).sendConfirmed(command, to: [target("i-1")])
         #expect(throttled.requests.count == 2 && result.isComplete)
     }
 
@@ -334,7 +334,7 @@ struct IntuneCommandTests {
     func deleteRepeated() async throws {
         let calls = Counter()
         let server = MockServer { _ in calls.next() == 1 ? .json(503, "{}") : .json(404, "{}") }
-        let result = try await intuneClient(server).send(.deleteRecord, to: [target("i-1")])
+        let result = try await intuneClient(server).sendConfirmed(.deleteRecord, to: [target("i-1")])
         #expect(server.requests.count == 2 && result.isComplete)
     }
 
@@ -343,7 +343,7 @@ struct IntuneCommandTests {
         let server = MockServer { request in
             request.path.contains("/i-2/") ? .json(404, #"{"error":{"code":"ResourceNotFound","message":"Not found."}}"#) : MockResponse(status: 204, body: Data())
         }
-        let result = try await intuneClient(server).send(.lockMobile, to: [target("i-1"), target("i-mac", .computer), target("i-2"), target("i-3")])
+        let result = try await intuneClient(server).sendConfirmed(.lockMobile, to: [target("i-1"), target("i-mac", .computer), target("i-2"), target("i-3")])
         #expect(result.command == "Lock Device")
         #expect(result.sent.map(\.recordID) == ["i-1", "i-3"])
         #expect(result.outcomes[1].outcome == .skipped(.notApplicable(.computer)))
@@ -356,7 +356,7 @@ struct IntuneCommandTests {
           arguments: [MDMCommand.lockComputer, .blankPush, .renewProfile, .redeployFramework])
     func notIntune(command: MDMCommand) async throws {
         let server = MockServer { _ in MockResponse(status: 204, body: Data()) }
-        await #expect(throws: MDMCommand.Refusal.self) { _ = try await intuneClient(server).send(command, to: [target("i-1")]) }
+        await #expect(throws: MDMCommand.Refusal.self) { _ = try await intuneClient(server).sendConfirmed(command, to: [target("i-1")]) }
         #expect(server.requests.isEmpty)
     }
 
@@ -364,7 +364,7 @@ struct IntuneCommandTests {
     func entry() async throws {
         let log = ActivityLog()
         let server = MockServer { _ in MockResponse(status: 204, body: Data()) }
-        let result = try await intuneClient(server).send(.updateInventory, to: [target("i-1")])
+        let result = try await intuneClient(server).sendConfirmed(.updateInventory, to: [target("i-1")])
         #expect(result.command == "Sync Device")
         log.recordCommand(result.command, outcomes: result.outcomes, service: "Intune", connection: "Contoso")
         #expect(log.entries.last?.detail == "Sent Sync Device to 1 device")

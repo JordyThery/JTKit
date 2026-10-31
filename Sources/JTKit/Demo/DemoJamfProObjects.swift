@@ -577,7 +577,7 @@ public nonisolated final class DemoJamfProObjects: @unchecked Sendable {
             let name = file.hasSuffix(".p7m") ? String(file.dropLast(4)) : file
             // the token itself is never kept, as Jamf never returns it
             pro["v1/device-enrollments", default: [:]][id] = [
-                "id": "\(id)", "name": name.isEmpty ? "Contoso ABM" : name, "supervisionIdentityId": "-1", "siteId": "-1",
+                "id": "\(id)", "name": name.isEmpty ? "Contoso Apple Business" : name, "supervisionIdentityId": "-1", "siteId": "-1",
                 "serverName": "Contoso Jamf Pro", "serverUuid": DemoSamples.uuid(0x7300 + id % 0x100),
                 "tokenExpirationDate": DemoJamfProObjectSamples.inAYear(),
             ]

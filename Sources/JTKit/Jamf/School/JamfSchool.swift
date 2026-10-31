@@ -357,9 +357,6 @@ extension JamfSchool {
     }
 }
 
-@available(*, deprecated, renamed: "JamfSchool.APIError")
-public typealias JamfSchoolError = JamfSchool.APIError
-
 // MARK: - Client
 
 extension JamfSchool {

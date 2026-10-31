@@ -24,21 +24,9 @@ extension JamfPlatform {
             case organization
         }
 
-        /// What an error status does.
-        public enum ErrorStatus: Sendable, Hashable {
-            /// Thrown as a `JamfPlatform.APIError` of kind `.status`.
-            case thrown
-            /// Returned as the response by `send`, for callers that read the
-            /// status themselves (Jamf Deployer’s preflight). A refused sign-in
-            /// is still thrown, and JTKit’s own calls always throw.
-            @available(*, deprecated, message: "Use .thrown and read the thrown JamfPlatform.APIError’s status.")
-            case returned
-        }
-
         public let baseURL: URL
         public let scope: Scope
         public let server: JamfPlatform.Server
-        public let errorStatus: ErrorStatus
         /// How the client signs in; decides the wording of Jamf Pro’s
         /// sign-in and privilege hints.
         public let signIn: SignInMethod
@@ -75,7 +63,6 @@ extension JamfPlatform {
             secret: @escaping @Sendable () throws -> String,
             recorder: RequestRecorder,
             scope: Scope? = nil,
-            errorStatus: ErrorStatus = .thrown,
             permits: @escaping @Sendable (HTTPRequest) -> Bool = { _ in true },
             hints: @escaping @Sendable (JamfPlatform.APIError) -> [String] = { _ in [] },
             headers: [String: String] = [:],
@@ -97,7 +84,7 @@ extension JamfPlatform {
             try self.init(baseURL: baseURL,
                           scope: scope ?? (server == .jamfPro ? .organization : .environment(connection.environmentID)),
                           server: server, signIn: connection.signIn,
-                          tokens: tokens, recorder: recorder, errorStatus: errorStatus, permits: permits, hints: hints,
+                          tokens: tokens, recorder: recorder, permits: permits, hints: hints,
                           headers: headers, writeSpacing: writeSpacing, sleep: sleep, random: random, now: now)
         }
 
@@ -113,7 +100,6 @@ extension JamfPlatform {
             signIn: SignInMethod = .apiClient,
             tokens: any BearerTokenSource,
             recorder: RequestRecorder,
-            errorStatus: ErrorStatus = .thrown,
             permits: @escaping @Sendable (HTTPRequest) -> Bool = { _ in true },
             hints: @escaping @Sendable (JamfPlatform.APIError) -> [String] = { _ in [] },
             headers extraHeaders: [String: String] = [:],
@@ -137,7 +123,6 @@ extension JamfPlatform {
             self.scope = scope
             self.server = server
             self.signIn = signIn
-            self.errorStatus = errorStatus
             self.tokens = tokens
             self.hints = hints
             http = HTTPClient(baseURL: baseURL, tokens: tokens, recorder: recorder, headers: headers,
@@ -146,8 +131,9 @@ extension JamfPlatform {
                               sleep: sleep, random: random, now: now)
         }
 
-        /// Sends a request. Returns a 2xx answer, or with `errorStatus:
-        /// .returned` any answer.
+        /// Sends a request. Returns a 2xx answer (or what `HTTPClient`
+        /// returns as it is, e.g. the 404 of a delete an earlier attempt
+        /// already did); an error status is thrown.
         ///
         /// - Parameter privilege: the Jamf Pro privilege the request needs,
         ///   named in the hint when Jamf Pro refuses it.
@@ -159,27 +145,9 @@ extension JamfPlatform {
         /// As `send(_:privilege:)`, for a request that needs several
         /// privileges, all named when Jamf Pro refuses it.
         public func send(_ request: HTTPRequest, privileges: [JamfPro.Privilege]) async throws -> HTTPResponse {
-            try await send(request, privileges: privileges, returningErrors: errorStatus != .thrown)
-        }
-
-        /// `send`, but an error status is always thrown, also by a client
-        /// that returns them (`errorStatus: .returned`): every JTKit call
-        /// goes through this. What `HTTPClient` returns comes back as it is,
-        /// e.g. the 404 of a delete an earlier attempt already did.
-        func sendThrowing(_ request: HTTPRequest, privilege: JamfPro.Privilege? = nil) async throws -> HTTPResponse {
-            try await sendThrowing(request, privileges: privilege.map { [$0] } ?? [])
-        }
-
-        func sendThrowing(_ request: HTTPRequest, privileges: [JamfPro.Privilege]) async throws -> HTTPResponse {
-            try await send(request, privileges: privileges, returningErrors: false)
-        }
-
-        private func send(_ request: HTTPRequest, privileges: [JamfPro.Privilege], returningErrors: Bool) async throws -> HTTPResponse {
             observePrivileges?(request.path, request.method, privileges)
             do {
                 return try await http.send(request)
-            } catch let HTTPError.status(response, _, _, duringSignIn) where !duringSignIn && returningErrors {
-                return response
             } catch let error as HTTPError {
                 var error = JamfPlatform.APIError(error)
                 error.privileges = privileges
@@ -194,7 +162,7 @@ extension JamfPlatform {
 
         /// A GET that needs several privileges, read as lossless JSON.
         public func json(_ path: String, query: [URLQueryItem] = [], privileges: [JamfPro.Privilege]) async throws -> LosslessJSON {
-            let response = try await sendThrowing(HTTPRequest(path: path, query: query), privileges: privileges)
+            let response = try await send(HTTPRequest(path: path, query: query), privileges: privileges)
             do {
                 return try LosslessJSON(data: response.data)
             } catch {
@@ -205,7 +173,7 @@ extension JamfPlatform {
         /// A GET, decoded.
         public func get<T: Decodable>(_ type: T.Type, _ path: String, query: [URLQueryItem] = [],
                                       privilege: JamfPro.Privilege? = nil) async throws -> T {
-            let response = try await sendThrowing(HTTPRequest(path: path, query: query), privilege: privilege)
+            let response = try await send(HTTPRequest(path: path, query: query), privilege: privilege)
             do {
                 return try JSONDecoder().decode(type, from: response.data)
             } catch {

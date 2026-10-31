@@ -230,7 +230,7 @@ extension JamfPlatform {
         }
 
         public func detail(id: String) async throws -> BlueprintDetail {
-            let response = try await client.sendThrowing(HTTPRequest(path: Self.itemPath(id)))
+            let response = try await client.send(HTTPRequest(path: Self.itemPath(id)))
             return try BlueprintDetail(data: response.data)
         }
 
@@ -244,7 +244,7 @@ extension JamfPlatform {
             if let description, !description.isEmpty { body["description"] = .string(description) }
             body["scope"] = Self.scope(deviceGroups)
             body["steps"] = .array(steps)
-            let response = try await client.sendThrowing(HTTPRequest(
+            let response = try await client.send(HTTPRequest(
                 method: "POST", path: Self.path, body: LosslessJSON.object(body).serialized(), contentType: "application/json"))
             guard let json = try? LosslessJSON(data: response.data), let id = json["id"]?.stringValue else {
                 throw JamfPlatform.APIError(.invalidResponse("The create response has no Blueprint id."))
@@ -273,7 +273,7 @@ extension JamfPlatform {
         /// `POST …/deploy`. Only retried after a 429, so a deployment is never
         /// started twice.
         public func deploy(id: String) async throws {
-            _ = try await client.sendThrowing(HTTPRequest(method: "POST", path: Self.itemPath(id) + "/deploy"))
+            _ = try await client.send(HTTPRequest(method: "POST", path: Self.itemPath(id) + "/deploy"))
         }
 
         /// The status report; nil while there is none (404).
@@ -288,7 +288,7 @@ extension JamfPlatform {
         /// `DELETE`. Safe to repeat: a 404 after a repeat means an earlier
         /// attempt already deleted it.
         public func delete(id: String) async throws {
-            _ = try await client.sendThrowing(HTTPRequest(method: "DELETE", path: Self.itemPath(id),
+            _ = try await client.send(HTTPRequest(method: "DELETE", path: Self.itemPath(id),
                                                           repeating: .safeNotFoundIsDone))
         }
 
@@ -348,7 +348,7 @@ extension JamfPlatform {
         }
 
         private func mergePatch(id: String, _ body: LosslessJSON.Object) async throws {
-            _ = try await client.sendThrowing(HTTPRequest(
+            _ = try await client.send(HTTPRequest(
                 method: "PATCH", path: Self.itemPath(id), body: LosslessJSON.object(body).serialized(),
                 contentType: "application/merge-patch+json", repeating: .safe))
         }

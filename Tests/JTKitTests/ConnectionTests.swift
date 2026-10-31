@@ -356,7 +356,7 @@ struct ConnectionTests {
     @Test func summaryNamesTheServiceAndWhereItPoints() {
         #expect(Connection(name: "A", service: .jamfPlatform, region: .eu).summary == "Jamf Platform API · EU")
         #expect(Connection(name: "B", service: .jamfPro, serverURL: "https://demo.jamfcloud.com").summary == "Jamf Pro · demo.jamfcloud.com")
-        #expect(Connection(name: "C", service: .appleBusinessManager).summary == "Apple Business Manager")
+        #expect(Connection(name: "C", service: .appleBusinessManager).summary == "Apple Business")
     }
 }
 

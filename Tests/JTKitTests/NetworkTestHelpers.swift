@@ -81,3 +81,48 @@ extension Duration {
         Double(components.seconds) + Double(components.attoseconds) / 1e18
     }
 }
+
+// MARK: - Confirmed commands
+
+extension MDMCommand {
+    /// The answer a person gives to the command’s confirmation (the typed
+    /// count, the PIN twice), or nil for a command that needs none: what an
+    /// app passes as `approval`.
+    func answered(for targets: [Target], on product: Product, overPlatformAPI: Bool = false,
+                  pin: String = "") throws -> Confirmation.Approval? {
+        guard needsApproval(on: product) else { return nil }
+        let confirmation = Confirmation(self, plan: plan(for: targets, on: product, overPlatformAPI: overPlatformAPI),
+                                        on: product, connectionName: "Lab")
+        return try confirmation.approve(typedCount: confirmation.typedCount.map(String.init) ?? "", pin: pin, pinAgain: pin)
+    }
+}
+
+extension JamfPlatform.Client {
+    /// Sends a command after answering its confirmation, as an app does.
+    func sendConfirmed(_ command: MDMCommand, to targets: [MDMCommand.Target], pin: String = "") async throws -> MDMCommand.Result {
+        let approval = try command.answered(for: targets, on: .jamfPro, overPlatformAPI: server == .platformAPI, pin: pin)
+        return try await send(command, to: targets, approval: approval)
+    }
+}
+
+extension JamfSchool.Client {
+    /// Sends a command after answering its confirmation, as an app does.
+    func sendConfirmed(_ command: MDMCommand, to targets: [MDMCommand.Target]) async throws -> MDMCommand.Result {
+        try await send(command, to: targets, approval: try command.answered(for: targets, on: .jamfSchool))
+    }
+}
+
+extension Graph.Client {
+    /// Sends a command after answering its confirmation, as an app does.
+    func sendConfirmed(_ command: MDMCommand, to targets: [MDMCommand.Target]) async throws -> MDMCommand.Result {
+        try await send(command, to: targets, approval: try command.answered(for: targets, on: .intune))
+    }
+
+    /// Sends a command to one device after answering its confirmation.
+    func performConfirmed(_ command: MDMCommand, intuneDeviceID id: String) async throws {
+        let device = [MDMCommand.Target(serial: "S1", recordID: id, kind: .computer),
+                      MDMCommand.Target(serial: "S2", recordID: id, kind: .mobileDevice)]
+        let approval = command.intuneRequest(deviceID: "") == nil ? nil : try command.answered(for: device, on: .intune)
+        try await perform(command, intuneDeviceID: id, approval: approval)
+    }
+}

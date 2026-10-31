@@ -11,12 +11,11 @@ private func platformClient(
     _ server: MockServer,
     log: ActivityLog? = nil,
     scope: JamfPlatform.Client.Scope = .environment(environmentID),
-    errorStatus: JamfPlatform.Client.ErrorStatus = .thrown,
     permits: @escaping @Sendable (HTTPRequest) -> Bool = { _ in true }
 ) throws -> JamfPlatform.Client {
     try JamfPlatform.Client(baseURL: gateway, scope: scope, tokens: FixedToken("tok"),
                             recorder: RequestRecorder(session: server.session, log: log, service: "Jamf Platform API"),
-                            errorStatus: errorStatus, permits: permits, sleep: { _ in }, random: { 0 })
+                            permits: permits, sleep: { _ in }, random: { 0 })
 }
 
 private func platformConnection(environment: String = environmentID, hostOverride: String = "") -> Connection {
@@ -109,18 +108,10 @@ struct JamfPlatformClientTests {
         #expect(lines.last?.contains("missing a permission") == true)
     }
 
-    @Test("With errorStatus .returned an error answer comes back as the response")
-    func returnedStatus() async throws {
-        let server = MockServer { _ in .json(403, #"{"httpStatus":403,"errors":[{"code":"BAD_PERMISSIONS"}]}"#) }
-        let response = try await platformClient(server, errorStatus: .returned).send(HTTPRequest(path: "/pro/v1/scripts"))
-        #expect(response.status == 403)
-    }
-
-    @Test("With errorStatus .returned, JTKit’s own calls still throw an error status",
-          arguments: [403, 404, 409, 500])
-    func ownCallsThrowOnReturningClient(status: Int) async throws {
+    @Test("JTKit’s own calls throw an error status", arguments: [403, 404, 409, 500])
+    func ownCallsThrow(status: Int) async throws {
         let server = MockServer { _ in .json(status, #"{"httpStatus":\#(status),"errors":[]}"#) }
-        let client = try platformClient(server, errorStatus: .returned)
+        let client = try platformClient(server)
         let blueprints = JamfPlatform.Blueprints(client: client)
         let id = "6b9a3c1e-3f0e-4d5e-9c1a-0e1f2a3b4c5d"
         let calls: [(String, @Sendable () async throws -> Void)] = [
@@ -139,11 +130,11 @@ struct JamfPlatformClientTests {
         }
     }
 
-    @Test("A refused sign-in is thrown, also with errorStatus .returned")
+    @Test("A refused sign-in is thrown")
     func refusedSignIn() async throws {
         let server = MockServer { _ in .json(401, #"{"error":"invalid_client","error_description":"Bad credentials"}"#) }
         let client = try JamfPlatform.Client(connection: platformConnection(), secret: { "s" },
-                                             recorder: RequestRecorder(session: server.session, log: nil), errorStatus: .returned)
+                                             recorder: RequestRecorder(session: server.session, log: nil))
         let error = await thrown { try await client.signIn() }
         guard case .signIn(401, _, _)? = error?.kind else { Issue.record("Got \(String(describing: error))"); return }
         #expect(error?.hasCode("invalid_client") == true)
@@ -845,20 +836,5 @@ struct JamfPlatformEnvironmentTests {
         var pro = connection
         pro.service = .jamfPro
         #expect(!EnvironmentListState.canLoad(pro, typedSecret: "s", hasStoredSecret: true))
-    }
-}
-
-@Suite("Names before 1.0: the old names still mean the same types")
-struct RenamedTypeTests {
-    @Test("Nested like ABM’s: the token providers, errors and Intune’s device record")
-    @available(*, deprecated)
-    func oldNames() {
-        #expect(JamfTokenProvider.self == JamfPlatform.TokenProvider.self)
-        #expect(JamfPlatformError.self == JamfPlatform.APIError.self)
-        #expect(EntraTokenProvider.self == Graph.TokenProvider.self)
-        #expect(GraphError.self == Graph.APIError.self)
-        #expect(IntuneManagedDevice.self == Graph.ManagedDevice.self)
-        #expect(JamfSchoolError.self == JamfSchool.APIError.self)
-        #expect(JamfPro.Match<String>.self == DeviceMatch<String>.self)
     }
 }

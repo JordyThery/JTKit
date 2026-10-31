@@ -41,7 +41,7 @@ extension ABM {
         }
     }
 
-    /// Why an Apple Business or School Manager request or sign-in failed, in
+    /// Why an Apple Business or Apple School Manager request or sign-in failed, in
     /// the same format as the Jamf and Intune errors: the HTTP status line,
     /// one `CODE: title — detail` line per error, Apple’s error ID, then
     /// hints: the app’s own first, then the standard ones. Everything shown
@@ -116,7 +116,7 @@ extension ABM {
             return []
         }
 
-        private var portal: String { service?.portal ?? "Apple Business Manager or Apple School Manager" }
+        private var portal: String { service?.portal ?? "Apple Business or Apple School Manager" }
         private var name: String { service?.label ?? "Apple" }
 
         /// Apple stops answering past its limit, so a lost connection after

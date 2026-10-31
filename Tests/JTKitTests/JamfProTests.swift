@@ -408,7 +408,7 @@ struct JamfProWriteTests {
         let sent = try #require(server.requests.last)
         #expect(sent.method == "PATCH")
         #expect(sent.path == "/api/v4/computers-inventory-detail/12")
-        let body = try JSONSerialization.jsonObject(with: try #require(sent.body)) as? [String: [String: String]]
+        let body = try JSONSerialization.jsonObject(with: sent.body) as? [String: [String: String]]
         #expect(body == ["general": ["assetTag": "A-2002"]])
     }
 
@@ -545,7 +545,7 @@ struct JamfProHintTests {
 // MARK: - Jamf School
 
 private func schoolClient(_ server: MockServer, log: ActivityLog? = nil, sleeps: SleepLog = SleepLog()) throws -> JamfSchool.Client {
-    try JamfSchool.Client(address: "school.jamfcloud.com/api/", networkID: " 067680 ", apiKey: "KEY123 ",
+    try JamfSchool.Client(address: "school.jamfcloud.com/api/", networkID: " 999001 ", apiKey: "KEY123 ",
                           recorder: RequestRecorder(session: server.session, log: log, service: "Jamf School"),
                           sleep: { try await sleeps.sleep($0) }, random: { 0 })
 }
@@ -589,7 +589,7 @@ struct JamfSchoolTests {
         let device = try #require(try await schoolClient(server, log: log).device(serial: "f9fxk2q3hgmn").record)
         let sent = try #require(server.requests.first)
         #expect(sent.url.absoluteString == "https://school.jamfcloud.com/api/devices?serialnumber=f9fxk2q3hgmn")
-        #expect(sent.header("Authorization") == "Basic " + Data("067680:KEY123".utf8).base64EncodedString())
+        #expect(sent.header("Authorization") == "Basic " + Data("999001:KEY123".utf8).base64EncodedString())
         let recorded = try #require(log.entries.last?.request?.requestHeaders.first { $0.name == "Authorization" })
         #expect(recorded.value == "Basic <redacted>")
         #expect(device.udid == "00008030-001A2B3C4D5E802E")

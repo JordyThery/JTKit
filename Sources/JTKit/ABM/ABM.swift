@@ -1,6 +1,6 @@
 import Foundation
 
-/// Apple Business Manager and Apple School Manager: the same
+/// Apple Business and Apple School Manager: the same
 /// API behind two addresses, with the same paths, device records and sign-in.
 /// Only the address, the sign-in scope and Release (Business only) differ.
 public nonisolated enum ABM {
@@ -33,15 +33,15 @@ public nonisolated enum ABM {
         /// As the activity log and messages name it.
         public var label: String {
             switch self {
-            case .business: "Apple Business Manager"
+            case .business: "Apple Business"
             case .school: "Apple School Manager"
             }
         }
 
-        /// The web portal, for hints ("in Apple Business Manager").
+        /// The web portal, for hints ("in Apple Business").
         public var portal: String {
             switch self {
-            case .business: "Apple Business Manager"
+            case .business: "Apple Business"
             case .school: "Apple School Manager"
             }
         }

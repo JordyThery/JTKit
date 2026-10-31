@@ -4,7 +4,8 @@ import AppKit
 /// The base class for an app’s UI tests: launches the
 /// app’s own Debug build, finds and drives elements, and on a failure prints
 /// the element tree’s types, identifiers and labels (`UIDUMP-BEGIN…END`; no
-/// field values) and keeps a screenshot.
+/// field values) and attaches a screenshot of the app’s window, kept only
+/// when the test fails.
 ///
 /// Under the release check (`JTKIT_RELEASE_CHECK=1`, set by its script) the
 /// default launch is `launchInDemo()`, a launch without the demo and sandbox
@@ -31,6 +32,9 @@ open class JTKitUITestCase: XCTestCase {
 
     /// Set by `paste`: only then does `tearDown` clear the pasteboard.
     private var didPaste = false
+
+    /// Set once the failure screenshot is attached: one per failing test.
+    private var didAttachFailureScreenshot = false
 
     /// Whether the release check runs this test (its script sets
     /// `TEST_RUNNER_JTKIT_RELEASE_CHECK=1`).
@@ -73,12 +77,15 @@ open class JTKitUITestCase: XCTestCase {
     }
 
     override open func tearDown() {
-        if let run = testRun, run.failureCount > 0, let app {
+        let failed = (testRun?.failureCount ?? 0) > 0
+        if failed, let app {
             let tree = (try? app.snapshot()).map { Self.outline(Self.node($0)) } ?? "(no element tree)\n"
             print("UIDUMP-BEGIN\n\(tree)UIDUMP-END")
-            let shot = XCTAttachment(screenshot: app.screenshot())
-            shot.name = "Failure — \(name)"
-            shot.lifetime = .keepAlways
+        }
+        // A failure recorded off the main thread got no screenshot yet.
+        if let shot = Self.failureScreenshot(failed: failed, alreadyAttached: didAttachFailureScreenshot,
+                                             capture: { XCTAttachment(screenshot: failureScreenshotSource()) }) {
+            didAttachFailureScreenshot = true
             add(shot)
         }
         if didPaste { NSPasteboard.general.clearContents() }
@@ -248,6 +255,47 @@ open class JTKitUITestCase: XCTestCase {
         field.click()
         field.typeKey("v", modifierFlags: .command)
         NSPasteboard.general.clearContents()
+    }
+
+    // MARK: Failure screenshot
+
+    /// The name of the screenshot attached to a failing test.
+    public static let failureScreenshotName = "Window at failure"
+
+    /// Attaches a screenshot of the app’s window to the first failure, as it
+    /// looks at that moment. Smoke tests run in demo mode (`launchInDemo()`,
+    /// required under the release check), so the screenshot shows sample
+    /// data only, never a real tenant.
+    override open func record(_ issue: XCTIssue) {
+        var issue = issue
+        if Thread.isMainThread,
+           let shot = Self.failureScreenshot(failed: true, alreadyAttached: didAttachFailureScreenshot,
+                                             capture: { XCTAttachment(screenshot: failureScreenshotSource()) }) {
+            didAttachFailureScreenshot = true
+            issue.add(shot)
+        }
+        super.record(issue)
+    }
+
+    /// What the failure screenshot shows: the app’s frontmost window (with
+    /// any sheet on it), else the whole app, else the screen when the app
+    /// isn’t running.
+    func failureScreenshotSource() -> XCUIScreenshot {
+        guard let app, app.state != .notRunning else { return XCUIScreen.main.screenshot() }
+        let window = app.windows.firstMatch
+        return window.exists ? window.screenshot() : app.screenshot()
+    }
+
+    /// The failure screenshot, named `failureScreenshotName` and deleted when
+    /// the test passes after all (`.deleteOnSuccess`). Nil, and nothing
+    /// captured, when the test hasn’t failed or already has one.
+    static func failureScreenshot(failed: Bool, alreadyAttached: Bool,
+                                  capture: () -> XCTAttachment) -> XCTAttachment? {
+        guard failed, !alreadyAttached else { return nil }
+        let shot = capture()
+        shot.name = failureScreenshotName
+        shot.lifetime = .deleteOnSuccess
+        return shot
     }
 
     // MARK: Failure dump

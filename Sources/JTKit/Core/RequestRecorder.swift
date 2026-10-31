@@ -390,7 +390,7 @@ public typealias RecordedJSONFilter = @Sendable (Any) -> Any
 /// gateway (`/pro/…`), and on Microsoft Graph (`/v1.0/…`, `/beta/…`): an app
 /// upload’s commit (the app’s encryption key), FileVault and BitLocker
 /// recovery keys, LAPS passwords. And Apple’s sign-in for Apple Business and
-/// School Manager (the signed request, the token).
+/// Apple School Manager (the signed request, the token).
 public nonisolated enum SensitiveRequests {
     nonisolated(unsafe) private static let patterns: [Regex<Substring>] = [
         /(?i)\/(?:api|pro)\/v\d+\/mobile-devices\/[^\/]+\/detail\/?$/,
@@ -410,7 +410,7 @@ public nonisolated enum SensitiveRequests {
         /(?i)\/(?:v1\.0|beta)\/deviceManagement\/managedDevices\/[^\/]+\/getFileVaultKey\/?$/,
         /(?i)\/(?:v1\.0|beta)\/informationProtection\/bitlocker\/recoveryKeys\/[^\/]+\/?$/,
         /(?i)\/(?:v1\.0|beta)\/(?:directory\/)?deviceLocalCredentials\/[^\/]+\/?$/,
-        // Apple Business and School Manager’s sign-in: the request
+        // Apple Business and Apple School Manager’s sign-in: the request
         // carries the signed client assertion, the answer the token
         /(?i)^\/auth\/oauth2\/v2\/token\/?$/,
     ]

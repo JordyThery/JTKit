@@ -30,9 +30,6 @@ public nonisolated final class LiveCheckRun: @unchecked Sendable {
     public let ledger: Ledger
     public let policy: LiveCheckPolicy
     public let network: LiveCheckNetwork
-    /// The one-time sweep of older test prefixes is over: always empty.
-    @available(*, deprecated, message: "The one-time sweep of older test prefixes is over; this is always empty")
-    public var legacyPrefixes: [String] { [] }
     /// Whether this stage may change tenants (`JTKIT_LIVE_WRITES=1`).
     public let writesAllowed: Bool
     /// A failure to inject on purpose (`JTKIT_LIVE_FAULT`), set only by the
@@ -307,10 +304,6 @@ public nonisolated final class LiveCheckRun: @unchecked Sendable {
         }
         policy.allowPurge(target: try target(role: role, service: .intune), id: id)
     }
-
-    /// The one-time sweep of older test prefixes is over: always false.
-    @available(*, deprecated, message: "The one-time sweep of older test prefixes is over; this is always false")
-    public func isLegacyTestObject(_ name: String) -> Bool { false }
 
     // MARK: Keychain item names, seen from the test host
 
