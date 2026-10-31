@@ -576,7 +576,7 @@ nonisolated final class DemoGraphStore {
                             "description": "Microsoft Edge for macOS.", "publisher": "Microsoft",
                             "publishingState": "published", "channel": "stable"]),
         ], to: "deviceAppManagement/mobileApps")
-        add([object(0xe749, ["tokenName": "Contoso Apple Business Manager", "appleIdentifier": "abm@contoso.example",
+        add([object(0xe749, ["tokenName": "Contoso Apple Business", "appleIdentifier": "abm@contoso.example",
                              "tokenType": "dep", "tokenExpirationDateTime": DemoWorld.iso(daysAgo: -300, from: now),
                              "lastSuccessfulSyncDateTime": DemoWorld.iso(daysAgo: 0.2, from: now)])],
             to: "deviceManagement/depOnboardingSettings")

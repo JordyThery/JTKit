@@ -212,7 +212,7 @@ public nonisolated final class LiveCheckPolicy: @unchecked Sendable {
         let lowered = path.lowercased()
         let role = entry.role
         if Self.isApple(entry.service) && lowered.contains("orgdeviceactivities") {
-            return .refuse("Apple Business / School Manager activities are never run")
+            return .refuse("Apple Business or Apple School Manager activities are never run")
         }
         if Self.isSecretRead(lowered) || Self.selectsSecret(request.url) {
             return .refuse("Device secrets (FileVault key, Recovery Lock, lock PIN, local admin password, Activation Lock bypass code) are never read in a live check")

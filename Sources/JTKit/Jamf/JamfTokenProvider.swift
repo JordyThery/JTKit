@@ -200,9 +200,6 @@ extension JamfPlatform {
     }
 }
 
-@available(*, deprecated, renamed: "JamfPlatform.TokenProvider")
-public typealias JamfTokenProvider = JamfPlatform.TokenProvider
-
 extension Connection {
     /// Where Jamf requests go: the Platform API gateway of the region, or the
     /// host override (scheme and trailing slashes dropped), or the Jamf Pro

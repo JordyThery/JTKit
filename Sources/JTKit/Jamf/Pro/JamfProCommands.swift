@@ -34,14 +34,6 @@ extension JamfPlatform.Client {
         return try await sendCommand(command, to: targets, pin: approval?.pin)
     }
 
-    /// Sends a command to the devices it applies to, without a confirmation.
-    ///
-    /// - Parameter pin: six digits, for Lock and Wipe Computer.
-    @available(*, deprecated, message: "Confirm with MDMCommand.Confirmation and pass its approve(...) to send(_:to:approval:).")
-    public func send(_ command: MDMCommand, to targets: [MDMCommand.Target], pin: String? = nil) async throws -> MDMCommand.Result {
-        try await sendCommand(command, to: targets, pin: pin)
-    }
-
     private func sendCommand(_ command: MDMCommand, to targets: [MDMCommand.Target], pin: String?) async throws -> MDMCommand.Result {
         let overPlatformAPI = server == .platformAPI
         if overPlatformAPI && !command.worksOverPlatformAPI {
@@ -130,14 +122,14 @@ extension JamfPlatform.Client {
     /// Deletes a computer’s record (`v4/computers-inventory/{id}`). Can’t be
     /// undone. Needs “Delete Computers”.
     public func deleteComputer(id: String) async throws {
-        _ = try await sendThrowing(HTTPRequest(method: "DELETE", path: "pro/v4/computers-inventory/\(JamfPlatform.pathSegment(id))"),
+        _ = try await send(HTTPRequest(method: "DELETE", path: "pro/v4/computers-inventory/\(JamfPlatform.pathSegment(id))"),
                                    privilege: .deleteComputers)
     }
 
     /// Deletes a mobile device’s record, through the Classic API (Jamf Pro
     /// has no other way). Can’t be undone. Needs “Delete Mobile Devices”.
     public func deleteMobileDevice(id: String) async throws {
-        _ = try await sendThrowing(HTTPRequest(method: "DELETE", path: JamfClassic.path("mobiledevices", id: id),
+        _ = try await send(HTTPRequest(method: "DELETE", path: JamfClassic.path("mobiledevices", id: id),
                                                accept: "application/json"),
                                    privilege: .deleteMobileDevices)
     }
@@ -174,7 +166,7 @@ extension JamfPlatform.Client {
             request = HTTPRequest(method: "POST", path: "proclassic/mobiledevicecommands/command/UpdateInventory/id/\(id)",
                                   accept: "application/json")
         }
-        _ = try await sendThrowing(request, privilege: privilege)
+        _ = try await send(request, privilege: privilege)
     }
 
     /// `v2/mdm/commands`. Jamf Pro’s API description names only “View MDM
@@ -186,7 +178,7 @@ extension JamfPlatform.Client {
             "commandData": data,
         ] as [String: Any])
         let privileges = privilege == .viewMDMCommandInformation ? [privilege] : [.viewMDMCommandInformation, privilege]
-        _ = try await sendThrowing(HTTPRequest(method: "POST", path: "pro/v2/mdm/commands", body: body), privileges: privileges)
+        _ = try await send(HTTPRequest(method: "POST", path: "pro/v2/mdm/commands", body: body), privileges: privileges)
     }
 
     /// Read when the command is sent, never during a lookup; the call is
@@ -196,7 +188,7 @@ extension JamfPlatform.Client {
             let ios, tvos, watchos, visionos: OS?
             struct OS: Decodable { let unlockToken: String? }
         }
-        let response = try await sendThrowing(HTTPRequest(path: "pro/v2/mobile-devices/\(JamfPlatform.pathSegment(id))/detail"),
+        let response = try await send(HTTPRequest(path: "pro/v2/mobile-devices/\(JamfPlatform.pathSegment(id))/detail"),
                                               privilege: .readMobileDevices)
         guard let detail = try? JSONDecoder().decode(Detail.self, from: response.data) else {
             throw failure(JamfPlatform.APIError(.invalidResponse("The mobile device detail couldn’t be read.")))
@@ -214,7 +206,7 @@ extension JamfPlatform.Client {
         }
         do {
             let body = try JSONSerialization.data(withJSONObject: ["udids": receiving.compactMap(\.udid)])
-            let response = try await sendThrowing(HTTPRequest(method: "POST", path: "pro/v1/mdm/renew-profile", body: body),
+            let response = try await send(HTTPRequest(method: "POST", path: "pro/v1/mdm/renew-profile", body: body),
                                                   privilege: .sendRenewMDMProfileCommand)
             let skipped = Set(((try? JSONDecoder().decode(Answer.self, from: response.data))?.udidsNotProcessed?.udids ?? [])
                 .map { $0.lowercased() })
@@ -239,7 +231,7 @@ extension JamfPlatform.Client {
         var syncErrors = [String]()
         for id in managementIDs {
             do {
-                _ = try await sendThrowing(HTTPRequest(method: "POST", path: "pro/v1/ddm/\(JamfPlatform.pathSegment(id))/sync"),
+                _ = try await send(HTTPRequest(method: "POST", path: "pro/v1/ddm/\(JamfPlatform.pathSegment(id))/sync"),
                                            privilege: .sendDeclarativeManagementCommand)
             } catch is CancellationError {
                 throw CancellationError()
@@ -262,7 +254,7 @@ extension JamfPlatform.Client {
         struct Answer: Decodable { let errorUuids: [String]? }
         do {
             let body = try JSONSerialization.data(withJSONObject: ["clientManagementIds": managementIDs])
-            let response = try await sendThrowing(HTTPRequest(method: "POST", path: "pro/v2/mdm/blank-push", body: body),
+            let response = try await send(HTTPRequest(method: "POST", path: "pro/v2/mdm/blank-push", body: body),
                                                   privilege: .viewMDMCommandInformation)
             let failed = Set(((try? JSONDecoder().decode(Answer.self, from: response.data))?.errorUuids ?? []).map { $0.lowercased() })
             for target in receiving {

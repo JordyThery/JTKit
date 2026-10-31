@@ -1,6 +1,6 @@
 # JTKit
 
-Shared Swift code for my Mac admin apps (Checkpoint, Profile2Blueprint, AppSettings2Blueprint, Jamf Migrator, Serial Number Reader, Intune Deployer, Jamf Deployer, Blueprint Managed Preferences Editor): updates, About and Settings building blocks, Keychain, and connections to Jamf, Intune and Apple Business Manager.
+Shared Swift code for my Mac admin apps (Checkpoint, Profile2Blueprint, AppSettings2Blueprint, Jamf Migrator, Serial Number Reader, Intune Deployer, Jamf Deployer, Blueprint Managed Preferences Editor): updates, About and Settings building blocks, Keychain, and connections to Jamf, Intune and Apple Business.
 
 Requires macOS 14. From 0.4.0 JTKit is macOS only.
 
@@ -21,7 +21,7 @@ Bump `JTKit.version`, add a CHANGELOG entry, commit, tag the version (`0.2.0`, â
 
 ## Status
 
-All eight apps use JTKit for their updates, About and Settings windows, saved connections, activity log and demo mode, and for their connections to Jamf, Intune and Apple Business Manager. See [ROADMAP.md](ROADMAP.md) for the plan and [CHANGELOG.md](CHANGELOG.md) for what changed in each version.
+All eight apps use JTKit for their updates, About and Settings windows, saved connections, activity log and demo mode, and for their connections to Jamf, Intune and Apple Business. See [ROADMAP.md](ROADMAP.md) for the plan and [CHANGELOG.md](CHANGELOG.md) for what changed in each version.
 
 ## License
 

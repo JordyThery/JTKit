@@ -1,7 +1,7 @@
 import Foundation
 
 extension ABM {
-    /// Sends requests to Apple Business or School Manager on JTKit’s
+    /// Sends requests to Apple Business or Apple School Manager on JTKit’s
     /// `HTTPClient`:
     ///
     /// - Apple’s limit as the client’s rate limit: at most 18 requests in any
@@ -61,13 +61,13 @@ extension ABM {
                                          now: { start + .seconds(now().timeIntervalSince(startDate)) })
         }
 
-        /// An Apple Business or School Manager connection and its private key.
+        /// An Apple Business or Apple School Manager connection and its private key.
         ///
         /// - Throws: `ABM.APIError.Kind.invalidRequest` for another service.
         public convenience init(connection: Connection, privateKey: @escaping @Sendable () throws -> String,
                                 session: URLSession, log: ActivityLog?, hints: [String] = []) throws {
             guard let service = Service(connection.service) else {
-                throw ABM.APIError(.invalidRequest("\(connection.service.displayName) isn’t Apple Business Manager or Apple School Manager."))
+                throw ABM.APIError(.invalidRequest("\(connection.service.displayName) isn’t Apple Business or Apple School Manager."))
             }
             let recorder = ABM.recorder(service, session: session, log: log, connection: connection.name)
             let tokens = ABM.TokenProvider(service: service, clientID: connection.clientID, keyID: connection.keyID,
@@ -150,11 +150,6 @@ extension ABM {
         @discardableResult
         public func testConnection() async throws -> Int {
             try await mdmServers().count
-        }
-
-        @available(*, deprecated, renamed: "testConnection()")
-        public func verify() async throws -> Int {
-            try await testConnection()
         }
 
         /// The first `limit` devices of the organization, in Apple’s order, in

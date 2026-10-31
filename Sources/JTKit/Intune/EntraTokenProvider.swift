@@ -174,6 +174,3 @@ extension Graph {
         }
     }
 }
-
-@available(*, deprecated, renamed: "Graph.TokenProvider")
-public typealias EntraTokenProvider = Graph.TokenProvider

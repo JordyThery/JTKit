@@ -793,14 +793,11 @@ struct LiveCheckRunTests {
         #expect(decision.kind == .delete)
     }
 
-    @Test("The one-time legacy sweep is over: the shims say so, and create-and-remove tenants adopt nothing")
-    @available(*, deprecated)
+    @Test("The one-time legacy sweep is over: create-and-remove tenants adopt nothing")
     func legacySweepIsOver() throws {
         var env = try environment()
         env["JTKIT_LIVE_LEGACY_PREFIXES"] = "[AUTOTEST]|UIT - "
         let run = try makeRun(env)
-        #expect(run.legacyPrefixes.isEmpty)
-        #expect(!run.isLegacyTestObject("[AUTOTEST] macOS – Script"))
         #expect(!run.isSweepable("UIT - Security") && run.isSweepable("JTKTEST ID 0101-0000 – Script"))
         for name in ["[AUTOTEST] macOS – Script", "JTKTEST ID 0101-0000 – Group"] {
             #expect(throws: LiveCheckRun.RunError.self) {

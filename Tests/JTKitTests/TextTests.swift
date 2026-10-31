@@ -4,7 +4,7 @@ import Testing
 
 /// The same condition is said in the same sentence everywhere, and text a
 /// user sees uses the package’s terms: server URL, Private key, username,
-/// Apple Business Manager, MDM server, “Network error:”.
+/// Apple Business, MDM server, “Network error:”.
 @Suite("Text")
 struct TextTests {
     private let recorder = RequestRecorder(session: URLSession(configuration: .ephemeral), log: nil)
@@ -95,12 +95,12 @@ struct TextTests {
         #expect(ABM.rateLimit.requests == 18)
     }
 
-    @Test("Apple’s writes name Apple Business Manager in full and the MDM server")
+    @Test("Apple’s writes name Apple Business and the MDM server")
     func appleTerms() {
         let assign = ABM.ActivityType.assign.consequence(count: 2, service: .business)
-        #expect(assign.contains("not in Apple Business Manager"))
+        #expect(assign.contains("not in Apple Business"))
         let cancel = ABM.ActivityType.cancelMigration.consequence(count: 1, service: .business)
-        #expect(cancel.contains("its assigned MDM server in Apple Business Manager"))
+        #expect(cancel.contains("its assigned MDM server in Apple Business"))
         #expect(cancel.contains("is canceled"))
         #expect(ABM.ActivityType.unassign.consequence(count: 1, service: .school).contains("won’t enroll automatically"))
     }
@@ -179,9 +179,9 @@ struct TextTests {
                 == "Jamf Pro won’t restart this device. It may be unmanaged, personally owned, or running an OS version that doesn’t support the command.")
     }
 
-    @Test("Apple Business Manager in full; a refused Apple sign-in reads like the others")
+    @Test("Apple Business by its name; a refused Apple sign-in reads like the others")
     func appleTexts() {
-        #expect(ABM.Service.business.label == "Apple Business Manager")
+        #expect(ABM.Service.business.label == "Apple Business")
         let refused = ABM.APIError(.signIn(status: 401, code: nil, description: nil), service: .business)
         #expect(refused.message().hasPrefix("Sign-in failed: HTTP 401 Unauthorized\n"))
         #expect(ABM.APIError(.unreadableKey, service: .school).message().hasPrefix(

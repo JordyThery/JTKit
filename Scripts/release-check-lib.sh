@@ -28,7 +28,7 @@
 #     the item names are written, and the two must be equal.
 #   LEGACY_PREFIXES is ignored: the one-time sweep of older test prefixes is over.
 #
-# Apple Business / School Manager: every request to an organization,
+# Apple Business or Apple School Manager: every request to an organization,
 # sign-in included, is paced to 9 a minute and capped at 40 a run (all test
 # processes together, counted in the live folder’s apple-requests.jsonl); the
 # report shows the count per role.

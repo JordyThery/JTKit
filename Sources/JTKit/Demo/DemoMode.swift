@@ -142,7 +142,7 @@ public final class DemoMode {
     /// demo network’s session. Nil for any other connection, so a real one
     /// can never be sent to the demo network, nor a demo one to a tenant.
     ///
-    /// Apple Business and School Manager sign in with a private key made for
+    /// Apple Business and Apple School Manager sign in with a private key made for
     /// this launch: it lives only in memory, in this `DemoMode`, and is never
     /// written anywhere, the Keychain included.
     public func source(for connection: Connection) -> DemoSource? {

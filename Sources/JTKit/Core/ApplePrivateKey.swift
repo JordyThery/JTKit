@@ -1,7 +1,7 @@
 import Foundation
 import UniformTypeIdentifiers
 
-/// The private key of an Apple Business or School Manager API account: the
+/// The private key of an Apple Business or Apple School Manager API account: the
 /// .pem file Apple offers once, when the account is created. The editor
 /// imports it from that file and never shows its text.
 nonisolated enum ApplePrivateKey {

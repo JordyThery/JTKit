@@ -352,7 +352,7 @@ struct StoredSecretBindingTests {
 @MainActor
 @Suite("Leaving demo mode from the picker")
 struct LeavingDemoModeTests {
-    private final class Choice {
+    private final class Choice: @unchecked Sendable {
         var id: UUID?
         var binding: Binding<UUID?> { Binding(get: { self.id }, set: { self.id = $0 }) }
     }

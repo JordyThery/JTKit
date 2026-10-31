@@ -339,6 +339,3 @@ extension JamfPlatform {
         }
     }
 }
-
-@available(*, deprecated, renamed: "JamfPlatform.APIError")
-public typealias JamfPlatformError = JamfPlatform.APIError

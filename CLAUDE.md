@@ -11,7 +11,7 @@ One library product, `JTKit` (macOS 14+ only, Swift 6 language mode). Organize `
 - `AppShell/`: About window, acknowledgements, the Settings window and reusable Settings sections (updates; connections from step 4), shared design components
 - `Jamf/`: token providers (OAuth client credentials, basic auth), Jamf Pro API, Classic API, Platform API (Blueprints, device groups), Jamf School
 - `Intune/`: Entra ID / Microsoft Graph auth and Intune device endpoints
-- `ABM/`: Apple Business / School Manager API
+- `ABM/`: Apple Business or Apple School Manager API
 - `Demo/`: demo mode (switch, private network, fake servers, Contoso sample data)
 
 Test helpers (MockURLProtocol, fixtures) are in the separate library product `JTKitTestSupport`, never in `JTKit` itself. `JTKitMSAL` is Microsoft’s sign-in window (the only product that depends on MSAL). For the release checks: `JTKitUITestSupport` (UI test targets only, XCTest, doesn’t link JTKit; Swift 5 language mode), `JTKitLiveCheck` (apps’ unit test targets only, never shipped; the allow-list, rules, ledger and guarded network of the live checks) and `Scripts/release-check-lib.sh` with `release-check-setup.sh` (the release-check template each app’s `Scripts/release-check.sh` loads).
@@ -50,7 +50,7 @@ From step 11 on, each app has a release check (`Scripts/release-check.sh`, see R
 
 Live checks (decided by Jordy on 2026-10-27):
 - Only tenants on the allow-list, `~/Library/Application Support/JTKit Release Check/allowlist.json`: outside every repo, never committed, hostnames, non-secret IDs and access levels only. Deny by default. Never add a customer tenant. Never name a real tenant in a repo; tests and scripts use role names.
-- Access is enforced in code (`JTKitLiveCheck`): read-only tenants get GET only (plus sign-in and sign-out); Apple Business/School Manager is read only, assign, unassign, release and deadline changes never run; elsewhere only `JTKTEST`-prefixed objects are created, and only objects the run created are changed or deleted. Cleanup on every exit, also on failure. The production Jamf Pro is read only, and only with `--include-production`.
+- Access is enforced in code (`JTKitLiveCheck`): read-only tenants get GET only (plus sign-in and sign-out); Apple Business or Apple School Manager is read only, assign, unassign, release and deadline changes never run; elsewhere only `JTKTEST`-prefixed objects are created, and only objects the run created are changed or deleted. Cleanup on every exit, also on failure. The production Jamf Pro is read only, and only with `--include-production`.
 - Never ask for secrets in chat and never print them. Credentials come from the login Keychain: the apps’ saved connections, or `release-check-setup.sh`, which asks Jordy in Terminal with hidden input.
 - Jamf Deployer’s live check keeps OpenTofu’s state and its store in a temporary folder and never pushes in Team Mode.
 - New UI test targets are added with Xcode’s own new-target tool, never by editing `project.pbxproj`.
@@ -60,6 +60,8 @@ Live checks (decided by Jordy on 2026-10-27):
 Follow the release gate in ROADMAP.md: release check passes (including live sandbox checks), a full apple-design review of the app, an independent code review of the app, then Jordy’s check by hand. Only then tag and release. Build the release from the app’s own project, so it uses the published JTKit version.
 
 ## Releasing JTKit
+
+From 1.0, JTKit follows semantic versioning (patch: fixes, minor: additions, major: breaking changes). A tag is created only after Jordy’s approval; until then the work waits on a branch.
 
 Bump `JTKit.version`, add a CHANGELOG entry, commit, tag `x.y.z` (a breaking API change means a new major version) and push with tags. Before releasing an app, update its JTKit package version so the committed app matches what was built.
 

@@ -1,10 +1,10 @@
 import Foundation
 
 /// One shared set of sample devices for demo mode, so a device is the same in
-/// Apple Business or School Manager, Jamf Pro, Jamf School and Intune (and
+/// Apple Business or Apple School Manager, Jamf Pro, Jamf School and Intune (and
 /// Checkpoint can compare them). Every demo server reads its records from here.
 ///
-/// Contoso (Apple Business Manager) has 31 devices: Macs, iPads and one
+/// Contoso (Apple Business) has 31 devices: Macs, iPads and one
 /// iPhone sent to "Contoso Jamf Pro", the other iPhones sent to "Contoso
 /// Intune". Contoso Academy (Apple School Manager) has 10, sent to "Contoso
 /// Academy Jamf School". One more Mac is in Jamf Pro only. The gaps a real fleet has are there on
@@ -20,7 +20,7 @@ public nonisolated enum DemoWorld {
     }
 
     public enum Organization: String, Sendable, Hashable, CaseIterable {
-        /// Contoso, in Apple Business Manager.
+        /// Contoso, in Apple Business.
         case contoso
         /// Contoso Academy, in Apple School Manager.
         case academy
@@ -222,7 +222,7 @@ public nonisolated enum DemoWorld {
         for _ in 1...2 {
             add(.mac, organization: .academy, server: jamfSchoolServerID, mdm: .jamfSchool, order: "DEMO-2001")
         }
-        // A Mac bought outside Apple Business Manager, enrolled in Jamf Pro by hand.
+        // A Mac bought outside Apple Business, enrolled in Jamf Pro by hand.
         add(.mac, organization: nil, server: nil, mdm: .jamfPro, order: nil)
         // Contoso: an iPhone on Jamf Pro (42), added later so 1–41 stay as they were.
         add(.iPhone, organization: .contoso, server: jamfProServerID, mdm: .jamfPro, order: "DEMO-1004")
@@ -240,7 +240,7 @@ public nonisolated enum DemoWorld {
 }
 
 extension Connection {
-    /// Demo mode’s Apple Business Manager organization. Never saved.
+    /// Demo mode’s Apple Business organization. Never saved.
     public static let demoAppleBusiness = Connection(
         id: UUID(uuidString: DemoSamples.uuid(0xde11)) ?? UUID(),
         name: "\(DemoSamples.organization) (Demo)", service: .appleBusinessManager,
@@ -284,7 +284,7 @@ extension Connection {
         name: "\(DemoSamples.organization) Destination (Demo)", service: .jamfPro, signIn: .apiClient,
         serverURL: "https://\(DemoJamfProObjectSamples.destinationHost)", clientID: DemoSamples.uuid(0xc033))
 
-    /// Every demo connection of Apple Business and School Manager and the MDMs.
+    /// Every demo connection of Apple Business and Apple School Manager and the MDMs.
     static let demoConnections: [Connection] = [
         .demoAppleBusiness, .demoAppleSchool, .demoJamfPro, .demoJamfSchool, .demoIntune, .demoJamfPlatform,
         .demoJamfProSource, .demoJamfProDestination,

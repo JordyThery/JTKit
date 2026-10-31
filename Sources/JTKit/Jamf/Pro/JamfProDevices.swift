@@ -314,9 +314,6 @@ extension JamfPro {
         }
     }
 
-    @available(*, deprecated, renamed: "DeviceMatch")
-    public typealias Match<Record: Sendable & Hashable> = DeviceMatch<Record>
-
     /// The result of looking up many devices at once.
     public struct Batch<Record: Sendable>: Sendable {
         /// Found records, by serial number in capitals. With several records
@@ -457,7 +454,7 @@ extension JamfPlatform.Client {
     /// - Returns: nil when the first answer can’t be read.
     /// - Throws: the first read’s error, or `CancellationError`.
     private func completedGeneral(id: String) async throws -> JamfPro.MobileDevice.General? {
-        let response = try await sendThrowing(Self.singleMobileDevice(id), privilege: .readMobileDevices)
+        let response = try await send(Self.singleMobileDevice(id), privilege: .readMobileDevices)
         guard var general = try? JSONDecoder().decode(JamfPro.MobileDeviceDetail.self, from: response.data).general else { return nil }
         if general.assetTag == nil {
             general.assetTag = try await classicAssetTag(id: id)
@@ -471,7 +468,7 @@ extension JamfPlatform.Client {
     /// - Throws: `CancellationError` only.
     private func classicAssetTag(id: String) async throws -> String? {
         do {
-            let response = try await sendThrowing(Self.classicGeneral(id), privilege: .readMobileDevices)
+            let response = try await send(Self.classicGeneral(id), privilege: .readMobileDevices)
             return (try? JSONDecoder().decode(JamfPro.ClassicMobileDeviceGeneral.self, from: response.data))?.assetTag
         } catch is CancellationError {
             throw CancellationError()
@@ -550,7 +547,7 @@ extension JamfPlatform.Client {
     /// empty tag clears it. Safe to repeat. Needs “Update Computers”.
     public func setAssetTag(_ assetTag: String, computerID: String) async throws {
         let body = try JSONSerialization.data(withJSONObject: ["general": ["assetTag": assetTag]])
-        _ = try await sendThrowing(HTTPRequest(method: "PATCH", path: "pro/v4/computers-inventory-detail/\(JamfPlatform.pathSegment(computerID))",
+        _ = try await send(HTTPRequest(method: "PATCH", path: "pro/v4/computers-inventory-detail/\(JamfPlatform.pathSegment(computerID))",
                                                body: body, repeating: .safe),
                                    privilege: .updateComputers)
     }
@@ -559,7 +556,7 @@ extension JamfPlatform.Client {
     /// tag clears it. Safe to repeat. Needs “Update Mobile Devices”.
     public func setAssetTag(_ assetTag: String, mobileDeviceID: String) async throws {
         let body = try JSONSerialization.data(withJSONObject: ["assetTag": assetTag])
-        _ = try await sendThrowing(HTTPRequest(method: "PATCH", path: "pro/v2/mobile-devices/\(JamfPlatform.pathSegment(mobileDeviceID))",
+        _ = try await send(HTTPRequest(method: "PATCH", path: "pro/v2/mobile-devices/\(JamfPlatform.pathSegment(mobileDeviceID))",
                                                body: body, repeating: .safe),
                                    privilege: .updateMobileDevices)
     }
@@ -588,7 +585,7 @@ extension JamfPlatform.Client {
                 query: [URLQueryItem(name: "page", value: String(page)), URLQueryItem(name: "page-size", value: String(pageSize))] + query,
                 recordsBodies: recording == .results,
                 recordedJSON: recording == .results ? JamfPro.recordedInventory(sections: sections) : nil)
-            let response = try await self.sendThrowing(request, privilege: list.privilege)
+            let response = try await self.send(request, privilege: list.privilege)
             let body: InventoryPage<Record>
             do {
                 body = try JSONDecoder().decode(InventoryPage<Record>.self, from: response.data)

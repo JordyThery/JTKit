@@ -58,17 +58,6 @@ public nonisolated struct AboutCopyright: Sendable, Hashable {
         self.license = license
     }
 
-    @available(*, deprecated, renamed: "init(year:holder:license:)")
-    public init(year: String, holder: String, licence: String) {
-        self.init(year: year, holder: holder, license: licence)
-    }
-
-    @available(*, deprecated, renamed: "license")
-    public var licence: String {
-        get { license }
-        set { license = newValue }
-    }
-
     /// "© 2026 Jordy Thery. Released under the MIT License."
     public var text: String {
         "© \(year) \(holder). Released under the \(license)."
@@ -129,18 +118,6 @@ public nonisolated struct Acknowledgement: Sendable, Hashable, Identifiable {
         self.givenLicenseName = licenseName
     }
 
-    @available(*, deprecated, renamed: "init(name:author:summary:links:license:licenseName:)")
-    public init(
-        name: String,
-        author: String? = nil,
-        summary: String? = nil,
-        links: [AboutLink] = [],
-        licence: String?,
-        licenceName: String? = nil
-    ) {
-        self.init(name: name, author: author, summary: summary, links: links, license: licence, licenseName: licenceName)
-    }
-
     /// "App Settings Utility by Anthony Darlow".
     public var heading: String {
         author.map { "\(name) by \($0)" } ?? name
@@ -154,15 +131,6 @@ public nonisolated struct Acknowledgement: Sendable, Hashable, Identifiable {
             .map { $0.trimmingCharacters(in: .whitespaces) }
             .first { !$0.isEmpty }
     }
-
-    @available(*, deprecated, renamed: "license")
-    public var licence: String? {
-        get { license }
-        set { license = newValue }
-    }
-
-    @available(*, deprecated, renamed: "licenseName")
-    public var licenceName: String? { licenseName }
 }
 
 /// The About window. Open it only from the app menu (`AppInfoCommands`); it is

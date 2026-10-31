@@ -635,7 +635,7 @@ nonisolated final class LiveCheckURLProtocol: URLProtocol, @unchecked Sendable {
                 return
             }
             network.didAnswer(allowed, request: seen, status: response.statusCode, body: data)
-            let answer = { [self] in
+            let answer: @Sendable () -> Void = { [self] in
                 client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
                 client?.urlProtocol(self, didLoad: data)
                 client?.urlProtocolDidFinishLoading(self)

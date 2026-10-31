@@ -2,7 +2,7 @@ import CryptoKit
 import Foundation
 
 extension ABM {
-    /// Signs in to Apple Business or School Manager with the API account’s
+    /// Signs in to Apple Business or Apple School Manager with the API account’s
     /// private key (OAuth client credentials with an ES256-signed client
     /// assertion) and keeps the token.
     ///
@@ -56,7 +56,7 @@ extension ABM {
             self.now = now
         }
 
-        /// Signs in with an Apple Business or School Manager connection.
+        /// Signs in with an Apple Business or Apple School Manager connection.
         ///
         /// - Throws: `ABM.APIError.Kind.invalidRequest` for another service.
         public init(
@@ -67,7 +67,7 @@ extension ABM {
             now: @escaping @Sendable () -> Date = { Date() }
         ) throws {
             guard let service = Service(connection.service) else {
-                throw ABM.APIError(.invalidRequest("\(connection.service.displayName) isn’t Apple Business Manager or Apple School Manager."))
+                throw ABM.APIError(.invalidRequest("\(connection.service.displayName) isn’t Apple Business or Apple School Manager."))
             }
             self.init(service: service, clientID: connection.clientID, keyID: connection.keyID, privateKey: privateKey,
                       recorder: recorder, refreshMargin: refreshMargin, now: now)

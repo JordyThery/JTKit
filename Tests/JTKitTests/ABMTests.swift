@@ -4,7 +4,7 @@ import Testing
 @testable import JTKit
 import JTKitTestSupport
 
-// Apple Business and School Manager: the private-key
+// Apple Business and Apple School Manager: the private-key
 // sign-in, the client with Apple’s limit, paging, errors, records, the
 // writes with their confirmations and outcomes, and that the private key,
 // the signed sign-in request and the token never reach the activity log,
@@ -294,14 +294,12 @@ struct HTTPClientLimitTests {
 @MainActor
 struct ABMSignInTests {
 
-    @Test("Test Connection counts the MDM servers; verify() is its old name")
-    @available(*, deprecated)
+    @Test("Test Connection counts the MDM servers")
     func testConnection() async throws {
         let rig = AppleRig(Apple.server {
             $0.path == "/v1/mdmServers" ? .json(200, #"{"data":[{"id":"S1","type":"mdmServers"},{"id":"S2","type":"mdmServers"}]}"#) : nil
         }, service: .business)
         #expect(try await rig.client.testConnection() == 2)
-        #expect(try await rig.client.verify() == 2)
     }
 
     @Test("The token request: address, form fields and scope", arguments: ABM.Service.allCases)
@@ -399,7 +397,7 @@ struct ABMSignInTests {
         #expect(error?.message() == """
             Sign-in failed: HTTP 400 Bad Request
             invalid_client: Client authentication failed
-            Check the client ID and the key ID, and that the private key is the .pem file downloaded when the API account was created in Apple Business Manager. A revoked key can’t sign in; create a new one there.
+            Check the client ID and the key ID, and that the private key is the .pem file downloaded when the API account was created in Apple Business. A revoked key can’t sign in; create a new one there.
             """)
         #expect(rig.api.isEmpty)
         // only method, path, status and duration are recorded
@@ -724,7 +722,7 @@ struct ABMRetryTests {
             FORBIDDEN: Forbidden — The API account lacks access.
             Error ID: d41f0ce2
             Checkpoint's own hint.
-            The API account isn’t allowed to do this. Check its access in Apple Business Manager.
+            The API account isn’t allowed to do this. Check its access in Apple Business.
             """)
         #expect(error?.report.hasPrefix("Request: GET v1/mdmServers\n") == true)
     }
@@ -770,7 +768,7 @@ struct ABMActivityTests {
         #expect(refusal(try ABM.Activity(.assign, serials: ["A"])) == "Assign to “the Selected MDM Server” needs an MDM server.")
         #expect(refusal(try ABM.Activity(.updateMigrationDeadline, serials: ["A"])) == "Update Migration Deadline needs a migration deadline.")
         #expect(refusal(try ABM.Activity(.updateMigrationDeadline, serials: ["A"], deadline: now.addingTimeInterval(91 * 86400)))
-                == "Apple Business Manager won’t accept a migration deadline more than 90 days from now.")
+                == "Apple Business won’t accept a migration deadline more than 90 days from now.")
         #expect(throws: ABM.APIError.self) { try ABM.Activity(.release, serials: ["A B"]) }
     }
 
@@ -843,7 +841,7 @@ struct ABMActivityTests {
         #expect(ABM.ActivityOutcome.stillProcessing.isWarning)
         #expect(ABM.ActivityOutcome.completed.sentence(.business) == nil)
         #expect(ABM.ActivityOutcome.partlyFailed.sentence(.business)
-                == "Apple couldn’t process some of the devices; its activity report in Apple Business Manager lists which.")
+                == "Apple couldn’t process some of the devices; its activity report in Apple Business lists which.")
     }
 
     /// A fake Apple that accepts a write and reports `states` one per check
@@ -894,7 +892,7 @@ struct ABMActivityTests {
         let outcome = try await rig.client.perform(try ABM.Activity(.release, serials: ["A"]))
         guard case .watchFailed(let reason) = outcome else { Issue.record("not a watch failure: \(outcome)"); return }
         #expect(outcome.isWarning && !outcome.isFailure)
-        #expect(outcome.sentence(.business) == "Checking on it failed (\(reason)); check the devices in Apple Business Manager.")
+        #expect(outcome.sentence(.business) == "Checking on it failed (\(reason)); check the devices in Apple Business.")
         #expect(!(outcome.sentence(.business) ?? "").contains("Apple reports"))
         #expect(try await rig.client.watch(activityID: nil) == .notFollowed)
     }

@@ -265,8 +265,8 @@ public nonisolated enum Redaction {
             (#"((?:Bearer|Basic)\s+)[A-Za-z0-9\-._~+/]+=*"#, "$1\(placeholder)"),
             // GitHub tokens are recognizable by their prefix alone
             (#"(?<![A-Za-z0-9_])(?:gh[pousr]_|github_pat_)[A-Za-z0-9_]+"#, placeholder),
-            // A PEM private key, whole or cut short (Apple Business and School
-            // Manager’s key); JSON writes its line breaks as \n
+            // A PEM private key, whole or cut short (Apple Business and Apple
+            // School Manager’s key); JSON writes its line breaks as \n
             (#"-----BEGIN ([A-Z ]*)PRIVATE KEY-----(?:[\s\S]*?-----END \1PRIVATE KEY-----|[A-Za-z0-9+/=\s\\]*)"#, placeholder),
             // A signed token (JWT) or what is left of one: its header and
             // payload are base64url JSON, so they start with "eyJ" (matched

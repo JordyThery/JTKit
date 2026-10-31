@@ -457,7 +457,7 @@ struct PrivilegeTableTests {
         try? await client.setAssetTag("A", computerID: "7")
         try? await client.setAssetTag("A", mobileDeviceID: "12")
         for command in MDMCommand.allCases {
-            _ = try? await client.send(command, to: [mac, iPad], pin: "123456")
+            _ = try? await client.sendConfirmed(command, to: [mac, iPad], pin: "123456")
         }
         try? await client.deleteComputer(id: "7")
         for family in JamfPro.PreStageFamily.allCases {
@@ -505,7 +505,7 @@ struct PrivilegeTableTests {
     @Test("A request needing two privileges names both")
     func twoPrivileges() async throws {
         let server = MockServer { _ in .json(403, "{}") }
-        let result = try await direct(server).send(.lockMobile, to: [MDMCommand.Target(serial: "DMP", recordID: "12", kind: .mobileDevice, managementID: "M")])
+        let result = try await direct(server).sendConfirmed(.lockMobile, to: [MDMCommand.Target(serial: "DMP", recordID: "12", kind: .mobileDevice, managementID: "M")])
         #expect(result.problems?.contains("The API role is missing one of these privileges: “View MDM command information in Jamf Pro API”, “Send Mobile Device Remote Lock Command”.") == true)
     }
 }

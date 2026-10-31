@@ -46,7 +46,7 @@ public nonisolated struct AllowList: Codable, Sendable, Equatable {
         public let region: String?
         public let environmentID: String?
         public let entraTenantID: String?
-        /// Apple Business / School Manager: the API account’s client ID.
+        /// Apple Business or Apple School Manager: the API account’s client ID.
         public let clientID: String?
         public let access: Access
         public let production: Bool
@@ -171,7 +171,7 @@ extension AllowList.Entry {
             throw AllowList.LoadError.incomplete(role: role, reason: "a production tenant must be read only")
         }
         if (service == .appleBusinessManager || service == .appleSchoolManager) && access != .readOnly {
-            throw AllowList.LoadError.incomplete(role: role, reason: "Apple Business / School Manager is read only")
+            throw AllowList.LoadError.incomplete(role: role, reason: "Apple Business or Apple School Manager is read only")
         }
     }
 }

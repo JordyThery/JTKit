@@ -147,7 +147,7 @@ public nonisolated final class DemoJamfProServer: DemoServer, @unchecked Sendabl
         case ("GET", ["v1", "buildings"]):
             return page(Self.buildings.map { ["id": $0.0, "name": $0.1] }, request)
         case ("GET", ["v1", "device-enrollments"]):
-            return page([["id": "1", "name": "Contoso Apple Business Manager", "serverUuid": DemoWorld.jamfProServerID]], request)
+            return page([["id": "1", "name": "Contoso Apple Business", "serverUuid": DemoWorld.jamfProServerID]], request)
         case ("GET", ["v1", "device-enrollments", "1", "devices"]):
             let serials = DemoWorld.devices.filter { $0.appleServerID == DemoWorld.jamfProServerID }
                 .map { ["id": "\($0.number)", "serialNumber": $0.serial, "deviceEnrollmentProgramInstanceId": "1"] }

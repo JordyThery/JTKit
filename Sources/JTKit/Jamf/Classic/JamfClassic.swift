@@ -120,7 +120,7 @@ extension JamfPlatform.Client {
     /// Every computer or mobile device group, smart and static, asked for as
     /// JSON. Needs the Read Smart and Read Static … Groups privileges.
     public func classicGroups(_ kind: JamfClassic.GroupKind) async throws -> [JamfClassic.Group] {
-        let response = try await sendThrowing(HTTPRequest(path: "proclassic/\(kind.resource)", accept: "application/json"))
+        let response = try await send(HTTPRequest(path: "proclassic/\(kind.resource)", accept: "application/json"))
         guard let json = try? LosslessJSON(data: response.data), let items = JamfClassic.listItems(json) else {
             throw failure(JamfPlatform.APIError(.invalidResponse("\(kind.resource) isn’t a Classic group list.")))
         }
@@ -133,7 +133,7 @@ extension JamfPlatform.Client {
 
     /// A group’s members, in one request.
     public func classicGroupMembers(_ group: JamfClassic.Group) async throws -> [JamfClassic.Member] {
-        let response = try await sendThrowing(HTTPRequest(path: JamfClassic.path(group.kind.resource, id: group.id),
+        let response = try await send(HTTPRequest(path: JamfClassic.path(group.kind.resource, id: group.id),
                                                           accept: "application/json"),
                                               privilege: group.kind.readPrivilege(smart: group.isSmart))
         guard let json = try? LosslessJSON(data: response.data),

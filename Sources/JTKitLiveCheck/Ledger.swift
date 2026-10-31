@@ -135,12 +135,6 @@ public nonisolated final class Ledger: @unchecked Sendable {
         try update(target: target, resource: resource, id: id) { $0.removed = true }
     }
 
-    /// Marks an object removed.
-    @available(*, deprecated, message: "Only a delete’s read-back marks an object removed; let the cleanup delete it")
-    public func markRemoved(target: String, resource: String, id: String) {
-        try? recordRemoval(target: target, resource: resource, id: id)
-    }
-
     /// The server showed the object under its ledger name.
     func confirm(target: String, resource: String, id: String) throws {
         try update(target: target, resource: resource, id: id) { $0.confirmed = true }

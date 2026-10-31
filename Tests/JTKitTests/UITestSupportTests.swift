@@ -66,3 +66,31 @@ struct UITestSupportSafetyTests {
         #expect(JTKitUITestCase.typeName(.secureTextField) == "SecureTextField")
     }
 }
+
+@Suite("UI test support: the screenshot at a failure")
+struct UITestSupportFailureScreenshotTests {
+    @Test("A failing test gets one screenshot, named and kept on failure only")
+    func screenshotOnFailure() throws {
+        var captures = 0
+        let shot = try #require(JTKitUITestCase.failureScreenshot(failed: true, alreadyAttached: false) {
+            captures += 1
+            return XCTAttachment(string: "window")
+        })
+        #expect(captures == 1)
+        #expect(shot.name == "Window at failure")
+        #expect(shot.name == JTKitUITestCase.failureScreenshotName)
+        #expect(shot.lifetime == .deleteOnSuccess)
+    }
+
+    @Test("No screenshot, and nothing captured, for a passing test or a second failure")
+    func noScreenshotOtherwise() {
+        var captures = 0
+        let capture = { () -> XCTAttachment in
+            captures += 1
+            return XCTAttachment(string: "window")
+        }
+        #expect(JTKitUITestCase.failureScreenshot(failed: false, alreadyAttached: false, capture: capture) == nil)
+        #expect(JTKitUITestCase.failureScreenshot(failed: true, alreadyAttached: true, capture: capture) == nil)
+        #expect(captures == 0)
+    }
+}

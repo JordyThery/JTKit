@@ -1,7 +1,7 @@
 import CryptoKit
 import Foundation
 
-/// Apple’s sign-in for Apple Business and School Manager
+/// Apple’s sign-in for Apple Business and Apple School Manager
 /// (`account.apple.com`): it checks the signed client assertion against the
 /// public key registered for the client ID, as Apple does, so JTKit’s real
 /// sign-in code runs. Tokens carry their scope; the API servers accept only
@@ -62,7 +62,7 @@ public nonisolated final class DemoAppleSignInServer: DemoServer, @unchecked Sen
     }
 }
 
-/// One Apple Business Manager or Apple School Manager organization of
+/// One Apple Business or Apple School Manager organization of
 /// `DemoWorld` (Contoso or Contoso Academy) on Apple’s own address: devices,
 /// the organization read, MDM servers and their devices, AppleCare,
 /// Activation Lock, the assigned server, built-in management (none here),

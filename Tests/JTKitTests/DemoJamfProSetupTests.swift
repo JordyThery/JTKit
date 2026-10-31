@@ -120,11 +120,11 @@ struct DemoJamfProSetupTests {
         #expect(String(decoding: key.data, as: UTF8.self).hasPrefix("-----BEGIN CERTIFICATE-----"))
         let before = try results(try await send(fresh, "GET", "pro/v1/device-enrollments")).count
         let upload = try await send(fresh, "POST", "pro/v1/device-enrollments/upload-token",
-                                    json: ["tokenFileName": "Contoso Lab ABM.p7m", "encodedToken": "ZGVtbw=="])
+                                    json: ["tokenFileName": "Contoso Lab Apple Business.p7m", "encodedToken": "ZGVtbw=="])
         #expect(upload.status == 201)
         let instances = try results(try await send(fresh, "GET", "pro/v1/device-enrollments"))
         #expect(instances.count == before + 1)
-        #expect(instances.contains { $0["name"] as? String == "Contoso Lab ABM" })
+        #expect(instances.contains { $0["name"] as? String == "Contoso Lab Apple Business" })
         #expect(!String(decoding: try await send(fresh, "GET", "pro/v1/device-enrollments").data, as: UTF8.self)
             .contains("ZGVtbw=="))
     }
