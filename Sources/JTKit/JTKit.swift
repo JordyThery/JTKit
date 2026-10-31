@@ -5,7 +5,7 @@ import Foundation
 /// See ROADMAP.md for the plan.
 public enum JTKit {
     /// Version of this package. Keep in sync with the git tag.
-    public static let version = "0.13.2"
+    public static let version = "0.13.3"
 
     /// "AppName/version", sent as the User-Agent of every request JTKit makes
     /// unless the request sets its own. The name is the app’s bundle name

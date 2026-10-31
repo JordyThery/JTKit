@@ -169,20 +169,58 @@ struct DemoJamfProServerTests {
         #expect(byUDID.hardware?.serialNumber == iPhone.serial && byUDID.general?.assetTag == iPhone.assetTag)
     }
 
-    @Test("One mobile device by ID (v2/mobile-devices/{id}): its general values, no unlock token")
+    @Test("One mobile device by ID (v2/mobile-devices/{id}): its general values, no unlock token, no asset tag (as a real Jamf Pro)")
     func singleMobileDevice() async throws {
         let iPhone = try #require(DemoWorld.devices.last)
         let client = try jamfPro(demoMode())
         let response = try await client.sendThrowing(HTTPRequest(path: "pro/v2/mobile-devices/\(iPhone.number)"))
         let detail = try JSONDecoder().decode(JamfPro.MobileDeviceDetail.self, from: response.data)
         #expect(detail.general.displayName == iPhone.name && detail.general.udid == iPhone.udid)
-        #expect(detail.general.assetTag == iPhone.assetTag && detail.general.siteID == "2")
+        #expect(detail.general.assetTag == nil && detail.general.siteID == "2")
         #expect(detail.general.supervised == true && detail.general.managementID == iPhone.managementID)
-        #expect(!String(decoding: response.data, as: UTF8.self).contains("unlockToken"))
+        let text = String(decoding: response.data, as: UTF8.self)
+        #expect(!text.contains("unlockToken") && !text.contains("assetTag"))
 
         let mac = try #require(DemoWorld.devices(managedBy: .jamfPro).first { $0.isComputer })
         await #expect(throws: JamfPlatform.APIError.self) {
             _ = try await client.sendThrowing(HTTPRequest(path: "pro/v2/mobile-devices/\(mac.number)"))
+        }
+    }
+
+    @Test("A mobile device’s Classic General subset: Classic names with the asset tag; 404 for a computer or unknown ID, 403 without permission")
+    func classicGeneralSubset() async throws {
+        let iPhone = try #require(DemoWorld.devices.last)
+        let client = try jamfPro(demoMode())
+        func general(_ id: Int, _ client: JamfPlatform.Client) async throws -> HTTPResponse {
+            try await client.sendThrowing(HTTPRequest(path: "proclassic/mobiledevices/id/\(id)/subset/General", accept: "application/json"))
+        }
+        let response = try await general(iPhone.number, client)
+        #expect(try JSONDecoder().decode(JamfPro.ClassicMobileDeviceGeneral.self, from: response.data).assetTag == iPhone.assetTag)
+        let object = try #require(DemoJSON.object(response.data)?["mobile_device"] as? [String: Any])
+        let fields = try #require(object["general"] as? [String: Any])
+        #expect(fields["name"] as? String == iPhone.name && fields["serial_number"] as? String == iPhone.serial)
+        #expect(fields["udid"] as? String == iPhone.udid && object.keys.sorted() == ["general"])
+
+        let mac = try #require(DemoWorld.devices(managedBy: .jamfPro).first { $0.isComputer })
+        for id in [mac.number, 999] {
+            let error = await #expect(throws: JamfPlatform.APIError.self) { _ = try await general(id, client) }
+            #expect(error?.status == 404)
+        }
+        let refused = try jamfPro(demoMode(scenario: "missingPermission"))
+        let error = await #expect(throws: JamfPlatform.APIError.self) { _ = try await general(iPhone.number, refused) }
+        #expect(error?.status == 403)
+    }
+
+    /// Every Jamf Pro mobile device the demo lists still shows its asset tag
+    /// in a lookup, one at a time and many at once.
+    @Test("Demo lookups of Jamf Pro mobile devices show their asset tags")
+    func demoMobileAssetTags() async throws {
+        let mobiles = DemoWorld.devices(managedBy: .jamfPro).filter { !$0.isComputer }
+        let client = try jamfPro(demoMode())
+        let batch = try await client.mobileDevices(serials: mobiles.map(\.serial))
+        for device in mobiles {
+            #expect(batch.records[device.serial]?.general?.assetTag == device.assetTag)
+            #expect(try await client.mobileDevice(serial: device.serial).record?.general?.assetTag == device.assetTag)
         }
     }
 

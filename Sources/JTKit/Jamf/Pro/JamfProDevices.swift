@@ -279,8 +279,9 @@ extension JamfPro {
 
 extension JamfPro {
     /// `v2/mobile-devices/{id}`: one record, its general values at the top
-    /// level (`name`, `udid`, …; `assetTag`, `ios.supervised` and `site.id`
-    /// when the answer has them).
+    /// level (`name`, `udid`, …; `ios.supervised` and `site.id` when the
+    /// answer has them). A real Jamf Pro leaves out `assetTag` here; it’s
+    /// read when present.
     struct MobileDeviceDetail: Decodable {
         var general: MobileDevice.General
 
@@ -297,6 +298,19 @@ extension JamfPro {
                 mdmProfileExpirationDate: c.date("mdmProfileExpirationTimestamp"),
                 siteID: JamfPro.reference(site?.text("id")),
                 enrollmentPreStageID: nil, enrollmentPreStageName: nil)
+        }
+    }
+
+    /// `mobiledevices/id/{id}/subset/General` from the Classic API, as JSON:
+    /// only `mobile_device.general.asset_tag` is read (empty is none).
+    struct ClassicMobileDeviceGeneral: Decodable {
+        var assetTag: String?
+
+        init(from decoder: any Decoder) throws {
+            let c = try decoder.container(keyedBy: AnyKey.self)
+            let device = try? c.nestedContainer(keyedBy: AnyKey.self, forKey: "mobile_device")
+            let general = try? device?.nestedContainer(keyedBy: AnyKey.self, forKey: "general")
+            assetTag = general?.text("asset_tag")
         }
     }
 
@@ -421,23 +435,60 @@ extension JamfPlatform.Client {
     }
 
     /// A record that never enrolled has device type "Unknown", and Jamf’s
-    /// device list leaves out its whole general section (name, asset tag, …);
-    /// the single record still has them (seen on Jamf Pro 11.33). So a lookup
-    /// that found one such record reads it once more by ID. It reads
-    /// `v2/mobile-devices/{id}`, never `…/detail`: that one carries the
-    /// device’s unlock token, and a lookup never reads it.
+    /// device list leaves out its whole general section (name, asset tag, …).
+    /// So a lookup that found one such record reads it once more by ID, with
+    /// `completedGeneral(id:)`.
     private func completingGeneral(_ match: DeviceMatch<JamfPro.MobileDevice>,
                                    sections: [JamfPro.InventorySection]) async throws -> DeviceMatch<JamfPro.MobileDevice> {
         guard sections.contains(.general), case .one(var record) = match, record.general == nil, let id = record.id else { return match }
-        let response = try await sendThrowing(Self.singleMobileDevice(id), privilege: .readMobileDevices)
-        guard let detail = try? JSONDecoder().decode(JamfPro.MobileDeviceDetail.self, from: response.data) else { return match }
-        record.general = detail.general
+        guard let general = try await completedGeneral(id: id) else { return match }
+        record.general = general
         return .one(record)
+    }
+
+    /// The general values of one mobile device by ID. It reads
+    /// `v2/mobile-devices/{id}`, never `…/detail`: that one carries the
+    /// device’s unlock token, and a lookup never reads it. That answer has the
+    /// name but no asset tag on a real Jamf Pro, so the asset tag comes from
+    /// the Classic API’s General subset (never the whole record or its
+    /// Security subset). When that read fails, the general values come back
+    /// without an asset tag. Both reads need “Read Mobile Devices”.
+    ///
+    /// - Returns: nil when the first answer can’t be read.
+    /// - Throws: the first read’s error, or `CancellationError`.
+    private func completedGeneral(id: String) async throws -> JamfPro.MobileDevice.General? {
+        let response = try await sendThrowing(Self.singleMobileDevice(id), privilege: .readMobileDevices)
+        guard var general = try? JSONDecoder().decode(JamfPro.MobileDeviceDetail.self, from: response.data).general else { return nil }
+        if general.assetTag == nil {
+            general.assetTag = try await classicAssetTag(id: id)
+        }
+        return general
+    }
+
+    /// The asset tag from `proclassic/mobiledevices/id/{id}/subset/General`;
+    /// nil when there’s none or the read fails.
+    ///
+    /// - Throws: `CancellationError` only.
+    private func classicAssetTag(id: String) async throws -> String? {
+        do {
+            let response = try await sendThrowing(Self.classicGeneral(id), privilege: .readMobileDevices)
+            return (try? JSONDecoder().decode(JamfPro.ClassicMobileDeviceGeneral.self, from: response.data))?.assetTag
+        } catch is CancellationError {
+            throw CancellationError()
+        } catch {
+            try Task.checkCancellation()
+            return nil
+        }
     }
 
     /// One mobile device by ID, without the unlock token.
     private static func singleMobileDevice(_ id: String) -> HTTPRequest {
         HTTPRequest(path: "pro/v2/mobile-devices/\(JamfPlatform.pathSegment(id))")
+    }
+
+    /// One mobile device’s Classic General subset, as JSON.
+    private static func classicGeneral(_ id: String) -> HTTPRequest {
+        HTTPRequest(path: "proclassic/mobiledevices/id/\(JamfPlatform.pathSegment(id))/subset/General", accept: "application/json")
     }
 
     /// Computers by serial number, many at once: 50 serials per request,
@@ -455,7 +506,7 @@ extension JamfPlatform.Client {
 
     /// Mobile devices by serial number, many at once, as `computers(serials:)`.
     /// A record that never enrolled is read once more by ID for its general
-    /// section, as in `mobileDevice(serial:)`.
+    /// section (and its asset tag), as in `mobileDevice(serial:)`.
     public func mobileDevices(serials: [String], sections: [JamfPro.InventorySection] = JamfPro.mobileDeviceSections,
                               recording: JamfPro.Recording = .errorsOnly) async throws -> JamfPro.Batch<JamfPro.MobileDevice> {
         var batch: JamfPro.Batch<JamfPro.MobileDevice> = try await self.batch(.mobileDevices, serials: serials, sections: sections,
@@ -463,8 +514,9 @@ extension JamfPlatform.Client {
         guard sections.contains(.general) else { return batch }
         let incomplete = batch.records.filter { $0.value.general == nil && $0.value.id != nil }
         guard !incomplete.isEmpty else { return batch }
-        // A few at a time, like the list reads. One that can’t be read
-        // leaves the record as the list gave it: found, without a name.
+        // A few at a time, like the list reads (each one’s two reads in
+        // turn). One that can’t be read leaves the record as the list gave
+        // it: found, without a name.
         let keys = Array(incomplete.keys)
         try await withThrowingTaskGroup(of: (String, JamfPro.MobileDevice.General?).self) { group in
             var next = 0
@@ -475,8 +527,7 @@ extension JamfPlatform.Client {
                 let id = incomplete[key]?.id ?? ""
                 group.addTask {
                     do {
-                        let response = try await self.sendThrowing(Self.singleMobileDevice(id), privilege: .readMobileDevices)
-                        return (key, try? JSONDecoder().decode(JamfPro.MobileDeviceDetail.self, from: response.data).general)
+                        return (key, try await self.completedGeneral(id: id))
                     } catch is CancellationError {
                         throw CancellationError()
                     } catch {
