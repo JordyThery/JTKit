@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.13.1 (2026-10-31)
+Fixes in the release check, found while moving Jamf Deployer to 0.13.0. Nothing an app ships changes, and no app has to change.
+- `JTKitLiveCheck`: the read-back before a test changes or deletes an
+  object copied the write’s `Content-Length` header into its GET, and Jamf
+  Pro refuses such a GET with HTTP 400, so the write was refused. Every
+  read-back now carries the sign-in but nothing of the write’s body (no
+  body, `Content-Type`, `Content-Length` or `Transfer-Encoding`).
+- `Scripts/release-check-lib.sh`: an app that leaves `FINGERPRINT_DEFAULTS`
+  (or `FINGERPRINT_PATHS`, `KEYCHAIN_PREFIXES`) unset got one empty entry,
+  and the fingerprint read an empty setting name, whose answer can change
+  during a run (“saved connections changed”). Empty entries are skipped.
+- The report names JTKit by its own `JTKit.version` and commit, e.g.
+  “0.13.1 (abc1234)”, instead of the nearest git tag, which a package
+  checkout may not have (0.13.0 showed as “0.12.6-4-g5be67d9”).
+
 ## 0.13.0 (2026-10-30)
 The step 12 review: safer live checks and release check, security and correctness fixes, a tidier public API, and consistent text. Apps don’t have to change to build: every renamed or replaced call still works, marked deprecated, and the next round of app updates clears those warnings.
 - Release check and live checks:

@@ -394,6 +394,40 @@ struct ReleaseCheckScriptTests {
         #expect(readAgain > stage4 && readAgain < liveStarted)
     }
 
+    // MARK: The fingerprint and the version label
+
+    @Test("Lists an app leaves unset fingerprint nothing: no empty setting, path or Keychain prefix")
+    func unsetListsAddNothing() throws {
+        let home = try Self.makeHome()
+        defer { try? FileManager.default.removeItem(at: home) }
+        let out = home.appending(path: "fp")
+        let result = try Self.zsh("""
+            unset FINGERPRINT_DEFAULTS KEYCHAIN_PREFIXES
+            FINGERPRINT_PATHS=("\(home.appending(path: "missing").path)")
+            rc_check_failed() { print -r -- "CHECK FAILED: $*" }
+            rc_fingerprint "\(out.path)" && cat "\(out.path).names"
+            """, home: home)
+        #expect(result.status == 0)
+        #expect(!result.output.contains("CHECK FAILED"))
+        #expect(result.output.split(separator: "\n").map(String.init) == ["absent \(home.appending(path: "missing").path)"],
+                "only the one path; no “defaults” line for an empty pair")
+    }
+
+    @Test("The report names JTKit by its own version and commit, not by the nearest git tag")
+    func versionLabel() throws {
+        let home = try Self.makeHome()
+        defer { try? FileManager.default.removeItem(at: home) }
+        let source = try String(contentsOf: Self.template.deletingLastPathComponent().deletingLastPathComponent()
+            .appending(path: "Sources/JTKit/JTKit.swift"), encoding: .utf8)
+        let version = try #require(source.firstMatch(of: /public static let version = "([^"]+)"/)?.1)
+        let result = try Self.zsh("""
+            RC_LIB_DIR="\(Self.template.deletingLastPathComponent().path)"
+            rc_jtkit_version
+            """, home: home)
+        let label = result.output.split(separator: "\n").last.map(String.init) ?? ""
+        #expect(label.wholeMatch(of: /(.+) \([0-9a-f]{7,}\)/)?.1 == Substring(version), "\(label)")
+    }
+
     // MARK: L10 and the legacy sweep
 
     @Test("No setting moves the allow-list, and the one-time legacy sweep is gone")

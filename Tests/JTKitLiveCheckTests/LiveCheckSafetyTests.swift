@@ -190,6 +190,35 @@ struct ReadBackBeforeWriteTests {
         #expect(run.ledger.items.first?.confirmed == true)
     }
 
+    @Test("The read-back of a write announces no body: Jamf Pro answers 400 to a GET with Content-Length")
+    func readBackHasNoBodyHeaders() async throws {
+        let name = "\(prefix) – Category"
+        let server = MockServer { request in
+            switch request.method {
+            case "GET" where request.headers.keys.contains { ["content-length", "content-type", "transfer-encoding"].contains($0.lowercased()) }:
+                .json(400, #"{"httpStatus":400,"errors":[{"code":"INVALID_REQUEST"}]}"#)
+            case "GET": .json(200, #"{"id":"241","name":"\#(name)"}"#)
+            default: .json(200, "{}")
+            }
+        }
+        let run = try makeTestRun(upstream: server.session)
+        try run.recordCreated(role: "jamf-test-a", service: .jamfPro, resource: "categories", id: "241", name: name)
+        try await send("PUT", "\(jamf)/api/v1/categories/241", on: run,
+                       headers: ["Content-Type": "application/json", "Content-Length": "25"], body: #"{"name":"\#(name)","x":1}"#)
+        #expect(server.requests.map { "\($0.method) \($0.path)" } == ["GET /api/v1/categories/241", "PUT /api/v1/categories/241"])
+        #expect(run.network.refusals.isEmpty)
+
+        var write = URLRequest(url: URL(string: "\(jamf)/api/v1/categories/241")!)
+        write.httpMethod = "PUT"
+        write.httpBody = Data("{}".utf8)
+        for (header, value) in ["Content-Type": "application/json", "Content-Length": "2", "Transfer-Encoding": "chunked", "Authorization": "Bearer t"] {
+            write.setValue(value, forHTTPHeaderField: header)
+        }
+        let read = LiveCheckNetwork.readBack(of: write)
+        #expect(read.httpMethod == "GET" && read.httpBody == nil && read.httpBodyStream == nil)
+        #expect(read.allHTTPHeaderFields == ["Authorization": "Bearer t"], "the sign-in stays; nothing of the body")
+    }
+
     @Test("Classic XML and Classic JSON names are read, inside their wrapping key")
     func classicNames() {
         #expect(LiveCheckNetwork.serverName(in: Data(#"{"computer":{"general":{"id":5,"name":"JTKTEST A"}}}"#.utf8)) == "JTKTEST A")
