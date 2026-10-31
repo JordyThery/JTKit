@@ -414,18 +414,33 @@ except FileNotFoundError: print(0)' "$RC_LIVE_DIR/ledger.json") || { rc_check_fa
 
 # Every release check sweeps its tenants for JTKTEST objects and adopts an
 # earlier run’s live folder, so two at once (of any apps) could remove each
-# other’s objects. The lock is a kernel lock on a file beside the allow-list,
-# held by this shell: taking it is one step, and it ends with the shell (also
-# after a crash or kill -9), so there’s never a stale lock to remove. The
-# holder’s process ID and app are in the .owner file beside it, for the
-# message only: this shell never opens the lock file again, as closing any
-# descriptor of it would end the lock.
+# other’s objects. The lock is a kernel lock (lockf) on a file beside the
+# allow-list: taking it is one step, so two checks can’t both get it, and it
+# ends with its holder, so there’s never a stale lock to remove.
+#
+# The holder is a small helper process, not this shell: while a zsh script
+# holds a `zsystem flock` lock, its EXIT trap reads every `$(…)` as having
+# succeeded, so the cleanup and the report (which run there) would miss a
+# failure. The helper ends within a second once this shell is gone (also
+# after a crash or kill -9) or its .held file is removed (rc_unlock);
+# taking the lock waits that long. The holder’s
+# process ID and app are in the .owner file beside it, for the message only.
 RC_LOCK="$RC_BASE/state/release-check.lock"
 rc_lock() {
     mkdir -p "$RC_BASE/state" && chmod 700 "$RC_BASE/state" || rc_fail "Can’t make $RC_BASE/state"
-    zmodload zsh/system || rc_fail "Can’t load zsh/system for the release-check lock"
     [[ -e "$RC_LOCK" ]] || : >> "$RC_LOCK" || rc_fail "Can’t make the release-check lock at $RC_LOCK"
-    if ! zsystem flock -t 0 -f RC_LOCK_FD "$RC_LOCK" 2>/dev/null; then
+    local held="$RC_LOCK.held.$$" waited=0
+    rm -f "$held"
+    /usr/bin/lockf -s -t 2 "$RC_LOCK" /bin/sh -c \
+        ': > "$2" || exit 1; while kill -0 "$1" 2>/dev/null && [ -e "$2" ]; do sleep 1; done; rm -f "$2"' \
+        rc-lock $$ "$held" 2>/dev/null &!
+    RC_LOCK_PID=$!
+    # Taken once the helper says so; refused once it ends without saying so.
+    while [[ ! -e "$held" ]] && kill -0 "$RC_LOCK_PID" 2>/dev/null && (( waited < 100 )); do
+        sleep 0.05; (( waited++ ))
+    done
+    if [[ ! -e "$held" ]]; then
+        kill "$RC_LOCK_PID" 2>/dev/null
         local holder="$(cat "$RC_LOCK.owner" 2>/dev/null)"
         rc_fail "Another release check is running on this Mac (${holder#* }, process ${holder%% *}); one at a time"
     fi
@@ -436,7 +451,8 @@ rc_lock() {
 rc_unlock() {
     (( ${RC_LOCKED:-0} )) || return 0
     [[ "$(cat "$RC_LOCK.owner" 2>/dev/null)" == "$$ $APP_NAME" ]] && rm -f "$RC_LOCK.owner"
-    zsystem flock -u "$RC_LOCK_FD"
+    kill "$RC_LOCK_PID" 2>/dev/null
+    rm -f "$RC_LOCK.held.$$"
     RC_LOCKED=0
 }
 

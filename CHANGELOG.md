@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.13.2 (2026-10-31)
+A release-check fix, found while moving JamfMigrator to 0.13.1. Nothing an app ships changes, and no app has to change.
+- `Scripts/release-check-lib.sh`: since 0.13.0 the “one release check per
+  Mac” lock was a `zsystem flock` held by the script’s own shell. While a
+  zsh script holds such a lock, its EXIT trap reads every `$(…)` as having
+  succeeded, and the cleanup, the “after” fingerprint and the report run
+  there. So a setting that isn’t there read as “there, empty” (JamfMigrator:
+  “saved connections changed”), and a failed cleanup test could have read
+  as passed. The lock is now held by a small helper process (`lockf`), which
+  ends within a second of the check (also after kill -9). Release checks
+  run on 0.13.0 and 0.13.1 should be run again.
+
 ## 0.13.1 (2026-10-31)
 Fixes in the release check, found while moving Jamf Deployer to 0.13.0. Nothing an app ships changes, and no app has to change.
 - `JTKitLiveCheck`: the read-back before a test changes or deletes an
