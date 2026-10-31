@@ -10,12 +10,12 @@ struct EntraTokenProviderTests {
     private static let client = "e445f0a6-0000-0000-0000-000000000000"
 
     private func provider(_ server: MockServer, log: ActivityLog? = nil, clock: TestClock = TestClock(),
-                          secret: @escaping @Sendable () throws -> String = { "s3cr+t=&" }) throws -> EntraTokenProvider {
-        try EntraTokenProvider(tenantID: Self.tenant, clientID: Self.client, secret: secret,
+                          secret: @escaping @Sendable () throws -> String = { "s3cr+t=&" }) throws -> Graph.TokenProvider {
+        try Graph.TokenProvider(tenantID: Self.tenant, clientID: Self.client, secret: secret,
                                recorder: RequestRecorder(session: server.session, log: log), now: { clock.now })
     }
 
-    @Test("Signs in to the tenant's token address with the client credentials and the Graph scope")
+    @Test("Signs in to the tenant’s token address with the client credentials and the Graph scope")
     func request() async throws {
         let server = MockServer { _ in .json(200, tokenJSON("t1", expiresIn: 3599)) }
         #expect(try await provider(server).token() == "t1")
@@ -80,7 +80,7 @@ struct EntraTokenProviderTests {
         #expect(server.requests.last?.bodyString.contains("secret-2") == true)
     }
 
-    @Test("A refused sign-in is a GraphError with Microsoft's code, Trace ID and hint")
+    @Test("A refused sign-in is a Graph.APIError with Microsoft’s code, Trace ID and hint")
     func refused() async throws {
         let server = MockServer { _ in
             .json(401, #"{"error":"invalid_client","error_description":"AADSTS7000222: The provided client secret keys are expired.\r\nTrace ID: t-9","error_codes":[7000222],"trace_id":"t-9"}"#)
@@ -88,7 +88,7 @@ struct EntraTokenProviderTests {
         do {
             _ = try await provider(server).token()
             Issue.record("Expected a failure")
-        } catch let error as GraphError {
+        } catch let error as Graph.APIError {
             #expect(error.status == 401)
             #expect(error.access == .application)
             let message = error.message()
@@ -104,30 +104,47 @@ struct EntraTokenProviderTests {
         let server = MockServer { request in
             request.url.host() == "evil.example.com" ? .json(200, tokenJSON("stolen")) : .redirect(307, to: elsewhere)
         }
-        await #expect(throws: GraphError.self) { _ = try await provider(server).token() }
+        await #expect(throws: Graph.APIError.self) { _ = try await provider(server).token() }
         #expect(!server.requests.contains { $0.url.host() == "evil.example.com" })
     }
 
     @Test("An unusable tenant or client ID is refused before anything is sent")
     func invalidIDs() throws {
-        let recorder = RequestRecorder(log: nil)
-        #expect(throws: GraphError.self) { try EntraTokenProvider(tenantID: "", clientID: Self.client, secret: { "" }, recorder: recorder) }
-        #expect(throws: GraphError.self) { try EntraTokenProvider(tenantID: "a/b", clientID: Self.client, secret: { "" }, recorder: recorder) }
-        #expect(throws: GraphError.self) { try EntraTokenProvider(tenantID: Self.tenant, clientID: "app", secret: { "" }, recorder: recorder) }
-        let domain = try EntraTokenProvider(tenantID: " contoso.com ", clientID: Self.client, secret: { "" }, recorder: recorder)
+        let recorder = RequestRecorder(session: URLSession(configuration: .ephemeral), log: nil)
+        #expect(throws: Graph.APIError.self) { try Graph.TokenProvider(tenantID: "", clientID: Self.client, secret: { "" }, recorder: recorder) }
+        #expect(throws: Graph.APIError.self) { try Graph.TokenProvider(tenantID: "a/b", clientID: Self.client, secret: { "" }, recorder: recorder) }
+        #expect(throws: Graph.APIError.self) { try Graph.TokenProvider(tenantID: Self.tenant, clientID: "app", secret: { "" }, recorder: recorder) }
+        let domain = try Graph.TokenProvider(tenantID: " contoso.com ", clientID: Self.client, secret: { "" }, recorder: recorder)
         #expect(domain.tokenURL.absoluteString == "https://login.microsoftonline.com/contoso.com/oauth2/v2.0/token")
+    }
+
+    @Test("The tenant is a UUID or a domain name, nothing that can change the sign-in address",
+          arguments: ["..", "a..b", "contoso.com/..", ".contoso.com", "contoso.com.", "-a.com", "a-.com", "contoso",
+                      "a%2F.com", "con toso.com", "contoso.com?x=1", "contoso.com#x", "kontöso.com"])
+    func tenantShape(tenant: String) {
+        #expect(!Graph.TokenProvider.isTenant(tenant))
+        #expect(throws: Graph.APIError.self) {
+            try Graph.TokenProvider(tenantID: tenant, clientID: Self.client, secret: { "" }, recorder: RequestRecorder(session: URLSession(configuration: .ephemeral), log: nil))
+        }
+    }
+
+    @Test("Tenant IDs and domains that are fine")
+    func tenantShapeAllowed() {
+        for tenant in [Self.tenant, "C0FFEE00-0000-0000-0000-000000000000", "contoso.com", "contoso.onmicrosoft.com", "lab-9.example.co.uk"] {
+            #expect(Graph.TokenProvider.isTenant(tenant), "\(tenant)")
+        }
     }
 
     @Test("Made from an Intune connection with an app registration only")
     func fromConnection() throws {
-        let recorder = RequestRecorder(log: nil)
+        let recorder = RequestRecorder(session: URLSession(configuration: .ephemeral), log: nil)
         let app = Connection(name: "Contoso", service: .intune, signIn: .entraClientSecret, clientID: Self.client, tenantID: Self.tenant)
-        #expect(try EntraTokenProvider(connection: app, secret: { "" }, recorder: recorder).clientID == Self.client)
+        #expect(try Graph.TokenProvider(connection: app, secret: { "" }, recorder: recorder).clientID == Self.client)
         var interactive = app
         interactive.signIn = .microsoftInteractive
-        #expect(throws: GraphError.self) { try EntraTokenProvider(connection: interactive, secret: { "" }, recorder: recorder) }
+        #expect(throws: Graph.APIError.self) { try Graph.TokenProvider(connection: interactive, secret: { "" }, recorder: recorder) }
         let jamf = Connection(name: "Jamf", service: .jamfPro, serverURL: "https://x.jamfcloud.com")
-        #expect(throws: GraphError.self) { try EntraTokenProvider(connection: jamf, secret: { "" }, recorder: recorder) }
+        #expect(throws: Graph.APIError.self) { try Graph.TokenProvider(connection: jamf, secret: { "" }, recorder: recorder) }
     }
 
     @Test("A Graph client from a connection signs in, then sends with the token")

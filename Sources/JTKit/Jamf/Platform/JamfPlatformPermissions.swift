@@ -33,7 +33,7 @@ extension JamfPlatform {
         public static let blueprintsRead = PermissionCheck(
             "Read Blueprints", path: "/blueprints/v1/blueprints", permission: "blueprints:read")
         public static let deviceGroupsRead = PermissionCheck(
-            "Read device groups", path: "/device-groups/v1/device-groups", permission: "device-groups:read")
+            "Read Device Groups", path: "/device-groups/v1/device-groups", permission: "device-groups:read")
 
         /// What to do when the permission is missing.
         public var hint: String {
@@ -46,7 +46,7 @@ extension JamfPlatform {
         }
 
         /// What to do when the permission is missing on `server`: in Jamf
-        /// Account, or in Jamf Pro's API roles (naming the privilege when
+        /// Account, or in Jamf Pro’s API roles (naming the privilege when
         /// the check knows it).
         public func hint(on server: JamfPlatform.Server) -> String {
             guard server == .jamfPro else { return hint }
@@ -97,18 +97,17 @@ extension JamfPlatform {
         case allowed
         /// HTTP 403: the integration lacks the permission.
         case missingPermission
-        /// HTTP 404: the list isn't there (wrong path, or not in this environment).
+        /// HTTP 404: the list isn’t there (wrong path, or not in this environment).
         case notFound
         /// Another status, also a refused sign-in.
         case failed(status: Int)
-        /// No answer, or the request wasn't sent.
+        /// No answer, or the request wasn’t sent.
         case unreachable(String)
     }
 
-    /// Signing in worked, but a read permission is missing or couldn't be
+    /// Signing in worked, but a read permission is missing or couldn’t be
     /// checked: what Test Connection shows. Each check gets one line: what to
-    /// add, or why it couldn't be checked. Moved from AppSettings2Blueprint's
-    /// `ConnectionTestProblem`.
+    /// add, or why it couldn’t be checked.
     public struct PermissionProblem: LocalizedError, Sendable {
         public let missing: [PermissionCheck]
         public let unchecked: [(check: PermissionCheck, reason: String)]
@@ -171,9 +170,9 @@ extension JamfPlatform.Client {
 
     private func result(of check: JamfPlatform.PermissionCheck) async -> JamfPlatform.PermissionResult {
         do {
-            let response = try await send(HTTPRequest(path: check.path, query: check.query))
+            let response = try await sendThrowing(HTTPRequest(path: check.path, query: check.query))
             return Self.result(status: response.status)
-        } catch let error as JamfPlatformError {
+        } catch let error as JamfPlatform.APIError {
             guard let status = error.status else { return .unreachable(error.message()) }
             if case .signIn = error.kind { return .failed(status: status) }
             return Self.result(status: status)

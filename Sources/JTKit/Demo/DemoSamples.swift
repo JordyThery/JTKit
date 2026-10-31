@@ -1,13 +1,13 @@
 import Foundation
 
-/// Demo mode's sample data: believable, and clearly fake. The organisation is
+/// Demo mode’s sample data: believable, and clearly fake. The organization is
 /// "Contoso" ("Contoso Academy" for schools), hosts end in `.demo.invalid`,
 /// e-mail and web addresses in `.contoso.example`, serials start with
 /// `ZZDEMO`, people have the surname "Sample", and every ID is a UUID in the
 /// reserved fake range (`00000000-0000-4000-8000-…`). A test checks all of it.
 public nonisolated enum DemoSamples {
     public static let organization = "Contoso"
-    public static let schoolOrganization = "Contoso Academy"
+    static let schoolOrganization = "Contoso Academy"
 
     /// The reserved fake UUID range: no real (random) UUID starts like this.
     public static let uuidPrefix = "00000000-0000-4000-8000-"
@@ -20,6 +20,16 @@ public nonisolated enum DemoSamples {
     /// Whether `id` is in the reserved fake range.
     public static func isDemoID(_ id: String) -> Bool {
         id.lowercased().hasPrefix(uuidPrefix)
+    }
+
+    /// Whether an ID a connection holds is in the reserved fake range, also
+    /// with Apple’s `BUSINESSAPI.` or `SCHOOLAPI.` before it (a client ID).
+    static func isDemoIdentifier(_ id: String) -> Bool {
+        var trimmed = id.trimmingCharacters(in: .whitespacesAndNewlines)
+        for prefix in ["BUSINESSAPI.", "SCHOOLAPI."] where trimmed.uppercased().hasPrefix(prefix) {
+            trimmed = String(trimmed.dropFirst(prefix.count))
+        }
+        return isDemoID(trimmed)
     }
 
     // MARK: Jamf Platform
@@ -45,13 +55,13 @@ public nonisolated enum DemoSamples {
     ]
 
     /// Device group IDs of the Jamf School scenario: numeric strings, as Jamf School has them.
-    public static let schoolGroupIDs = ["101", "102"]
+    static let schoolGroupIDs = ["101", "102"]
 
     /// Blueprints of the Contoso environment, oldest first, as full detail JSON.
     /// They cover what apps meet on a real tenant: deployed and never deployed,
     /// with and without App Settings, created in Jamf without a scope, and
     /// assigned to a division (read-only through the API).
-    public static func platformBlueprints(jamfSchool: Bool = false) -> [LosslessJSON.Object] {
+    static func platformBlueprints(jamfSchool: Bool = false) -> [LosslessJSON.Object] {
         let allMacs = jamfSchool ? schoolGroupIDs[0] : uuid(0xd601)
         let engineering = jamfSchool ? schoolGroupIDs[0] : uuid(0xd603)
         let salesIPads = jamfSchool ? schoolGroupIDs[1] : uuid(0xd606)

@@ -57,14 +57,12 @@ struct JSONFileTests {
 
 @Suite("Text export document")
 struct TextExportDocumentTests {
-    @Test func defaultsToPlainText() {
+    @Test func holdsTheText() throws {
         let document = TextExportDocument(text: "# Notes")
         #expect(document.text == "# Notes")
-        #expect(document.contentType == .plainText)
     }
 
     @Test func exportsTheCommonTextFormats() {
         #expect(TextExportDocument.readableContentTypes == [.plainText, .html, .json, .commaSeparatedText])
-        #expect(TextExportDocument(text: "a,b", contentType: .commaSeparatedText).contentType == .commaSeparatedText)
     }
 }

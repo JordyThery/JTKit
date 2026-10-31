@@ -1,36 +1,37 @@
 import Foundation
 
 extension JamfPlatform {
-    /// Talks to the Jamf Platform API for one connection, on JTKit's
-    /// `HTTPClient`: signs in with `JamfTokenProvider`, adds the scope header,
-    /// checks each request against the app's allow-list, retries by JTKit's
+    /// Talks to the Jamf Platform API for one connection, on JTKit’s
+    /// `HTTPClient`: signs in with `JamfPlatform.TokenProvider`, adds the scope header,
+    /// checks each request against the app’s allow-list, retries by JTKit’s
     /// rules and writes every attempt, wait and refusal to the activity log.
     ///
-    /// Errors come back as `JamfPlatformError`. Follows a redirect only to
+    /// Errors come back as `JamfPlatform.APIError`. Follows a redirect only to
     /// HTTPS on the same host and port, as the sign-in does.
     ///
     /// Also talks to a Jamf Pro server directly (`server: .jamfPro`), for
     /// tenants without Platform API access; the same gateway-form paths are
-    /// then mapped onto Jamf Pro's.
+    /// then mapped onto Jamf Pro’s.
     public struct Client: Sendable {
         /// Which header says what the requests are about.
         public enum Scope: Sendable, Hashable {
             /// `X-Environment-Id`; must be a UUID.
             case environment(String)
-            /// `X-Tenant-Id`, for Jamf Deployer's older integrations.
+            /// `X-Tenant-Id`, for Jamf Deployer’s older integrations.
             case legacyTenant(String)
-            /// No scope header: the integration's own organization, e.g. its
+            /// No scope header: the integration’s own organization, e.g. its
             /// list of environments, or a Jamf Pro server reached directly.
             case organization
         }
 
         /// What an error status does.
         public enum ErrorStatus: Sendable, Hashable {
-            /// Thrown as a `JamfPlatformError` of kind `.status`.
+            /// Thrown as a `JamfPlatform.APIError` of kind `.status`.
             case thrown
-            /// Returned as the response, for callers that read the status
-            /// themselves (Jamf Deployer's preflight). A refused sign-in is
-            /// still thrown.
+            /// Returned as the response by `send`, for callers that read the
+            /// status themselves (Jamf Deployer’s preflight). A refused sign-in
+            /// is still thrown, and JTKit’s own calls always throw.
+            @available(*, deprecated, message: "Use .thrown and read the thrown JamfPlatform.APIError’s status.")
             case returned
         }
 
@@ -38,17 +39,17 @@ extension JamfPlatform {
         public let scope: Scope
         public let server: JamfPlatform.Server
         public let errorStatus: ErrorStatus
-        /// How the client signs in; decides the wording of Jamf Pro's
+        /// How the client signs in; decides the wording of Jamf Pro’s
         /// sign-in and privilege hints.
         public let signIn: SignInMethod
         let http: HTTPClient
-        /// The recorder under the client, for the few requests that don't go
+        /// The recorder under the client, for the few requests that don’t go
         /// through it (e.g. images on another host).
         public var recorder: RequestRecorder { http.recorder }
         private let tokens: any BearerTokenSource
-        private let hints: @Sendable (JamfPlatformError) -> [String]
+        private let hints: @Sendable (JamfPlatform.APIError) -> [String]
         /// Tests only: told the path, method and privileges of every request,
-        /// so the privilege table can be checked against Jamf Pro's API
+        /// so the privilege table can be checked against Jamf Pro’s API
         /// description.
         var observePrivileges: (@Sendable (_ path: String, _ method: String, _ privileges: [JamfPro.Privilege]) -> Void)?
 
@@ -59,15 +60,15 @@ extension JamfPlatform {
         ///     override, Environment ID and client ID), or a Jamf Pro
         ///     connection, reached directly with no scope header.
         ///   - secret: the client secret, read when signing in; its errors are
-        ///     passed on unchanged (e.g. the app's "no secret saved").
-        ///   - scope: the connection's Environment ID by default.
-        ///   - permits: the app's allow-list, checked before anything is sent.
-        ///   - hints: the app's own hints for an error, shown before the
+        ///     passed on unchanged (e.g. the app’s "no secret saved").
+        ///   - scope: the connection’s Environment ID by default.
+        ///   - permits: the app’s allow-list, checked before anything is sent.
+        ///   - hints: the app’s own hints for an error, shown before the
         ///     standard ones (e.g. what its allow-list allows).
-        ///   - headers: sent with every request, e.g. a header of the app's own.
+        ///   - headers: sent with every request, e.g. a header of the app’s own.
         ///   - sleep, random, now: injectable for tests.
-        /// - Throws: `JamfPlatformError` `.invalidEnvironmentID` when the
-        ///   Environment ID isn't a UUID, `.invalidResponse` when the
+        /// - Throws: `JamfPlatform.APIError` `.invalidEnvironmentID` when the
+        ///   Environment ID isn’t a UUID, `.invalidResponse` when the
         ///   connection has no usable address.
         public init(
             connection: Connection,
@@ -76,7 +77,7 @@ extension JamfPlatform {
             scope: Scope? = nil,
             errorStatus: ErrorStatus = .thrown,
             permits: @escaping @Sendable (HTTPRequest) -> Bool = { _ in true },
-            hints: @escaping @Sendable (JamfPlatformError) -> [String] = { _ in [] },
+            hints: @escaping @Sendable (JamfPlatform.APIError) -> [String] = { _ in [] },
             headers: [String: String] = [:],
             writeSpacing: Duration = .zero,
             sleep: @escaping @Sendable (Duration) async throws -> Void = { try await Task.sleep(for: $0) },
@@ -85,13 +86,13 @@ extension JamfPlatform {
         ) throws {
             let server: JamfPlatform.Server = connection.service == .jamfPro ? .jamfPro : .platformAPI
             guard [.jamfPlatform, .jamfPro].contains(connection.service), let baseURL = connection.jamfBaseURL else {
-                throw JamfPlatformError(.invalidResponse("“\(ConnectionMenuText.name(of: connection))” is not a Jamf Platform API or Jamf Pro connection with a valid address."))
+                throw JamfPlatform.APIError(.invalidResponse("“\(ConnectionMenuText.name(of: connection))” isn’t a Jamf Platform API or Jamf Pro connection with a valid address."))
             }
-            let tokens: JamfTokenProvider
+            let tokens: JamfPlatform.TokenProvider
             do {
-                tokens = try JamfTokenProvider(connection: connection, secret: secret, recorder: recorder, now: now)
+                tokens = try JamfPlatform.TokenProvider(connection: connection, secret: secret, recorder: recorder, now: now)
             } catch let error as HTTPError {
-                throw JamfPlatformError(error)
+                throw JamfPlatform.APIError(error)
             }
             try self.init(baseURL: baseURL,
                           scope: scope ?? (server == .jamfPro ? .organization : .environment(connection.environmentID)),
@@ -101,7 +102,7 @@ extension JamfPlatform {
         }
 
         /// A client with its own token source, e.g. for tests or credentials
-        /// that aren't saved as a connection.
+        /// that aren’t saved as a connection.
         ///
         /// - Parameter server: `.jamfPro` for a Jamf Pro server reached
         ///   directly; give it `.organization` scope.
@@ -114,7 +115,7 @@ extension JamfPlatform {
             recorder: RequestRecorder,
             errorStatus: ErrorStatus = .thrown,
             permits: @escaping @Sendable (HTTPRequest) -> Bool = { _ in true },
-            hints: @escaping @Sendable (JamfPlatformError) -> [String] = { _ in [] },
+            hints: @escaping @Sendable (JamfPlatform.APIError) -> [String] = { _ in [] },
             headers extraHeaders: [String: String] = [:],
             writeSpacing: Duration = .zero,
             sleep: @escaping @Sendable (Duration) async throws -> Void = { try await Task.sleep(for: $0) },
@@ -125,7 +126,7 @@ extension JamfPlatform {
             switch scope {
             case .environment(let id):
                 let trimmed = id.trimmingCharacters(in: .whitespacesAndNewlines)
-                guard UUID(uuidString: trimmed) != nil else { throw JamfPlatformError(.invalidEnvironmentID(trimmed)) }
+                guard UUID(uuidString: trimmed) != nil else { throw JamfPlatform.APIError(.invalidEnvironmentID(trimmed)) }
                 headers["X-Environment-Id"] = trimmed
             case .legacyTenant(let id):
                 headers["X-Tenant-Id"] = id.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -150,7 +151,7 @@ extension JamfPlatform {
         ///
         /// - Parameter privilege: the Jamf Pro privilege the request needs,
         ///   named in the hint when Jamf Pro refuses it.
-        /// - Throws: `JamfPlatformError`, `CancellationError`, or the secret's own error.
+        /// - Throws: `JamfPlatform.APIError`, `CancellationError`, or the secret’s own error.
         public func send(_ request: HTTPRequest, privilege: JamfPro.Privilege? = nil) async throws -> HTTPResponse {
             try await send(request, privileges: privilege.map { [$0] } ?? [])
         }
@@ -158,32 +159,32 @@ extension JamfPlatform {
         /// As `send(_:privilege:)`, for a request that needs several
         /// privileges, all named when Jamf Pro refuses it.
         public func send(_ request: HTTPRequest, privileges: [JamfPro.Privilege]) async throws -> HTTPResponse {
-            observePrivileges?(request.path, request.method, privileges)
-            do {
-                return try await http.send(request)
-            } catch let HTTPError.status(response, _, _, duringSignIn) where !duringSignIn && errorStatus == .returned {
-                return response
-            } catch let error as HTTPError {
-                var error = JamfPlatformError(error)
-                error.privileges = privileges
-                throw failure(error)
-            }
+            try await send(request, privileges: privileges, returningErrors: errorStatus != .thrown)
         }
 
         /// `send`, but an error status is always thrown, also by a client
-        /// that returns them (`errorStatus: .returned`): for JTKit's own calls.
+        /// that returns them (`errorStatus: .returned`): every JTKit call
+        /// goes through this. What `HTTPClient` returns comes back as it is,
+        /// e.g. the 404 of a delete an earlier attempt already did.
         func sendThrowing(_ request: HTTPRequest, privilege: JamfPro.Privilege? = nil) async throws -> HTTPResponse {
             try await sendThrowing(request, privileges: privilege.map { [$0] } ?? [])
         }
 
         func sendThrowing(_ request: HTTPRequest, privileges: [JamfPro.Privilege]) async throws -> HTTPResponse {
-            let response = try await send(request, privileges: privileges)
-            guard (200..<300).contains(response.status) else {
-                var error = JamfPlatformError(HTTPError.status(response, method: request.method, path: request.path, duringSignIn: false))
+            try await send(request, privileges: privileges, returningErrors: false)
+        }
+
+        private func send(_ request: HTTPRequest, privileges: [JamfPro.Privilege], returningErrors: Bool) async throws -> HTTPResponse {
+            observePrivileges?(request.path, request.method, privileges)
+            do {
+                return try await http.send(request)
+            } catch let HTTPError.status(response, _, _, duringSignIn) where !duringSignIn && returningErrors {
+                return response
+            } catch let error as HTTPError {
+                var error = JamfPlatform.APIError(error)
                 error.privileges = privileges
                 throw failure(error)
             }
-            return response
         }
 
         /// A GET, read as lossless JSON.
@@ -193,22 +194,22 @@ extension JamfPlatform {
 
         /// A GET that needs several privileges, read as lossless JSON.
         public func json(_ path: String, query: [URLQueryItem] = [], privileges: [JamfPro.Privilege]) async throws -> LosslessJSON {
-            let response = try await send(HTTPRequest(path: path, query: query), privileges: privileges)
+            let response = try await sendThrowing(HTTPRequest(path: path, query: query), privileges: privileges)
             do {
                 return try LosslessJSON(data: response.data)
             } catch {
-                throw failure(JamfPlatformError(.invalidResponse("\(path) is not valid JSON: \(error.localizedDescription)")))
+                throw failure(JamfPlatform.APIError(.invalidResponse("\(path) isn’t valid JSON: \(error.localizedDescription)")))
             }
         }
 
         /// A GET, decoded.
         public func get<T: Decodable>(_ type: T.Type, _ path: String, query: [URLQueryItem] = [],
                                       privilege: JamfPro.Privilege? = nil) async throws -> T {
-            let response = try await send(HTTPRequest(path: path, query: query), privilege: privilege)
+            let response = try await sendThrowing(HTTPRequest(path: path, query: query), privilege: privilege)
             do {
                 return try JSONDecoder().decode(type, from: response.data)
             } catch {
-                throw failure(JamfPlatformError(.invalidResponse("\(path) could not be read: \(error.localizedDescription)")))
+                throw failure(JamfPlatform.APIError(.invalidResponse("\(path) couldn’t be read: \(error.localizedDescription)")))
             }
         }
 
@@ -218,13 +219,13 @@ extension JamfPlatform {
             do {
                 _ = try await tokens.token()
             } catch let error as HTTPError {
-                throw failure(JamfPlatformError(error))
+                throw failure(JamfPlatform.APIError(error))
             }
         }
 
-        /// An error with the client's server and the app's hints added, as
+        /// An error with the client’s server and the app’s hints added, as
         /// the client throws it.
-        public func failure(_ error: JamfPlatformError) -> JamfPlatformError {
+        public func failure(_ error: JamfPlatform.APIError) -> JamfPlatform.APIError {
             var annotated = error
             annotated.server = server
             annotated.signIn = signIn

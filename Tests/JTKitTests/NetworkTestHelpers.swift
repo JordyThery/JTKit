@@ -2,7 +2,7 @@ import Foundation
 @testable import JTKit
 import JTKitTestSupport
 
-/// A value shared between a test and the fake server's handler.
+/// A value shared between a test and the fake server’s handler.
 final class Locked<Value>: @unchecked Sendable {
     private let lock = NSLock()
     private var stored: Value

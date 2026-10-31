@@ -1,9 +1,8 @@
 import Foundation
 
-// Jamf School's commands, Move to Trash and moving location (ROADMAP step 7,
-// from Checkpoint). One device resource serves Macs and mobile devices alike.
+// Jamf School’s commands, Move to Trash and moving location. One device resource serves Macs and mobile devices alike.
 // A command is never repeated after a server error, only after a 429; a
-// failure can come under HTTP 200 (`JamfSchoolError.check`).
+// failure can come under HTTP 200 (`JamfSchool.APIError.check`).
 
 extension JamfSchool {
     /// What became of each device in a location move. The move reports per
@@ -17,12 +16,12 @@ extension JamfSchool {
 
         public init() {}
 
-        /// UDIDs that didn't end up where they were asked to go.
+        /// UDIDs that didn’t end up where they were asked to go.
         public var unmoved: [String] { notFound + failed }
     }
 
     /// Jamf School takes at most twenty devices per move.
-    public static let moveBatchSize = 20
+    static let moveBatchSize = 20
 }
 
 extension JamfSchool.Client {
@@ -31,9 +30,24 @@ extension JamfSchool.Client {
     /// the endpoints require are sent and always false: restarting never
     /// clears the passcode, wiping never clears Activation Lock.
     ///
-    /// - Throws: `MDMCommand.Refusal` for a command Jamf School doesn't have;
-    ///   `CancellationError`.
+    /// - Parameter approval: the answered confirmation, from
+    ///   `MDMCommand.Confirmation.approve(...)`. Required for Wipe and Remove
+    ///   MDM Profile (`needsApproval(on:)`), and then for exactly this
+    ///   command on Jamf School and the devices that receive it.
+    /// - Throws: `MDMCommand.Refusal` for a command Jamf School doesn’t have,
+    ///   and for no or another approval; `CancellationError`.
+    public func send(_ command: MDMCommand, to targets: [MDMCommand.Target],
+                     approval: MDMCommand.Confirmation.Approval?) async throws -> MDMCommand.Result {
+        try command.check(approval, on: .jamfSchool, receiving: command.plan(for: targets, on: .jamfSchool).receiving.count)
+        return try await sendCommand(command, to: targets)
+    }
+
+    @available(*, deprecated, message: "Confirm with MDMCommand.Confirmation and pass its approve(...) to send(_:to:approval:).")
     public func send(_ command: MDMCommand, to targets: [MDMCommand.Target]) async throws -> MDMCommand.Result {
+        try await sendCommand(command, to: targets)
+    }
+
+    private func sendCommand(_ command: MDMCommand, to targets: [MDMCommand.Target]) async throws -> MDMCommand.Result {
         let action: String
         let form: String?
         switch command {
@@ -41,7 +55,7 @@ extension JamfSchool.Client {
         case .restartMobile: (action, form) = ("restart", "clearPasscode=false")
         case .wipeComputer, .wipeMobile: (action, form) = ("wipe", "clearActivationLock=false")
         case .unmanage: (action, form) = ("unenroll", nil)
-        default: throw MDMCommand.Refusal("\(command.title) is not available in Jamf School.")
+        default: throw MDMCommand.Refusal("\(command.title) isn’t available in Jamf School.")
         }
         let plan = command.plan(for: targets, on: .jamfSchool)
         var run = CommandRun(targets: targets, command: command.title)
@@ -58,8 +72,8 @@ extension JamfSchool.Client {
         return run.result
     }
 
-    /// Moves a device's record to the trash (`DELETE devices/{udid}/`, with
-    /// the trailing slash the API documents). Unlike Jamf Pro's delete it can
+    /// Moves a device’s record to the trash (`DELETE devices/{udid}/`, with
+    /// the trailing slash the API documents). Unlike Jamf Pro’s delete it can
     /// be restored in Jamf School; the device stops being managed.
     public func trash(udid: String) async throws {
         let safe = try Self.validatedUDID(udid)
@@ -102,7 +116,7 @@ extension JamfSchool.Client {
         do {
             return try JamfPro.validatedIdentifier(value)
         } catch {
-            throw JamfSchoolError(.invalidIdentifier(String(value.prefix(64))))
+            throw JamfSchool.APIError(.invalidIdentifier(String(value.prefix(64))))
         }
     }
 }

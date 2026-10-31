@@ -8,7 +8,7 @@ import Foundation
 ///
 /// Which commands an app offers, and the confirmation screens, stay in the
 /// app; the texts and rules are here, so every app that sends commands asks
-/// the same way (ROADMAP steps 7 and 8).
+/// the same way.
 public nonisolated enum MDMCommand: String, CaseIterable, Sendable, Hashable {
     case lockComputer
     case wipeComputer
@@ -22,8 +22,8 @@ public nonisolated enum MDMCommand: String, CaseIterable, Sendable, Hashable {
     case shutDownMobile
     case wipeMobile
     case unmanage
-    /// Deletes the device's record, leaving the device itself alone. In the
-    /// list for Intune only (Graph's `DELETE managedDevices/{id}`); the apps
+    /// Deletes the device’s record, leaving the device itself alone. In the
+    /// list for Intune only (Graph’s `DELETE managedDevices/{id}`); the apps
     /// remove Jamf Pro and Jamf School records their own way.
     case deleteRecord
 
@@ -56,9 +56,8 @@ public nonisolated enum MDMCommand: String, CaseIterable, Sendable, Hashable {
         }
     }
 
-    /// The title on a product: Intune calls two of them by its own names
-    /// (decided by Jordy, ROADMAP step 8), because the Jamf names mislead
-    /// there: Intune's sync is no inventory request, and a retired device's
+    /// The title on a product: Intune calls two of them by its own names,
+    /// because the Jamf names mislead there: Intune’s sync is no inventory request, and a retired device’s
     /// record goes too.
     public func title(on product: Product) -> String {
         switch (product, self) {
@@ -73,12 +72,12 @@ public nonisolated enum MDMCommand: String, CaseIterable, Sendable, Hashable {
         if product == .intune, let text = intuneConsequence { return text }
         return switch self {
         case .lockComputer: "The Mac will lock immediately and require the PIN to be used again."
-        case .wipeComputer: "All data on the Mac will be erased. This cannot be undone."
+        case .wipeComputer: "All data on the Mac will be erased. This can’t be undone."
         case .blankPush: "The device will be asked to check in with MDM and process any pending commands."
         case .renewProfile: "The MDM enrollment profile will be renewed on the device."
-        case .redeployFramework: "Reinstalls the Jamf management framework (jamf binary) on the Mac through MDM. Use when a Mac has stopped checking in but still responds to MDM."
+        case .redeployFramework: "The Jamf management framework (the jamf binary) will be reinstalled on the Mac through MDM, so a Mac that stopped checking in but still responds to MDM checks in again."
         case .updateInventory: "The device will be asked to submit a fresh inventory report."
-        case .lockMobile: "The device will lock immediately; the owner's passcode unlocks it."
+        case .lockMobile: "The device will lock immediately; the owner’s passcode unlocks it."
         case .unmanage:
             switch product {
             case .jamfPro: "The MDM profile is removed, so Jamf Pro can no longer manage the device. Its inventory record stays until you delete it."
@@ -88,22 +87,22 @@ public nonisolated enum MDMCommand: String, CaseIterable, Sendable, Hashable {
         case .clearPasscode: "The device passcode will be removed."
         case .restartMobile: "The device will restart immediately."
         case .shutDownMobile: "The device will shut down immediately and stay off until someone powers it back on."
-        case .wipeMobile: "All data on the device will be erased. This cannot be undone."
+        case .wipeMobile: "All data on the device will be erased. This can’t be undone."
         case .deleteRecord: "The device’s record will be deleted. The device itself isn’t changed."
         }
     }
 
-    /// Intune's own texts; nil for a command Intune doesn't have.
+    /// Intune’s own texts; nil for a command Intune doesn’t have.
     private var intuneConsequence: String? {
         switch self {
         case .updateInventory: "Intune asks the device to check in now, so it picks up pending policies and actions and reports its state."
         case .restartMobile: "The device will restart immediately."
         case .shutDownMobile: "The device will shut down immediately and stay off until someone powers it back on."
-        case .lockMobile: "The device will lock immediately; the owner's passcode unlocks it."
+        case .lockMobile: "The device will lock immediately; the owner’s passcode unlocks it."
         case .clearPasscode: "Intune removes the device passcode. If a policy requires one, the user is asked to set a new one."
-        case .wipeMobile: "All data on the device will be erased and it returns to factory settings. This cannot be undone."
-        case .wipeComputer: "All data on the Mac will be erased and it returns to factory settings. This cannot be undone."
-        case .unmanage: "The device is retired: company data and the management profile are removed, so Intune can no longer manage it. Unlike the Jamf products, the record goes too once the device acknowledges."
+        case .wipeMobile: "All data on the device will be erased and it returns to factory settings. This can’t be undone."
+        case .wipeComputer: "All data on the Mac will be erased and it returns to factory settings. This can’t be undone."
+        case .unmanage: "The device is retired: company data and the management profile are removed, so Intune can no longer manage it. Its record is deleted too once the device acknowledges."
         case .deleteRecord: "The record will be deleted from Intune. The device itself stays enrolled and will reappear at its next check-in; Retire Device is what unmanages it."
         case .lockComputer, .blankPush, .renewProfile, .redeployFramework: nil
         }
@@ -130,7 +129,7 @@ public nonisolated enum MDMCommand: String, CaseIterable, Sendable, Hashable {
     }
 
     /// Lock and Wipe Computer on Jamf Pro ask for a 6-digit PIN, typed twice.
-    /// Jamf School's and Intune's wipes take no PIN.
+    /// Jamf School’s and Intune’s wipes take no PIN.
     public func needsPIN(on product: Product) -> Bool {
         product == .jamfPro && (self == .lockComputer || self == .wipeComputer)
     }
@@ -142,7 +141,12 @@ public nonisolated enum MDMCommand: String, CaseIterable, Sendable, Hashable {
         self != .renewProfile
     }
 
-    public static let unavailableOverPlatformAPI = "This command is currently unavailable over the Platform API and requires an API client connection."
+    public static let unavailableOverPlatformAPI = unavailableOverPlatformAPI(.renewProfile)
+
+    /// "Renew MDM Profile doesn’t work over the Platform API. Use a Jamf Pro connection."
+    public static func unavailableOverPlatformAPI(_ command: MDMCommand) -> String {
+        "\(command.title) doesn’t work over the Platform API. Use a Jamf Pro connection."
+    }
 
     /// Whether the command reaches this kind of device on the product. Jamf
     /// School has one device resource for Macs and mobile devices, so restart,
@@ -169,7 +173,7 @@ public nonisolated enum MDMCommand: String, CaseIterable, Sendable, Hashable {
         case (.jamfSchool, .updateInventory), (.jamfSchool, .restartMobile),
              (_, .blankPush), (_, .renewProfile), (_, .unmanage):
             true
-        // Intune is answered above; Delete Record isn't a Jamf command
+        // Intune is answered above; Delete Record isn’t a Jamf command
         case (.intune, _), (_, .deleteRecord):
             false
         }
@@ -182,7 +186,7 @@ public nonisolated enum MDMCommand: String, CaseIterable, Sendable, Hashable {
         switch self {
         case .lockComputer: .sendComputerRemoteLockCommand
         case .wipeComputer: .sendComputerRemoteWipeCommand
-        // Jamf Pro's API description: v2/mdm/blank-push needs View MDM
+        // Jamf Pro’s API description: v2/mdm/blank-push needs View MDM
         // command information (there is no "Send Blank Push")
         case .blankPush: .viewMDMCommandInformation
         case .renewProfile: .sendRenewMDMProfileCommand
@@ -199,7 +203,9 @@ public nonisolated enum MDMCommand: String, CaseIterable, Sendable, Hashable {
     }
 
     /// On Intune: the Graph request the command is, for one managed device;
-    /// nil for a command Intune doesn't have.
+    /// nil for a command Intune doesn’t have. The path isn’t encoded yet:
+    /// `Graph.Client` encodes it, and `perform` refuses an ID with `?`, `#`
+    /// or `/`, which would change the request.
     public func intuneRequest(deviceID: String) -> (method: String, path: String, body: Data?)? {
         let device = "deviceManagement/managedDevices/\(deviceID)"
         return switch self {
@@ -211,23 +217,11 @@ public nonisolated enum MDMCommand: String, CaseIterable, Sendable, Hashable {
         // removes company data and the management profile; the record goes
         // once the device acknowledges
         case .unmanage: ("POST", "\(device)/retire", nil)
-        // an explicit empty body: each of the action's options changes what
+        // an explicit empty body: each of the action’s options changes what
         // survives, and leaving them out asks for a plain erase
         case .wipeComputer, .wipeMobile: ("POST", "\(device)/wipe", Data("{}".utf8))
         case .deleteRecord: ("DELETE", device, nil)
         case .lockComputer, .blankPush, .renewProfile, .redeployFramework: nil
-        }
-    }
-
-    /// The Graph permission the command needs on Intune, named when Graph
-    /// refuses it. Every device action needs PrivilegedOperations.All, also
-    /// the harmless ones (Microsoft groups by what reaches the device);
-    /// deleting a record needs ReadWrite.All.
-    public var intunePermission: Graph.Permission? {
-        switch self {
-        case .deleteRecord: .managedDevicesReadWrite
-        case .lockComputer, .blankPush, .renewProfile, .redeployFramework: nil
-        default: .managedDevicesPrivileged
         }
     }
 }
@@ -239,7 +233,10 @@ extension MDMCommand {
     public struct Target: Sendable, Hashable {
         /// Shown in results and the activity log (masked in the bug report).
         public var serial: String
-        /// The Jamf Pro computer or mobile device ID, or the Jamf School UDID.
+        /// The ID the product addresses the device’s record by: the Jamf Pro
+        /// computer or mobile device ID, the Jamf School UDID, or the Intune
+        /// managed device ID. The `jamfPro`, `jamfSchool` and `intune`
+        /// constructors say which.
         public var recordID: String
         public var kind: DeviceKind
         public var udid: String?
@@ -253,13 +250,29 @@ extension MDMCommand {
             self.udid = udid
             self.managementID = managementID
         }
+
+        /// A Jamf Pro record: `id` is the computer or mobile device ID.
+        public static func jamfPro(serial: String, id: String, kind: DeviceKind, udid: String? = nil,
+                                   managementID: String? = nil) -> Target {
+            Target(serial: serial, recordID: id, kind: kind, udid: udid, managementID: managementID)
+        }
+
+        /// A Jamf School record, addressed by its UDID.
+        public static func jamfSchool(serial: String, udid: String, kind: DeviceKind) -> Target {
+            Target(serial: serial, recordID: udid, kind: kind, udid: udid)
+        }
+
+        /// An Intune record, addressed by its managed device ID.
+        public static func intune(serial: String, managedDeviceID: String, kind: DeviceKind) -> Target {
+            Target(serial: serial, recordID: managedDeviceID, kind: kind)
+        }
     }
 
-    /// Why a device doesn't get the command.
+    /// Why a device doesn’t get the command.
     public enum SkipReason: Sendable, Hashable {
-        /// The command isn't for this kind of device.
+        /// The command isn’t for this kind of device.
         case notApplicable(DeviceKind)
-        /// The address needs the record's management ID, which the lookup didn't return.
+        /// The address needs the record’s management ID, which the lookup didn’t return.
         case noManagementID
         /// Renew MDM Profile addresses devices by UDID.
         case noUDID
@@ -339,7 +352,7 @@ extension MDMCommand {
     /// kind of device, with the identifiers its address needs.
     ///
     /// - Parameter overPlatformAPI: Restart and Shut Down then go through the
-    ///   Platform API's device actions, by serial number, so they need no
+    ///   Platform API’s device actions, by serial number, so they need no
     ///   management ID.
     public func plan(for targets: [Target], on product: Product, overPlatformAPI: Bool = false) -> Plan {
         var plan = Plan(receiving: [], skipped: [])
@@ -374,42 +387,48 @@ extension MDMCommand {
 
 extension MDMCommand {
     /// How a command, or any other device action, is confirmed. The rules,
-    /// the same in every app (decided by Jordy, ROADMAP step 7):
-    /// - something that can't be undone always names the connection, also
+    /// the same in every app:
+    /// - something that can’t be undone always names the connection, also
     ///   for one device;
     /// - with two or more devices it also asks to type their number;
-    /// - a PIN is typed twice.
+    /// - a PIN is typed twice;
+    /// - with no device to receive it, it can’t be confirmed.
     ///
     /// The app shows it: a dialog when nothing has to be typed, otherwise a
     /// sheet (`needsTyping`).
     public struct Confirmation: Sendable, Hashable {
         /// "Wipe Computer — C02XK1JHJG5H", "Wipe Computer — 3 Devices".
         public var title: String
-        /// What it does, e.g. the command's consequence.
+        /// What it does, e.g. the command’s consequence.
         public var message: String
-        /// “On “Lab Jamf”.”, nil when the connection isn't named.
+        /// “On “Lab Jamf”.”, nil when the connection isn’t named.
         public var connectionLine: String?
         /// Why fewer devices than selected receive it, shown before typing.
         public var explanation: String?
         /// The number to type, nil when none is asked.
-        public var typedCount: Int?
+        public private(set) var typedCount: Int?
         public var asksPINTwice: Bool
         /// The button that sends.
         public var actionTitle: String
         public var isDestructive: Bool
+        /// How many devices it goes to.
+        public let deviceCount: Int
+        /// The command it confirms, and where; nil for any other action.
+        public private(set) var command: MDMCommand?
+        public private(set) var product: Product?
 
         public static let pinLength = 6
 
         /// - Parameters:
-        ///   - subject: the one device's serial, or nil for "N Devices".
+        ///   - subject: the one device’s serial, or nil for "N Devices".
         ///   - count: how many devices it goes to.
         ///   - irreversible: names the connection, and asks for the number
         ///     from two devices.
-        ///   - namesConnection: names the connection anyway (Jamf School's
-        ///     Move to Trash, decided by Jordy).
+        ///   - namesConnection: names the connection anyway (Jamf School’s
+        ///     Move to Trash).
         ///   - asksNumber: asks for the number from two devices, or not,
-        ///     whatever `irreversible` says (Apple's migration deadlines,
-        ///     decided by Jordy). Nil: as `irreversible`.
+        ///     whatever `irreversible` says (Apple’s migration deadlines).
+        ///     Nil: as `irreversible`.
         public init(action actionTitle: String, subject: String?, count: Int, message: String,
                     irreversible: Bool, namesConnection: Bool = false, connectionName: String?,
                     needsPIN: Bool = false, explanation: String? = nil, isDestructive: Bool,
@@ -425,9 +444,10 @@ extension MDMCommand {
             typedCount = (asksNumber ?? irreversible) && count >= 2 ? count : nil
             asksPINTwice = needsPIN
             self.isDestructive = isDestructive
+            deviceCount = count
         }
 
-        /// A command's confirmation, from its plan.
+        /// A command’s confirmation, from its plan.
         public init(_ command: MDMCommand, plan: Plan, on product: Product, connectionName: String?,
                     extra: [SkipReason: Int] = [:]) {
             let receiving = plan.receiving
@@ -436,13 +456,21 @@ extension MDMCommand {
                       irreversible: !command.canBeUndone, connectionName: connectionName,
                       needsPIN: command.needsPIN(on: product), explanation: plan.explanation(extra: extra),
                       isDestructive: command.isDestructive)
+            self.command = command
+            self.product = product
         }
 
-        /// Something has to be typed, so a dialog can't hold it.
-        public var needsTyping: Bool { typedCount != nil || asksPINTwice }
+        /// No device receives it: it is refused, never sent.
+        public var isRefused: Bool { deviceCount < 1 }
+
+        /// Something has to be typed, so a dialog can’t hold it. Also true
+        /// when it is refused: the sheet shows why and can’t be confirmed.
+        public var needsTyping: Bool { typedCount != nil || asksPINTwice || isRefused }
 
         /// What is still missing before it can be sent, nil when it can be.
+        /// Never nil when it is refused.
         public func problem(typedCount typed: String = "", pin: String = "", pinAgain: String = "") -> String? {
+            if isRefused { return "None of the selected devices can receive it." }
             if asksPINTwice {
                 guard Self.isValidPIN(pin) else { return "Enter a \(Self.pinLength)-digit PIN." }
                 guard pin == pinAgain else { return "The two PINs don’t match." }
@@ -456,6 +484,66 @@ extension MDMCommand {
         public static func isValidPIN(_ pin: String) -> Bool {
             pin.count == pinLength && pin.allSatisfy { $0.isASCII && $0.isNumber }
         }
+
+        /// The answer to the confirmation, once nothing is missing: what a
+        /// command that can’t be undone, or that takes a PIN, needs to be
+        /// sent (`needsApproval(on:)`). Only a confirmation makes one.
+        ///
+        /// - Throws: `MDMCommand.Refusal` with `problem(...)` while something
+        ///   is missing or it is refused.
+        public func approve(typedCount typed: String = "", pin: String = "", pinAgain: String = "") throws -> Approval {
+            if let problem = problem(typedCount: typed, pin: pin, pinAgain: pinAgain) {
+                throw MDMCommand.Refusal(problem)
+            }
+            return Approval(command: command, product: product, deviceCount: deviceCount, pin: asksPINTwice ? pin : nil)
+        }
+
+        /// A confirmation that was answered, from `approve(...)`. The PIN in
+        /// it is never printed.
+        public struct Approval: Sendable, Hashable, CustomStringConvertible {
+            /// The command confirmed and where; nil for a confirmation of
+            /// another action, which no command accepts.
+            public let command: MDMCommand?
+            public let product: Product?
+            public let deviceCount: Int
+            let pin: String?
+
+            fileprivate init(command: MDMCommand?, product: Product?, deviceCount: Int, pin: String?) {
+                self.command = command
+                self.product = product
+                self.deviceCount = deviceCount
+                self.pin = pin
+            }
+
+            public var description: String {
+                "Approval(\(command?.rawValue ?? "no command"), \(deviceCount) device\(deviceCount == 1 ? "" : "s"))"
+            }
+        }
+    }
+
+    /// Whether sending it on `product` takes a `Confirmation.Approval`: a
+    /// command that can’t be undone, or one that takes a PIN.
+    public func needsApproval(on product: Product) -> Bool {
+        !canBeUndone || needsPIN(on: product)
+    }
+
+    /// Refuses the command unless the approval is for it, on this product,
+    /// and for `count` receiving devices (nil: any number). Without an
+    /// approval, only a command that doesn’t need one passes.
+    func check(_ approval: Confirmation.Approval?, on product: Product, receiving count: Int?) throws {
+        guard let approval else {
+            if needsApproval(on: product) {
+                throw Refusal("\(title(on: product)) needs a confirmation first. Nothing was sent.")
+            }
+            return
+        }
+        guard approval.command == self, approval.product == product else {
+            throw Refusal("The confirmation was for another action. Nothing was sent.")
+        }
+        if let count, approval.deviceCount != count {
+            func devices(_ n: Int) -> String { n == 1 ? "1 device" : "\(n) devices" }
+            throw Refusal("The confirmation was for \(devices(approval.deviceCount)), not \(devices(count)). Nothing was sent.")
+        }
     }
 }
 
@@ -468,7 +556,7 @@ extension MDMCommand {
         /// Refused, with the message to show after the serial.
         case failed(String)
         /// Accepted, but the server says it did nothing for this device
-        /// (Renew MDM Profile's `udidsNotProcessed`, Blank Push's `errorUuids`).
+        /// (Renew MDM Profile’s `udidsNotProcessed`, Blank Push’s `errorUuids`).
         case notProcessed
         case skipped(SkipReason)
     }
@@ -483,7 +571,7 @@ extension MDMCommand {
         }
     }
 
-    /// The command's result, device by device. A command is never repeated
+    /// The command’s result, device by device. A command is never repeated
     /// after a server error, only after a 429, when nothing was done.
     public struct Result: Sendable, Hashable {
         public var command: String
@@ -504,9 +592,9 @@ extension MDMCommand {
         public var isComplete: Bool { problems == nil }
 
         /// What to show when not every applicable device received it: one
-        /// line per device ("SERIAL: message"), devices the server didn't
+        /// line per device ("SERIAL: message"), devices the server didn’t
         /// process together, then the warning. Devices of the wrong kind
-        /// aren't listed: the command was never meant for them.
+        /// aren’t listed: the command was never meant for them.
         public var problems: String? {
             var lines = [String]()
             var notProcessed = [String]()
@@ -523,7 +611,7 @@ extension MDMCommand {
                 lines.append(command == MDMCommand.renewProfile.title
                              ? "Jamf Pro accepted the request but renewed no profile for: \(names)"
                              : command == MDMCommand.blankPush.title
-                             ? "Jamf Pro could not deliver the blank push to: \(names)"
+                             ? "Jamf Pro couldn’t deliver the blank push to: \(names)"
                              : "The server accepted \(command) but didn’t process it for: \(names)")
             }
             if let warning { lines.append(warning) }
@@ -531,7 +619,7 @@ extension MDMCommand {
         }
     }
 
-    /// Thrown when nothing is sent at all: the connection can't carry the
+    /// Thrown when nothing is sent at all: the connection can’t carry the
     /// command, no device has what its address needs, or the PIN is missing.
     public struct Refusal: Error, LocalizedError, Sendable, Hashable {
         public var message: String
@@ -548,8 +636,8 @@ extension MDMCommand {
 
 extension ActivityLog {
     /// One "Action" entry for a command: how many devices it went to, and
-    /// every one it didn't reach with the reason, in the note. Failed when a
-    /// device failed or wasn't processed (or `failure` says the whole command
+    /// every one it didn’t reach with the reason, in the note. Failed when a
+    /// device failed or wasn’t processed (or `failure` says the whole command
     /// failed); a warning when devices were only skipped. Every device is
     /// masked in the bug-report export.
     public func recordCommand(

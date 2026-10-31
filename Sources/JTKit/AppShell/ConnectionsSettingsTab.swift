@@ -4,7 +4,7 @@ import UniformTypeIdentifiers
 /// A way the app uses a connection: "Active connection" in most apps,
 /// "Source" and "Destination" in JamfMigrator, "Apple" and "MDM" in
 /// Checkpoint. The app keeps the choice itself (and saves it under the key it
-/// has always used); the editor's "Use This Connection" or "Use as …" button,
+/// has always used); the editor’s "Use This Connection" or "Use as …" button,
 /// the toolbar picker and the Connection menu set it.
 public struct ConnectionRole {
     public let title: String
@@ -14,9 +14,9 @@ public struct ConnectionRole {
     public let selection: Binding<UUID?>
     /// The services whose connections can have this role; nil for every service.
     public let services: Set<ConnectionService>?
-    /// The role's "All" choice, e.g. "All Organizations"; nil when it has none.
+    /// The role’s "All" choice, e.g. "All Organizations"; nil when it has none.
     public let all: AllConnectionsChoice?
-    /// The role's demo connections, chosen instead of the saved ones while
+    /// The role’s demo connections, chosen instead of the saved ones while
     /// demo mode is on; nil for an app without demo mode.
     public let demo: DemoConnectionChoice?
     /// How VoiceOver names the toolbar picker.
@@ -25,11 +25,11 @@ public struct ConnectionRole {
     /// - Parameters:
     ///   - title: shown when the connection has this role, e.g. `"Source"`.
     ///   - useTitle: the button that gives it the role; `"Use as <title>"` by default.
-    ///   - selection: the app's choice for this role.
+    ///   - selection: the app’s choice for this role.
     ///   - services: only connections of these services can have the role,
-    ///     e.g. Checkpoint's Apple role; every service by default.
+    ///     e.g. Checkpoint’s Apple role; every service by default.
     ///   - all: offers "All" for this role (see `AllConnectionsChoice`).
-    ///   - demo: the role's demo connections (see `DemoConnectionChoice`).
+    ///   - demo: the role’s demo connections (see `DemoConnectionChoice`).
     public init(_ title: String, useTitle: String? = nil, selection: Binding<UUID?>,
                 services: Set<ConnectionService>? = nil, all: AllConnectionsChoice? = nil,
                 demo: DemoConnectionChoice? = nil) {
@@ -38,7 +38,7 @@ public struct ConnectionRole {
     }
 
     private init(_ title: String, useTitle: String?, selection: Binding<UUID?>,
-                 services: Set<ConnectionService>?, all: AllConnectionsChoice?, demo: DemoConnectionChoice? = nil,
+                 services: Set<ConnectionService>?, all: AllConnectionsChoice?, demo: DemoConnectionChoice?,
                  accessibilityName: String) {
         self.title = title
         self.useTitle = useTitle ?? "Use as \(title)"
@@ -73,15 +73,28 @@ public struct ConnectionRole {
     @MainActor
     public var usesDemo: Bool { demo?.isActive ?? false }
 
-    /// Gives a single connection the role, which ends "All" and leaves demo mode.
+    /// Gives a single connection the role, which ends "All" and leaves demo
+    /// mode. Leaving demo mode goes through `DemoMode.requestSwitch`, so the
+    /// app asks about unsaved work first; canceled, nothing changes.
     @MainActor
     func use(_ id: UUID?) {
-        all?.isChosen = false
-        selection.wrappedValue = id
-        if let demo, demo.isActive { demo.mode.isOn = false }
+        leavingDemo {
+            all?.isChosen = false
+            selection.wrappedValue = id
+        }
     }
 
-    /// The menu's choice: a connection, or "All".
+    /// Runs `change`, after leaving demo mode when it’s on.
+    @MainActor
+    private func leavingDemo(_ change: @escaping @MainActor () -> Void) {
+        if let demo, demo.isActive {
+            demo.mode.requestSwitch(to: false, then: change)
+        } else {
+            change()
+        }
+    }
+
+    /// The menu’s choice: a connection, or "All".
     @MainActor
     func menuChoice(connectionCount: Int) -> Binding<ConnectionMenuChoice?> {
         Binding(
@@ -93,8 +106,7 @@ public struct ConnectionRole {
             set: { choice in
                 switch choice {
                 case .all:
-                    all?.isChosen = true
-                    if let demo, demo.isActive { demo.mode.isOn = false }
+                    leavingDemo { all?.isChosen = true }
                 case .connection(let id): use(id)
                 case nil: break
                 }
@@ -102,17 +114,17 @@ public struct ConnectionRole {
     }
 }
 
-/// What a role's picker or menu can choose.
+/// What a role’s picker or menu can choose.
 enum ConnectionMenuChoice: Hashable {
     case connection(UUID)
     case all
 }
 
-/// The "All" choice of a role, e.g. Checkpoint's "All Organizations": every
+/// The "All" choice of a role, e.g. Checkpoint’s "All Organizations": every
 /// connection of the role at once.
 ///
 /// The same in every app: "All" lasts for this session only and is never
-/// saved. Choosing it leaves the app's saved single connection as it is, so
+/// saved. Choosing it leaves the app’s saved single connection as it is, so
 /// at the next launch the role falls back to the last single connection used,
 /// and a combined read is never a surprise at launch. Choosing a single
 /// connection ends it. It is offered only while the role has at least
@@ -160,13 +172,43 @@ nonisolated enum ConnectionServiceChoices {
         return offered.filter(group.contains)
     }
 
-    /// The + menu's sections: the app's groups in order, then any service in
+    /// The + menu’s sections: the app’s groups in order, then any service in
     /// no group.
     static func addMenuSections(offered: [ConnectionService], groups: [[ConnectionService]]) -> [[ConnectionService]] {
         var sections = groups.map { group in offered.filter(group.contains) }
         let rest = offered.filter { service in !groups.contains { $0.contains(service) } }
         sections.append(rest)
         return sections.filter { !$0.isEmpty }
+    }
+
+    /// Whether the stored secret of a kind still goes with the edited
+    /// values: not once the service, the sign-in method or where the secret
+    /// is sent (the server URL, the Platform region or host, the Intune
+    /// tenant, the Jamf Protect URL) differs from the saved connection, so a
+    /// mistyped host never gets the saved secret.
+    static func storedSecretApplies(_ kind: ConnectionSecretKind, saved: Connection, edited: Connection) -> Bool {
+        func same(_ a: String, _ b: String) -> Bool {
+            a.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+                == b.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        }
+        guard saved.service == edited.service, saved.signIn == edited.signIn else { return false }
+        switch kind {
+        case .main:
+            switch edited.service {
+            case .jamfPlatform: return saved.region == edited.region && same(saved.hostOverride, edited.hostOverride)
+            case .jamfPro, .jamfSchool: return same(saved.serverURL, edited.serverURL)
+            case .intune: return same(saved.tenantID, edited.tenantID)
+            case .appleBusinessManager, .appleSchoolManager: return true
+            }
+        case .protect:
+            return same(saved.protect?.url ?? "", edited.protect?.url ?? "")
+        }
+    }
+
+    /// Whether saving the edited values deletes the stored secrets: a
+    /// secret is for one service and one sign-in method.
+    static func savingClearsStoredSecrets(saved: Connection, edited: Connection) -> Bool {
+        saved.service != edited.service || saved.signIn != edited.signIn
     }
 
     /// The sign-in methods the app accepts for a service, the usual one first.
@@ -188,7 +230,7 @@ nonisolated enum ConnectionServiceChoices {
 /// the HTTP status or a trace ID in `failureReason`.
 public typealias ConnectionTest<Record> = @MainActor (Record, [ConnectionSecretKind: String]) async throws -> String
 
-/// Lists the Jamf Platform API environments the editor's values can see, so
+/// Lists the Jamf Platform API environments the editor’s values can see, so
 /// the Environment ID can be picked instead of typed. Gets the same values as
 /// `ConnectionTest`; typically `JamfPlatform.environments(for:secret:recorder:)`.
 /// A thrown error is shown below the field, and typing the ID still works.
@@ -203,8 +245,8 @@ nonisolated enum EnvironmentListState: Equatable {
 
     static let emptyListMessage = "This integration sees no environments. Find the Environment ID in Jamf Account (account.jamf.com): open the API integration’s details and copy it from there."
 
-    /// The picker's choice for an Environment ID: the matching environment,
-    /// or "" when the ID was typed and isn't in the list.
+    /// The picker’s choice for an Environment ID: the matching environment,
+    /// or "" when the ID was typed and isn’t in the list.
     static func choice(for environmentID: String, in environments: [JamfPlatform.Environment]) -> String {
         let trimmed = environmentID.trimmingCharacters(in: .whitespacesAndNewlines)
         return environments.first { $0.id.caseInsensitiveCompare(trimmed) == .orderedSame }?.id ?? ""
@@ -231,8 +273,8 @@ public struct ConnectionImport<Record: ConnectionRecord> {
     /// - Parameters:
     ///   - title: the + menu item, `"Import…"` by default.
     ///   - contentTypes: the files the open panel accepts, e.g. `[.json]`.
-    ///   - read: the record in the file's contents; throws for a file that
-    ///     isn't one, with a plain-language message.
+    ///   - read: the record in the file’s contents; throws for a file that
+    ///     isn’t one, with a plain-language message.
     public init(title: String = "Import…", contentTypes: [UTType],
                 read: @escaping @MainActor (Data) throws -> Record) {
         self.title = title
@@ -279,7 +321,7 @@ nonisolated func connectionTestFailureText(_ error: any Error) -> String {
     return unique.isEmpty ? "No details were given." : unique.joined(separator: "\n\n")
 }
 
-/// The Connections tab of the Settings window: the app's saved connections in
+/// The Connections tab of the Settings window: the app’s saved connections in
 /// a list beside an editor. Several services can share the list.
 ///
 /// ```swift
@@ -311,7 +353,7 @@ public struct ConnectionsSettingsTab<Record: ConnectionRecord, AppSection: View>
     let environments: ConnectionEnvironmentLoader<Record>?
     let appSection: (Binding<Record>) -> AppSection
 
-    /// The app's demo mode, when it passes one in (`.environment(demo)`).
+    /// The app’s demo mode, when it passes one in (`.environment(demo)`).
     @Environment(DemoMode.self) private var demo: DemoMode?
     @State private var editingID: UUID?
     @State private var editorHasChanges = false
@@ -322,36 +364,36 @@ public struct ConnectionsSettingsTab<Record: ConnectionRecord, AppSection: View>
     @State private var showingImporter = false
 
     /// - Parameters:
-    ///   - store: the app's saved connections.
+    ///   - store: the app’s saved connections.
     ///   - services: the services the app supports, in the order of the + menu.
     ///   - optionalFields: extra fields to show, e.g. `.jamfProtect`.
     ///   - allowsChangingService: whether a saved connection can switch service.
     ///   - serviceGroups: services a saved connection can switch between,
-    ///     e.g. Checkpoint's Apple services and its MDM services; also the
+    ///     e.g. Checkpoint’s Apple services and its MDM services; also the
     ///     sections of the + menu. Empty: any service the app supports.
     ///   - signInMethods: limits the sign-in methods of a service, e.g.
     ///     `[.intune: [.entraClientSecret]]`; services left out offer all theirs.
     ///   - roles: the ways the app uses a connection, each with a button in the editor.
-    ///   - height: the tab's height; the width is `SettingsLayout.width`.
+    ///   - height: the tab’s height; the width is `SettingsLayout.width`.
     ///   - footer: a note below the editor, e.g. the API permissions needed.
     ///   - readOnlyFields: shared fields shown as text for a record, e.g. what
     ///     was fixed when the connection was made.
     ///   - protectServices: the services that offer the Jamf Protect add-on
     ///     when `optionalFields` contains `.jamfProtect`.
     ///   - newRecord: a new, unsaved record for the service chosen with +.
-    ///   - add: replaces what + does, e.g. to open the app's own setup wizard.
+    ///   - add: replaces what + does, e.g. to open the app’s own setup wizard.
     ///   - importer: adds "Import…" to the + menu (see `ConnectionImport`).
     ///   - delete: replaces what deleting does, e.g. when more than the record
     ///     and its secrets goes; the list is read again afterwards. A thrown
     ///     error is shown below the list.
-    ///   - deleteMessage: the delete confirmation's text, when the app's
+    ///   - deleteMessage: the delete confirmation’s text, when the app’s
     ///     `delete` does more than remove the connection and its secrets.
     ///   - didDelete: called after a connection and its secrets were deleted,
     ///     e.g. to clear choices the app stored for it.
-    ///   - test: tests the editor's values; without it there is no Test Connection button.
+    ///   - test: tests the editor’s values; without it there is no Test Connection button.
     ///   - environments: lists the Jamf Platform API environments, so the
     ///     Environment ID can be picked; without it the ID is only typed.
-    ///   - appSection: the app's own `Section`s for the record, below the shared fields.
+    ///   - appSection: the app’s own `Section`s for the record, below the shared fields.
     public init(
         store: ConnectionStore<Record>,
         services: [ConnectionService],
@@ -437,7 +479,7 @@ public struct ConnectionsSettingsTab<Record: ConnectionRecord, AppSection: View>
             }
             Button("Cancel", role: .cancel) { pendingSelection = nil }
         } message: {
-            Text("The changes to this connection have not been saved.")
+            Text("The changes to this connection haven’t been saved.")
         }
         .confirmationDialog(
             "Delete “\(pendingDeletion?.connection.name ?? "connection")”?",
@@ -720,7 +762,7 @@ private struct ConnectionRow: View {
                 .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 1) {
                 HStack(spacing: 4) {
-                    Text(connection.name.isEmpty ? "Unnamed connection" : connection.name)
+                    Text(ConnectionMenuText.name(of: connection))
                         .lineLimit(1)
                     if let badge {
                         Image(systemName: badge.systemImage)
@@ -774,6 +816,8 @@ private struct ConnectionEditor<Record: ConnectionRecord, AppSection: View>: Vie
     /// never shown (HIG: never prepopulate a password field).
     @State private var secrets: [ConnectionSecretKind: String] = [:]
     @State private var hasStoredSecret: Set<ConnectionSecretKind> = []
+    /// Kinds the Keychain couldn’t say anything about.
+    @State private var unreadableSecrets: Set<ConnectionSecretKind> = []
     @State private var testState = TestState.idle
     @State private var saveError: String?
     @State private var showingKeyImporter = false
@@ -884,7 +928,7 @@ private struct ConnectionEditor<Record: ConnectionRecord, AppSection: View>: Vie
             testState = .idle
             environmentState = .idle
         }
-        // a list loaded with other sign-in values may not be this integration's
+        // a list loaded with other sign-in values may not be this integration’s
         .onChange(of: [current.region.rawValue, current.hostOverride, current.clientID]) { environmentState = .idle }
     }
 
@@ -905,7 +949,7 @@ private struct ConnectionEditor<Record: ConnectionRecord, AppSection: View>: Vie
                     }
                 }
                 if optionalFields.contains(.hostOverride) {
-                    TextField("Host override", text: connection.hostOverride, prompt: Text("Leave empty for the region’s gateway"))
+                    TextField("Host Override", text: connection.hostOverride, prompt: Text("Leave empty for the region’s gateway"))
                 }
                 textField(.environmentID, "Environment ID", text: connection.environmentID, prompt: "From Jamf Account")
                 if environments != nil && !readOnlyFields.contains(.environmentID) {
@@ -914,7 +958,7 @@ private struct ConnectionEditor<Record: ConnectionRecord, AppSection: View>: Vie
                 textField(.clientID, "Client ID", text: connection.clientID)
                 secretField(.main)
                 if optionalFields.contains(.jamfProWebURL) {
-                    TextField("Jamf Pro web address", text: connection.jamfProWebURL, prompt: Text("https://yourorg.jamfcloud.com (optional)"))
+                    TextField("Jamf Pro Web Address", text: connection.jamfProWebURL, prompt: Text("https://yourorg.jamfcloud.com (optional)"))
                         .textContentType(.URL)
                 }
             case .jamfPro:
@@ -963,10 +1007,10 @@ private struct ConnectionEditor<Record: ConnectionRecord, AppSection: View>: Vie
                     get: { protect.url },
                     set: { draft.connection.protect?.url = $0 }), prompt: Text("https://yourorg.protect.jamfcloud.com"))
                     .textContentType(.URL)
-                TextField("Protect client ID", text: Binding(
+                TextField("Protect Client ID", text: Binding(
                     get: { protect.clientID },
                     set: { draft.connection.protect?.clientID = $0 }))
-                secretField(.protect, name: "Protect client secret")
+                secretField(.protect, name: "Protect Client Secret")
             }
         } footer: {
             issuesFooter(current.issues.filter { $0.contains("Jamf Protect") })
@@ -974,7 +1018,7 @@ private struct ConnectionEditor<Record: ConnectionRecord, AppSection: View>: Vie
     }
 
     /// Below the Environment ID: a picker once the list is loaded, the button
-    /// that loads it, and why it couldn't be loaded. Typing the ID always works.
+    /// that loads it, and why it couldn’t be loaded. Typing the ID always works.
     @ViewBuilder
     private var environmentRows: some View {
         if case .loaded(let list) = environmentState, !list.isEmpty {
@@ -1023,7 +1067,7 @@ private struct ConnectionEditor<Record: ConnectionRecord, AppSection: View>: Vie
     }
 
     private var canLoadEnvironments: Bool {
-        EnvironmentListState.canLoad(current, typedSecret: secrets[.main], hasStoredSecret: hasStoredSecret.contains(.main))
+        EnvironmentListState.canLoad(current, typedSecret: secrets[.main], hasStoredSecret: storedSecretApplies(.main))
     }
 
     /// Picking an environment fills in its ID; "" (a typed ID) changes nothing.
@@ -1071,7 +1115,7 @@ private struct ConnectionEditor<Record: ConnectionRecord, AppSection: View>: Vie
     private func secretField(_ kind: ConnectionSecretKind, name: String? = nil) -> some View {
         if store.stores(kind), let title = name ?? current.signIn.secretName {
             let binding = Binding(get: { secrets[kind] ?? "" }, set: { secrets[kind] = $0 })
-            let prompt = Text(hasStoredSecret.contains(kind) ? "Stored in the Keychain · type to replace" : "Required")
+            let prompt = Text(secretPrompt(kind))
             if kind == .main && current.signIn == .applePrivateKey {
                 privateKeyField(title)
             } else {
@@ -1080,11 +1124,17 @@ private struct ConnectionEditor<Record: ConnectionRecord, AppSection: View>: Vie
         }
     }
 
+    private func secretPrompt(_ kind: ConnectionSecretKind) -> String {
+        if unreadableSecrets.contains(kind) { return "Couldn’t read the Keychain · type to replace" }
+        guard hasStoredSecret.contains(kind) else { return "Required" }
+        return storedSecretApplies(kind) ? "Stored in the Keychain · type to replace" : "Required after this change"
+    }
+
     /// The Apple private key is imported from its .pem file and never shown:
     /// a status line and a button, no text.
     private func privateKeyField(_ title: String) -> some View {
         let imported = !(secrets[.main] ?? "").isEmpty
-        let hasKey = imported || hasStoredSecret.contains(.main)
+        let hasKey = imported || storedSecretApplies(.main)
         return LabeledContent(title) {
             VStack(alignment: .leading, spacing: 4) {
                 Button(hasKey ? "Replace Private Key…" : "Import .pem File…") { showingKeyImporter = true }
@@ -1105,7 +1155,9 @@ private struct ConnectionEditor<Record: ConnectionRecord, AppSection: View>: Vie
         if imported {
             return "\(importedKeyName ?? "Private key") imported · Save to keep it"
         }
-        return hasStoredSecret.contains(.main) ? "Stored in the Keychain" : "Required: the .pem file downloaded from Apple"
+        if storedSecretApplies(.main) { return "Stored in the Keychain" }
+        if hasStoredSecret.contains(.main) { return "Required after this change: the .pem file downloaded from Apple" }
+        return "Required: the .pem file downloaded from Apple"
     }
 
     private func importPrivateKey(_ result: Result<URL, any Error>) {
@@ -1231,25 +1283,59 @@ private struct ConnectionEditor<Record: ConnectionRecord, AppSection: View>: Vie
         case .appleBusinessManager, .appleSchoolManager: required = [c.clientID, c.keyID]
         }
         let needsSecret = c.signIn.secretName != nil && store.stores(.main)
-        let secretMissing = needsSecret && (secrets[.main] ?? "").isEmpty && !hasStoredSecret.contains(.main)
-        return !required.contains { $0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty } && !secretMissing
+        let secretMissing = needsSecret && (secrets[.main] ?? "").isEmpty && !storedSecretApplies(.main)
+        // a changed Jamf Protect URL needs its secret typed again too
+        let protectMissing = c.protect != nil && hasStoredSecret.contains(.protect)
+            && (secrets[.protect] ?? "").isEmpty && !storedSecretApplies(.protect)
+        return !required.contains { $0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+            && !secretMissing && !protectMissing
     }
 
+    /// A stored secret that still goes with the editor’s values: a test or
+    /// the environment list may use it.
+    private func storedSecretApplies(_ kind: ConnectionSecretKind) -> Bool {
+        hasStoredSecret.contains(kind)
+            && ConnectionServiceChoices.storedSecretApplies(kind, saved: saved.connection, edited: current)
+    }
+
+    /// Asks the Keychain whether each secret exists, never for its value.
     private func loadSecrets() {
-        hasStoredSecret = Set(ConnectionSecretKind.allCases.filter { kind in
-            store.stores(kind) && !(store.secret(kind, for: saved.connection) ?? "").isEmpty
-        })
+        var stored = Set<ConnectionSecretKind>()
+        var unreadable = Set<ConnectionSecretKind>()
+        for kind in ConnectionSecretKind.allCases where store.stores(kind) {
+            do {
+                if try store.hasSecret(kind, for: saved.connection) { stored.insert(kind) }
+            } catch {
+                unreadable.insert(kind)
+            }
+        }
+        hasStoredSecret = stored
+        unreadableSecrets = unreadable
         secrets = [:]
+    }
+
+    /// The typed secrets, and an empty one (deleting it) for each stored
+    /// secret that a new service or sign-in method leaves without use.
+    private var secretsToSave: [ConnectionSecretKind: String] {
+        var toSave = changedSecrets
+        if ConnectionServiceChoices.savingClearsStoredSecrets(saved: saved.connection, edited: current) {
+            for kind in hasStoredSecret.union(unreadableSecrets) where toSave[kind] == nil { toSave[kind] = "" }
+        }
+        return toSave
     }
 
     @discardableResult
     private func save() -> Bool {
+        let toSave = secretsToSave
         do {
-            try store.save(draft, secrets: changedSecrets)
+            try store.save(draft, secrets: toSave)
             // continue from what was saved, as the storage reads it back
             saved = store.record(id: draft.id) ?? draft
             draft = saved
-            hasStoredSecret.formUnion(changedSecrets.keys)
+            for (kind, secret) in toSave {
+                if secret.isEmpty { hasStoredSecret.remove(kind) } else { hasStoredSecret.insert(kind) }
+                unreadableSecrets.remove(kind)
+            }
             secrets = [:]
             importedKeyName = nil
             saveError = nil

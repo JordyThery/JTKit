@@ -11,7 +11,7 @@ import Foundation
 /// purpose, each once unless noted: iPhones missing from Intune (three), a
 /// Mac whose AppleCare has expired, a new iPad not assigned to any server, a
 /// Mac Apple has released that Jamf Pro still manages (release pending), a Mac
-/// Jamf Pro hasn't heard from in months (stale), and that Mac outside Apple.
+/// Jamf Pro hasn’t heard from in months (stale), and that Mac outside Apple.
 public nonisolated enum DemoWorld {
     public enum Family: String, Sendable, Hashable, CaseIterable {
         case mac = "Mac"
@@ -40,7 +40,7 @@ public nonisolated enum DemoWorld {
     }
 
     public struct Device: Sendable, Hashable, Identifiable {
-        /// 1…42, unique; also the device's ID in Jamf Pro.
+        /// 1…42, unique; also the device’s ID in Jamf Pro.
         public let number: Int
         public let serial: String
         public let family: Family
@@ -50,7 +50,7 @@ public nonisolated enum DemoWorld {
         /// The person using it: an invented first name and "Sample".
         public let user: String
         public let osVersion: String
-        /// The Apple organization it's in; nil for a device bought elsewhere.
+        /// The Apple organization it’s in; nil for a device bought elsewhere.
         public let organization: Organization?
         /// The MDM server Apple assigns it to; nil when unassigned.
         public let appleServerID: String?
@@ -74,11 +74,11 @@ public nonisolated enum DemoWorld {
         public var isComputer: Bool { family == .mac }
     }
 
-    // MARK: Apple's MDM servers
+    // MARK: Apple’s MDM servers
 
     public static let jamfProServerID = DemoSamples.uuid(0xa501)
-    public static let intuneServerID = DemoSamples.uuid(0xa502)
-    public static let jamfSchoolServerID = DemoSamples.uuid(0xa511)
+    static let intuneServerID = DemoSamples.uuid(0xa502)
+    static let jamfSchoolServerID = DemoSamples.uuid(0xa511)
 
     /// The MDM servers of an organization: (ID, name).
     public static func mdmServers(in organization: Organization) -> [(id: String, name: String)] {
@@ -91,9 +91,9 @@ public nonisolated enum DemoWorld {
     // MARK: Hosts
 
     public static let jamfProHost = "contoso-jamf.\(DemoNetwork.reservedDomain)"
-    public static let jamfSchoolHost = "contoso-academy.\(DemoNetwork.reservedDomain)"
+    static let jamfSchoolHost = "contoso-academy.\(DemoNetwork.reservedDomain)"
     /// The Entra tenant of "Contoso Intune".
-    public static let intuneTenantID = DemoSamples.uuid(0xe701)
+    static let intuneTenantID = DemoSamples.uuid(0xe701)
 
     // MARK: Devices
 
@@ -131,7 +131,7 @@ public nonisolated enum DemoWorld {
     public static var notInApple: [Device] { devices.filter { $0.organization == nil } }
 
     /// Days since the MDM last heard from a device counted as stale.
-    public static let staleDays = 131
+    static let staleDays = 131
 
     // MARK: Building the set
 
@@ -240,44 +240,44 @@ public nonisolated enum DemoWorld {
 }
 
 extension Connection {
-    /// Demo mode's Apple Business Manager organization. Never saved.
+    /// Demo mode’s Apple Business Manager organization. Never saved.
     public static let demoAppleBusiness = Connection(
         id: UUID(uuidString: DemoSamples.uuid(0xde11)) ?? UUID(),
         name: "\(DemoSamples.organization) (Demo)", service: .appleBusinessManager,
         clientID: "BUSINESSAPI.\(DemoSamples.uuid(0xc011))", keyID: DemoSamples.uuid(0xc012))
 
-    /// Demo mode's Apple School Manager organization. Never saved.
+    /// Demo mode’s Apple School Manager organization. Never saved.
     public static let demoAppleSchool = Connection(
         id: UUID(uuidString: DemoSamples.uuid(0xde12)) ?? UUID(),
         name: "\(DemoSamples.schoolOrganization) (Demo)", service: .appleSchoolManager,
         clientID: "SCHOOLAPI.\(DemoSamples.uuid(0xc021))", keyID: DemoSamples.uuid(0xc022))
 
-    /// Demo mode's Jamf Pro, signed in with an API client. Never saved.
+    /// Demo mode’s Jamf Pro, signed in with an API client. Never saved.
     public static let demoJamfPro = Connection(
         id: UUID(uuidString: DemoSamples.uuid(0xde21)) ?? UUID(),
         name: "\(DemoSamples.organization) Jamf Pro (Demo)", service: .jamfPro, signIn: .apiClient,
         serverURL: "https://\(DemoWorld.jamfProHost)", clientID: DemoSamples.uuid(0xc031))
 
-    /// Demo mode's Jamf School. Never saved.
+    /// Demo mode’s Jamf School. Never saved.
     public static let demoJamfSchool = Connection(
         id: UUID(uuidString: DemoSamples.uuid(0xde22)) ?? UUID(),
         name: "\(DemoSamples.schoolOrganization) (Demo)", service: .jamfSchool,
         serverURL: "https://\(DemoWorld.jamfSchoolHost)", clientID: "8000123")
 
-    /// Demo mode's Intune tenant, signed in with an app registration. Never saved.
+    /// Demo mode’s Intune tenant, signed in with an app registration. Never saved.
     public static let demoIntune = Connection(
         id: UUID(uuidString: DemoSamples.uuid(0xde23)) ?? UUID(),
         name: "\(DemoSamples.organization) Intune (Demo)", service: .intune, signIn: .entraClientSecret,
         clientID: DemoSamples.uuid(0xc041), tenantID: DemoWorld.intuneTenantID)
 
-    /// Demo mode's Jamf Pro to copy from (JamfMigrator's Source): Contoso's
+    /// Demo mode’s Jamf Pro to copy from (JamfMigrator’s Source): Contoso’s
     /// golden master, objects only (`DemoJamfProObjects.contosoSource()`). Never saved.
     public static let demoJamfProSource = Connection(
         id: UUID(uuidString: DemoSamples.uuid(0xde24)) ?? UUID(),
         name: "\(DemoSamples.organization) Source (Demo)", service: .jamfPro, signIn: .apiClient,
         serverURL: "https://\(DemoJamfProObjectSamples.sourceHost)", clientID: DemoSamples.uuid(0xc032))
 
-    /// Demo mode's Jamf Pro to copy to (JamfMigrator's Destination): a fresh
+    /// Demo mode’s Jamf Pro to copy to (JamfMigrator’s Destination): a fresh
     /// Contoso tenant (`DemoJamfProObjects.contosoDestination()`). Never saved.
     public static let demoJamfProDestination = Connection(
         id: UUID(uuidString: DemoSamples.uuid(0xde25)) ?? UUID(),
@@ -285,7 +285,7 @@ extension Connection {
         serverURL: "https://\(DemoJamfProObjectSamples.destinationHost)", clientID: DemoSamples.uuid(0xc033))
 
     /// Every demo connection of Apple Business and School Manager and the MDMs.
-    public static let demoConnections: [Connection] = [
+    static let demoConnections: [Connection] = [
         .demoAppleBusiness, .demoAppleSchool, .demoJamfPro, .demoJamfSchool, .demoIntune, .demoJamfPlatform,
         .demoJamfProSource, .demoJamfProDestination,
     ]

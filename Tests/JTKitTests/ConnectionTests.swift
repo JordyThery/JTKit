@@ -5,7 +5,7 @@ import Testing
 @testable import JTKit
 import JTKitTestSupport
 
-/// An app's own record, shaped like JamfMigrator's `Tenant`: its own field
+/// An app’s own record, shaped like JamfMigrator’s `Tenant`: its own field
 /// names, an app-only field, optional keys left out when nil.
 nonisolated struct SampleTenant: Codable, Equatable, Sendable, ConnectionRecord {
     var id = UUID()
@@ -40,7 +40,7 @@ nonisolated struct SampleTenant: Codable, Equatable, Sendable, ConnectionRecord 
 @Suite("Saved connections")
 struct ConnectionStoreTests {
 
-    /// Written like JamfMigrator's tenants.json: pretty-printed, sorted keys,
+    /// Written like JamfMigrator’s tenants.json: pretty-printed, sorted keys,
     /// slashes escaped, no trailing newline.
     static let existingFile = """
     [
@@ -157,7 +157,7 @@ struct ConnectionStoreTests {
 
         renamed.name = "Golden master 2"
         try store.save(renamed)
-        // a later launch doesn't replace the backup either
+        // a later launch doesn’t replace the backup either
         try makeStore(url).save(renamed)
         #expect(try String(contentsOf: backup, encoding: .utf8) == Self.existingFile)
     }
@@ -197,11 +197,29 @@ struct ConnectionStoreTests {
         secrets.refusesWrites = true
         let store = makeStore(url, secrets: secrets)
 
-        #expect(throws: ConnectionStoreError.keychainRefused) {
+        #expect(throws: ConnectionStoreError.keychainRefused(status: nil)) {
             try store.save(SampleTenant(name: "Sandbox"), secrets: [.main: "hunter2"])
         }
         #expect(store.records.isEmpty)
         #expect(!FileManager.default.fileExists(atPath: url.path))
+    }
+
+    @Test func aRefusedSecretNamesTheKeychainCode() throws {
+        struct RefusingStore: SecretStore {
+            func secret(for account: String) -> String? { nil }
+            func setSecret(_ secret: String?, for account: String) -> Bool { false }
+            func writeSecret(_ secret: String?, for account: String) throws { throw SecretWriteError(status: -25308) }
+        }
+        let url = temporaryFile()
+        defer { cleanUp(url) }
+        let store = ConnectionStore<SampleTenant>(storage: JSONFileConnectionStorage<SampleTenant>(fileURL: url),
+                                                  secrets: [.main: SecretLocation(store: RefusingStore())])
+        #expect(throws: ConnectionStoreError.keychainRefused(status: -25308)) {
+            try store.save(SampleTenant(name: "Sandbox"), secrets: [.main: "hunter2"])
+        }
+        #expect(ConnectionStoreError.keychainRefused(status: -25308).localizedDescription
+                == "The Keychain refused to save the secret (error -25308).")
+        #expect(ConnectionStoreError.keychainRefused(status: nil).localizedDescription == "The Keychain refused to save the secret.")
     }
 
     @Test func deletingRemovesTheRecordAndEverySecret() throws {
@@ -344,7 +362,7 @@ struct ConnectionTests {
 
 @Suite("Keychain")
 struct KeychainSecretStoreTests {
-    /// Uses a throwaway service name and removes its item, so no app's
+    /// Uses a throwaway service name and removes its item, so no app’s
     /// Keychain items are touched.
     @Test func savesUpdatesReadsAndDeletes() {
         let store = KeychainSecretStore(service: "be.jordythery.jtkit.tests.\(UUID().uuidString)",
@@ -359,7 +377,7 @@ struct KeychainSecretStoreTests {
         #expect(store.secret(for: account) == "second")
         #expect(store.setSecret(nil, for: account))
         #expect(store.secret(for: account) == nil)
-        // deleting what isn't there is not a failure
+        // deleting what isn’t there isn’t a failure
         #expect(store.setSecret(nil, for: account))
     }
 }
@@ -419,7 +437,7 @@ struct ConnectionMenuTests {
     }
 
     @Test func anUnnamedConnectionIsNamedAsInTheConnectionsTab() {
-        #expect(ConnectionMenuText.name(of: Connection(name: "", service: .jamfPro)) == "Unnamed connection")
+        #expect(ConnectionMenuText.name(of: Connection(name: "", service: .jamfPro)) == "Unnamed Connection")
         #expect(ConnectionMenuText.name(of: Connection(name: "School", service: .jamfSchool)) == "School")
     }
 
@@ -430,7 +448,7 @@ struct ConnectionMenuTests {
 }
 
 // MARK: - Roles, “All”, services offered and the Apple private key
-/// A role's choice, kept the way an app keeps it.
+/// A role’s choice, kept the way an app keeps it.
 @MainActor
 private final class SavedChoice {
     var id: UUID?
@@ -550,7 +568,7 @@ struct ConnectionServiceChoicesTests {
     @Test func anAppCanLimitSignInMethods() {
         #expect(ConnectionServiceChoices.signInMethods(for: .intune, limits: [.intune: [.entraClientSecret]]) == [.entraClientSecret])
         #expect(ConnectionServiceChoices.signInMethods(for: .jamfPro, limits: [.intune: [.entraClientSecret]]) == [.apiClient, .usernamePassword])
-        // a limit that leaves nothing falls back to the service's own methods
+        // a limit that leaves nothing falls back to the service’s own methods
         #expect(ConnectionServiceChoices.signInMethods(for: .jamfSchool, limits: [.jamfSchool: [.apiClient]]) == [.schoolAPIKey])
     }
 
@@ -599,5 +617,11 @@ struct ApplePrivateKeyTests {
         try Data(Self.key.utf8).write(to: file)
         defer { try? FileManager.default.removeItem(at: file) }
         #expect(try ApplePrivateKey.read(contentsOf: file) == Self.key)
+    }
+
+    @Test func aFileThatCantBeReadSaysSo() {
+        let missing = FileManager.default.temporaryDirectory.appendingPathComponent("AuthKey_\(UUID().uuidString).pem")
+        #expect(throws: ApplePrivateKey.ImportError.unreadable) { try ApplePrivateKey.read(contentsOf: missing) }
+        #expect(ApplePrivateKey.ImportError.unreadable.localizedDescription == "The file couldn’t be read.")
     }
 }

@@ -2,12 +2,12 @@ import Foundation
 import JTKit
 
 extension Acknowledgement {
-    /// Credit for Microsoft's sign-in library, with its MIT licence as
+    /// Credit for Microsoft’s sign-in library, with its MIT license as
     /// published in the version JTKit pins (`MicrosoftSignIn.msalVersion`).
     /// Every app that links JTKitMSAL shows it in About.
     public static let msal = msal(summary: "Used to sign in to Entra ID and get access to Microsoft Graph.")
 
-    /// The same credit with the app's own sentence on what it uses MSAL for.
+    /// The same credit with the app’s own sentence on what it uses MSAL for.
     public static func msal(summary: String) -> Acknowledgement {
         Acknowledgement(
             name: "Microsoft Authentication Library for iOS and macOS (MSAL)",
@@ -19,12 +19,15 @@ extension Acknowledgement {
                     address: "https://github.com/AzureAD/microsoft-authentication-library-for-objc"
                 ),
             ].compactMap { $0 },
-            licence: msalLicence
+            license: msalLicense
         )
     }
 
-    /// MSAL's `LICENSE` file at version 2.16.0, unchanged.
-    public static let msalLicence = """
+    @available(*, deprecated, renamed: "msalLicense")
+    public static var msalLicence: String { msalLicense }
+
+    /// MSAL’s `LICENSE` file at version 2.16.0, unchanged.
+    public static let msalLicense = """
         MIT License
 
         Copyright (c) Microsoft Corporation

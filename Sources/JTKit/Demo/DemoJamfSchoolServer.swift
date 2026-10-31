@@ -30,7 +30,7 @@ public nonisolated final class DemoJamfSchoolServer: DemoServer, @unchecked Send
     /// Commands received: the action (`refresh`, `restart`, …) and the device.
     public var commands: [(action: String, udid: String)] { lock.withLock { commandsValue } }
 
-    /// - Parameter apiKey: the key every request must carry with the demo connection's Network ID.
+    /// - Parameter apiKey: the key every request must carry with the demo connection’s Network ID.
     public init(apiKey: String = DemoSecretStore().secret(for: "") ?? "", scenario: DemoScenario? = nil, now: Date = Date()) {
         authorization = "Basic " + Data("\(Connection.demoJamfSchool.clientID):\(apiKey)".utf8).base64EncodedString()
         self.scenario = scenario
@@ -41,7 +41,7 @@ public nonisolated final class DemoJamfSchoolServer: DemoServer, @unchecked Send
         }
     }
 
-    /// A device's current asset tag, or nil when it isn't there.
+    /// A device’s current asset tag, or nil when it isn’t there.
     public func assetTag(serial: String) -> String? {
         lock.withLock { records.values.first { $0.device.serial == serial.uppercased() }?.assetTag }
     }

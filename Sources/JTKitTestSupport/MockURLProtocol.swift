@@ -26,7 +26,7 @@ public struct MockResponse: Sendable {
     public var headers: [String: String]
     public var body: Data
     /// Set by `redirect(_:to:)`: the session is told to go there, as a real
-    /// server's redirect would, so the client's redirect rule is applied.
+    /// server’s redirect would, so the client’s redirect rule is applied.
     public var redirectTarget: URL?
 
     public init(status: Int, headers: [String: String] = ["Content-Type": "application/json"], body: Data) {
@@ -180,11 +180,6 @@ public final class MockServer: @unchecked Sendable {
     /// Every request received, oldest first.
     public var requests: [RecordedRequest] {
         lock.withLock { recorded }
-    }
-
-    /// Stops routing to this server; later requests fail.
-    public func shutDown() {
-        Self.lock.withLock { _ = Self.servers.removeValue(forKey: id) }
     }
 
     static func route(_ id: String, _ request: RecordedRequest) -> MockURLProtocol.Handler? {

@@ -4,20 +4,20 @@ import Foundation
 /// A general in-memory Jamf Pro object store behind a demo Jamf Pro server
 /// (`DemoJamfProServer(objects:)`), for an app that copies objects between
 /// tenants (JamfMigrator): every object type it reads and writes, on both of
-/// Jamf Pro's APIs, from the same objects.
+/// Jamf Pro’s APIs, from the same objects.
 ///
 /// - **Classic API** (`/JSSResource/…`): lists as JSON (`{"policies": [{id,
 ///   name}]}`) or XML, details as XML, create with `POST …/id/0` answering
 ///   `<policy><id>n</id></policy>`, `PUT` merged into the stored object as
 ///   Jamf does (an icon-only `PUT` keeps the rest of the policy), `DELETE`.
 ///   A duplicate name is refused with 409 "Duplicate name", a missing object
-///   with 404, both as Jamf's HTML pages. A written `<password>` reads back
+///   with 404, both as Jamf’s HTML pages. A written `<password>` reads back
 ///   as `<password_sha256>`, as Jamf never returns a password.
 /// - **Jamf Pro API** (`/api/…`): lists with `page` / `page-size` and
 ///   `totalCount`, details, create answering `{"id", "href"}`, `PUT`
 ///   (replace), `PATCH` (merge-patch), `DELETE`, the settings pages (one
 ///   object, read and updated), the Jamf Pro version.
-/// - Jamf's special cases: PreStages keep a `versionLock` (a `PUT` with an
+/// - Jamf’s special cases: PreStages keep a `versionLock` (a `PUT` with an
 ///   old one is refused with 409 `OPTIMISTIC_LOCK_FAILED`), get a
 ///   `profileUuid` and their own nested block IDs, and never return the
 ///   admin or Recovery Lock password; a patch title is created by
@@ -26,18 +26,17 @@ import Foundation
 ///   title; Self Service icons upload and download; ADE instances and the
 ///   device groups by platform ID (`/api/v2/groups`) are listed.
 ///
-/// What's written stays until the app quits. The `missingPermission`
-/// scenario refuses a few types on the store it's given to, with Jamf's 403.
+/// What’s written stays until the app quits. The `missingPermission`
+/// scenario refuses a few types on the store it’s given to, with Jamf’s 403.
 public nonisolated final class DemoJamfProObjects: @unchecked Sendable {
 
     // MARK: What the store holds
 
-    /// A Classic resource: its list's container, the root element of one
+    /// A Classic resource: its list’s container, the root element of one
     /// object, and the path component before an ID.
     struct ClassicKind {
         let container: String
         let root: String
-        var idPath = "id"
         /// Answered but never written by the app (patch sources).
         var readOnly = false
     }
@@ -72,7 +71,7 @@ public nonisolated final class DemoJamfProObjects: @unchecked Sendable {
 
     /// A Jamf Pro API list.
     struct ProKind {
-        /// The field holding the object's unique name.
+        /// The field holding the object’s unique name.
         var nameKey = "name"
         /// Listed as a bare array, not a page (patch title configurations).
         var bareArray = false
@@ -111,7 +110,7 @@ public nonisolated final class DemoJamfProObjects: @unchecked Sendable {
         "v1/self-service/branding/macos": ProKind(nameKey: "brandingName"),
     ]
 
-    /// Jamf's App Catalog (`/api/v1/app-installers/titles`): the same on
+    /// Jamf’s App Catalog (`/api/v1/app-installers/titles`): the same on
     /// every tenant, read only.
     static var appInstallerTitles: [[String: Any]] { [
         ("0BC", "Google Chrome", "Google"), ("0C4", "Mozilla Firefox", "Mozilla"),
@@ -125,7 +124,7 @@ public nonisolated final class DemoJamfProObjects: @unchecked Sendable {
         "v1/reenrollment", "v2/local-admin-password/settings", "v1/onboarding", "v3/sso",
     ]
 
-    /// The device group lists behind `/api/v2/groups`, with their platform's name.
+    /// The device group lists behind `/api/v2/groups`, with their device type.
     private static let groupLists: [(path: String, type: String, smart: Bool)] = [
         ("v3/computer-groups/smart-groups", "COMPUTER", true), ("v3/computer-groups/static-groups", "COMPUTER", false),
         ("v2/mobile-device-groups/smart-groups", "MOBILE", true), ("v2/mobile-device-groups/static-groups", "MOBILE", false),
@@ -174,7 +173,7 @@ public nonisolated final class DemoJamfProObjects: @unchecked Sendable {
     }
 
     /// The Jamf Pro behind "Contoso (Demo)"'s Platform gateway (`/pro/…` and
-    /// `/proclassic/…`): Contoso's objects, with Automated Device Enrollment,
+    /// `/proclassic/…`): Contoso’s objects, with Automated Device Enrollment,
     /// Apps and Books and Self Service branding set up.
     public static func contosoPlatform() -> DemoJamfProObjects {
         var seed = DemoJamfProObjectSamples.source
@@ -183,13 +182,13 @@ public nonisolated final class DemoJamfProObjects: @unchecked Sendable {
         return DemoJamfProObjects(host: DemoSamples.platformHost, version: "11.33.1-t1761000000000", seed: seed)
     }
 
-    /// Contoso's golden master, for "Contoso Source (Demo)".
+    /// Contoso’s golden master, for "Contoso Source (Demo)".
     public static func contosoSource() -> DemoJamfProObjects {
         DemoJamfProObjects(host: DemoJamfProObjectSamples.sourceHost, version: "11.33.1-t1761000000000",
                            seed: DemoJamfProObjectSamples.source)
     }
 
-    /// A fresh Contoso tenant with Jamf's built-ins and a few objects already
+    /// A fresh Contoso tenant with Jamf’s built-ins and a few objects already
     /// there, for "Contoso Destination (Demo)". The `missingPermission`
     /// scenario refuses its webhooks and single sign-on settings.
     public static func contosoDestination(scenario: DemoScenario? = nil) -> DemoJamfProObjects {
@@ -198,10 +197,10 @@ public nonisolated final class DemoJamfProObjects: @unchecked Sendable {
                            refusing: scenario == .missingPermission ? ["JSSResource/webhooks", "api/v3/sso"] : [])
     }
 
-    // MARK: An app's own sample objects
+    // MARK: An app’s own sample objects
 
     /// Adds Jamf Pro API objects at a list path (e.g. `"v1/app-installers/deployments"`),
-    /// an app's own sample data after the ones already there. One whose ID
+    /// an app’s own sample data after the ones already there. One whose ID
     /// is already there replaces it in place; one without a numeric ID is skipped.
     public func add(_ objects: [LosslessJSON.Object], at path: String) {
         lock.withLock {
@@ -214,7 +213,7 @@ public nonisolated final class DemoJamfProObjects: @unchecked Sendable {
         }
     }
 
-    // MARK: For tests and the app's checks
+    // MARK: For tests and the app’s checks
 
     /// The names of the objects at a list path as the app requests it, e.g.
     /// `"JSSResource/policies"`, `"JSSResource/accounts/groups"` or
@@ -232,7 +231,7 @@ public nonisolated final class DemoJamfProObjects: @unchecked Sendable {
         }
     }
 
-    /// A Classic object's XML as the store holds it, found by name.
+    /// A Classic object’s XML as the store holds it, found by name.
     public func classicXML(_ resource: String, named name: String) -> String? {
         lock.withLock { classic[resource]?.values.first { $0.objectName == name }?.xml() }
     }
@@ -247,24 +246,16 @@ public nonisolated final class DemoJamfProObjects: @unchecked Sendable {
         }
     }
 
-    /// A settings page as the store holds it, e.g. `"v3/check-in"`.
-    public func settingsPage(_ path: String) -> LosslessJSON? {
-        lock.withLock {
-            guard let object = settings[path], let data = try? JSONSerialization.data(withJSONObject: object) else { return nil }
-            return try? LosslessJSON(data: data)
-        }
-    }
-
     // MARK: Requests
 
-    /// Answers a signed-in request; `parts` are the path's segments.
+    /// Answers a signed-in request; `parts` are the path’s segments.
     func respond(to request: DemoRequest, parts: [String]) -> DemoResponse {
         lock.withLock {
             requestCountValue += 1
             let joined = parts.joined(separator: "/")
             if refused.contains(where: { joined == $0 || joined.hasPrefix($0 + "/") }) {
                 return parts.first == "JSSResource" ? Self.classicError(403, "Forbidden", "You do not have access to this resource")
-                    : DemoJamfProServer.error(403, "INVALID_PRIVILEGE", "Forbidden: the demo's missingPermission scenario")
+                    : DemoJamfProServer.error(403, "INVALID_PRIVILEGE", "Forbidden: the demo’s missingPermission scenario")
             }
             switch parts.first {
             case "JSSResource": return classicRequest(request, Array(parts.dropFirst()))
@@ -286,7 +277,7 @@ public nonisolated final class DemoJamfProObjects: @unchecked Sendable {
         switch (request.method, path.count) {
         case ("GET", 1):
             return classicList(resource, kind: kind, container: kind.container, root: kind.root, request: request)
-        case ("GET", 3) where path[1] == kind.idPath:
+        case ("GET", 3) where path[1] == "id":
             guard let id = Int(path[2]), let node = classic[resource]?[id] else { return Self.classicNotFound() }
             return Self.xmlResponse(200, node.xml())
         case ("GET", 3) where path[1] == "name":
@@ -294,16 +285,16 @@ public nonisolated final class DemoJamfProObjects: @unchecked Sendable {
                 return Self.classicNotFound()
             }
             return Self.xmlResponse(200, node.xml())
-        case ("POST", 3) where path[1] == kind.idPath && !kind.readOnly:
+        case ("POST", 3) where path[1] == "id" && !kind.readOnly:
             return classicCreate(resource, root: kind.root, body: request.body)
         case ("POST", 4) where resource == "patchpolicies" && path[1] == "softwaretitleconfig" && path[2] == "id":
             guard let titleID = Int(path[3]), pro["v3/patch-software-title-configurations"]?[titleID] != nil else {
                 return Self.classicNotFound()
             }
             return classicCreate(resource, root: kind.root, body: request.body, patchTitleID: titleID)
-        case ("PUT", 3) where path[1] == kind.idPath && !kind.readOnly:
+        case ("PUT", 3) where path[1] == "id" && !kind.readOnly:
             return classicUpdate(resource, root: kind.root, id: Int(path[2]), body: request.body)
-        case ("DELETE", 3) where path[1] == kind.idPath && !kind.readOnly:
+        case ("DELETE", 3) where path[1] == "id" && !kind.readOnly:
             return classicDelete(resource, root: kind.root, id: Int(path[2]))
         default:
             return Self.classicError(405, "Method Not Allowed", "The request method is not supported here")
@@ -436,7 +427,7 @@ public nonisolated final class DemoJamfProObjects: @unchecked Sendable {
         DemoResponse(status: status, headers: ["Content-Type": "application/xml;charset=UTF-8"], body: Data(xml.utf8))
     }
 
-    /// Jamf's Classic error page.
+    /// Jamf’s Classic error page.
     static func classicError(_ status: Int, _ title: String, _ message: String) -> DemoResponse {
         let html = "<html><head><title>Status page</title></head><body><p>\(title)</p><p>\(message)</p></body></html>"
         return DemoResponse(status: status, headers: ["Content-Type": "text/html;charset=UTF-8"], body: Data(html.utf8))
@@ -509,7 +500,7 @@ public nonisolated final class DemoJamfProObjects: @unchecked Sendable {
         object["id"] = "\(id)"
         if kind.isPreStage { Self.createPreStage(&object, id: id) }
         if key == "v1/volume-purchasing-locations" {
-            // Jamf reads the token and never returns it; Apple's details come back instead.
+            // Jamf reads the token and never returns it; Apple’s details come back instead.
             object["serviceToken"] = nil
             object.merge(DemoJamfProObjectSamples.volumePurchasingLocation(id: id, name: name)) { stored, _ in stored }
         }
@@ -558,9 +549,9 @@ public nonisolated final class DemoJamfProObjects: @unchecked Sendable {
         }
     }
 
-    /// A tenant's setup pages, as a deployment tool reads and writes them:
+    /// A tenant’s setup pages, as a deployment tool reads and writes them:
     /// the server address, the App Catalog, the group lists, Automated Device
-    /// Enrollment's key and token upload, and the Jamf Protect link. Nil for
+    /// Enrollment’s key and token upload, and the Jamf Protect link. Nil for
     /// any other path.
     private func setupRequest(_ request: DemoRequest, _ key: String) -> DemoResponse? {
         switch (request.method, key) {
@@ -611,7 +602,7 @@ public nonisolated final class DemoJamfProObjects: @unchecked Sendable {
         }
     }
 
-    /// The groups in `lists`, in ID order, with whether they're smart.
+    /// The groups in `lists`, in ID order, with whether they’re smart.
     private func groups(_ lists: [String]) -> [(id: Int, name: String, smart: Bool)] {
         lists.flatMap { list in
             (pro[list] ?? [:]).map { (id: $0.key, name: "\($0.value["name"] ?? "")", smart: list.hasSuffix("smart-groups")) }
@@ -632,14 +623,16 @@ public nonisolated final class DemoJamfProObjects: @unchecked Sendable {
         return DemoJSON.response(201, ["id": id, "name": name, "url": "https://\(host)/icon?id=\(id)"])
     }
 
-    /// Every device group as the Platform namespaces see it: `groupPlatformId`.
+    /// Every device group as the Platform namespaces see it: `groupPlatformId`,
+    /// with the Platform API’s split: `deviceType` COMPUTER or MOBILE,
+    /// `groupType` SMART or STATIC.
     private func platformGroups() -> [[String: Any]] {
         Self.groupLists.flatMap { list in
             (pro[list.path] ?? [:]).sorted { $0.key < $1.key }.map { id, group -> [String: Any] in
                 let offset = list.type == "COMPUTER" ? 0x7100 : 0x7200
                 return ["groupPlatformId": DemoSamples.uuid(offset + (list.smart ? 0 : 0x80) + id % 0x80),
                         "groupJamfProId": "\(id)", "groupName": "\(group["name"] ?? "")",
-                        "groupType": list.type, "smart": list.smart]
+                        "deviceType": list.type, "groupType": list.smart ? "SMART" : "STATIC"]
             }
         }
     }
@@ -745,7 +738,7 @@ nonisolated struct DemoXML {
         children.first { $0.name == name }
     }
 
-    /// The object's name: in `<general>` or `<connection>` (LDAP servers) when it has one.
+    /// The object’s name: in `<general>` or `<connection>` (LDAP servers) when it has one.
     var objectName: String {
         for block in ["general", "connection"] {
             if let name = child(block)?.child("name")?.text { return name }
@@ -753,7 +746,7 @@ nonisolated struct DemoXML {
         return child("name")?.text ?? ""
     }
 
-    /// Sets the object's ID where Jamf shows it: first in `<general>` or
+    /// Sets the object’s ID where Jamf shows it: first in `<general>` or
     /// `<connection>`, else first in the object.
     mutating func setID(_ id: Int) {
         for block in ["general", "connection"] {
@@ -814,8 +807,8 @@ nonisolated struct DemoXML {
         Set(children.map(\.name)).count == children.count
     }
 
-    func xml(declaration: Bool = true) -> String {
-        (declaration ? "<?xml version=\"1.0\" encoding=\"UTF-8\"?>" : "") + element()
+    func xml() -> String {
+        "<?xml version=\"1.0\" encoding=\"UTF-8\"?>" + element()
     }
 
     private func element() -> String {

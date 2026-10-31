@@ -68,7 +68,7 @@ public nonisolated enum SignInMethod: String, Codable, CaseIterable, Identifiabl
         case .schoolAPIKey: "API key"
         case .entraClientSecret: "App registration with client secret"
         case .microsoftInteractive: "Microsoft sign-in"
-        case .applePrivateKey: "API key"
+        case .applePrivateKey: "Private key"
         }
     }
 
@@ -116,7 +116,7 @@ public nonisolated struct JamfProtectSettings: Codable, Hashable, Sendable {
 }
 
 /// Which secret of a connection: the one its sign-in method needs, or the
-/// Jamf Protect add-on's.
+/// Jamf Protect add-on’s.
 public nonisolated enum ConnectionSecretKind: String, CaseIterable, Sendable {
     case main
     case protect
@@ -218,29 +218,29 @@ public nonisolated struct Connection: Identifiable, Codable, Hashable, Sendable 
     }
 
     /// Problems with values that were typed in, in plain language. Empty
-    /// fields count only where the service can't work without them.
+    /// fields count only where the service can’t work without them.
     public var issues: [String] {
         var issues = [String]()
         switch service {
         case .jamfPlatform:
             let environment = trimmed(environmentID)
             if !environment.isEmpty && UUID(uuidString: environment) == nil {
-                issues.append("The Environment ID is not a UUID (8-4-4-4-12 hexadecimal characters). Copy it from Jamf Account.")
+                issues.append(JamfPlatform.APIError.environmentIDNotUUID)
             }
         case .jamfPro, .jamfSchool:
             if !Self.isWebAddress(trimmed(serverURL)) {
-                issues.append("Enter the server address, starting with https://.")
+                issues.append("Enter the server URL, starting with https://.")
             }
         case .intune:
             let client = trimmed(clientID)
             if !client.isEmpty && UUID(uuidString: client) == nil {
-                issues.append("The client ID is not a UUID. Copy the Application (client) ID from Entra.")
+                issues.append("The client ID isn’t a UUID. Copy the Application (client) ID from Entra.")
             }
         case .appleBusinessManager, .appleSchoolManager:
             break
         }
         if let protect, !trimmed(protect.url).isEmpty && !Self.isWebAddress(trimmed(protect.url)) {
-            issues.append("Enter the Jamf Protect address, starting with https://.")
+            issues.append("Enter the Protect URL, starting with https://.")
         }
         return issues
     }
@@ -255,8 +255,8 @@ public nonisolated struct Connection: Identifiable, Codable, Hashable, Sendable 
     }
 }
 
-/// An app's own saved record of a connection (JamfMigrator's `Tenant`,
-/// AppSettings2Blueprint's `ConnectionProfile`). The app's type keeps its own
+/// An app’s own saved record of a connection (JamfMigrator’s `Tenant`,
+/// AppSettings2Blueprint’s `ConnectionProfile`). The app’s type keeps its own
 /// field names and its own settings, so files and keys stay as they are;
 /// `connection` maps its connection fields to and from the shared ones.
 ///

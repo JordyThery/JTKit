@@ -18,12 +18,12 @@ public nonisolated struct ActivityLogEntry: Identifiable, Sendable {
     /// Marks the entry failed even though it has no status, e.g. a request
     /// that never got a response. Entries with a status ≥ 400 fail anyway.
     public var failedWithoutStatus: Bool
-    /// Something worth a look that isn't a failure, e.g. a wait before a
+    /// Something worth a look that isn’t a failure, e.g. a wait before a
     /// retry or a refused request. Shown with a warning symbol.
     public var isWarning: Bool
     /// The service, e.g. "Jamf Platform API".
     public var service: String?
-    /// The connection's name.
+    /// The connection’s name.
     public var connection: String?
     /// What was sent and received, for entries the request recorder made.
     public var request: ActivityRequestDetails?
@@ -70,6 +70,29 @@ public nonisolated struct ActivityLogEntry: Identifiable, Sendable {
     /// Failed, or marked as a warning: what "Problems Only" shows.
     public var isProblem: Bool {
         isFailure || isWarning
+    }
+
+    /// The entry with every text cleaned as free text (`Redaction.text`)
+    /// and its headers redacted by name. Cleaning twice changes nothing, so
+    /// what the request recorder already cleaned stays as it was.
+    var redacted: ActivityLogEntry {
+        var entry = self
+        entry.detail = Redaction.text(detail)
+        entry.note = note.map(Redaction.text)
+        if var request {
+            func clean(_ headers: [HTTPHeader]) -> [HTTPHeader] {
+                headers.map { HTTPHeader(name: $0.name, value: Redaction.text(Redaction.headerValue(name: $0.name, value: $0.value))) }
+            }
+            request.url = Redaction.text(request.url)
+            request.requestHeaders = clean(request.requestHeaders)
+            request.responseHeaders = clean(request.responseHeaders)
+            request.requestBody = request.requestBody.map(Redaction.text)
+            request.responseBody = request.responseBody.map(Redaction.text)
+            request.error = request.error.map(Redaction.text)
+            request.bodyNote = request.bodyNote.map(Redaction.text)
+            entry.request = request
+        }
+        return entry
     }
 }
 
@@ -131,8 +154,10 @@ public final class ActivityLog {
         self.capacity = capacity
     }
 
+    /// Adds the entry with its texts redacted (`ActivityLogEntry.redacted`),
+    /// whoever made it, so an app’s own entry can’t log a secret either.
     public func append(_ entry: ActivityLogEntry) {
-        entries.append(entry)
+        entries.append(entry.redacted)
         if entries.count > capacity {
             entries.removeFirst(entries.count - capacity)
         }
@@ -155,10 +180,10 @@ extension ActivityLogEntry {
     ///
     /// - Parameters:
     ///   - devices: serial numbers, UDIDs or ECIDs the action was about,
-    ///     masked in the bug-report export (also when the summary doesn't
+    ///     masked in the bug-report export (also when the summary doesn’t
     ///     show them).
-    ///   - failed: the action didn't happen; put why in `note`.
-    /// - Parameter isWarning: e.g. Apple still processing a write (step 9).
+    ///   - failed: the action didn’t happen; put why in `note`.
+    /// - Parameter isWarning: e.g. Apple still processing a write.
     public static func action(
         _ summary: String,
         note: String? = nil,

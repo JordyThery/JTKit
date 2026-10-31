@@ -4,7 +4,7 @@ import Testing
 import JTKitTestSupport
 
 /// Counts how many token requests are in progress at once; the Graph client
-/// asks for the token inside a request's turn.
+/// asks for the token inside a request’s turn.
 final class TokenInFlight: BearerTokenSource, @unchecked Sendable {
     private let state = Locked((now: 0, most: 0))
     var most: Int { state.value.most }
@@ -29,14 +29,14 @@ private func graphClient(_ server: MockServer, log: ActivityLog = ActivityLog(),
 }
 
 @MainActor
-private func graphError(_ body: () async throws -> Void) async -> GraphError? {
+private func graphError(_ body: () async throws -> Void) async -> Graph.APIError? {
     do {
         try await body()
-        Issue.record("Expected a GraphError")
-    } catch let error as GraphError {
+        Issue.record("Expected a Graph.APIError")
+    } catch let error as Graph.APIError {
         return error
     } catch {
-        Issue.record("Expected a GraphError, got \(error)")
+        Issue.record("Expected a Graph.APIError, got \(error)")
     }
     return nil
 }
@@ -96,7 +96,7 @@ struct GraphClientTests {
         #expect(tokens.most == 4)
     }
 
-    @Test("A create is not repeated after a server error")
+    @Test("A create isn’t repeated after a server error")
     func createNotRepeated() async throws {
         let server = MockServer { _ in .json(503, "{}") }
         let error = await graphError { try await graphClient(server).post("groups", version: .v1, body: Data("{}".utf8)) }
@@ -123,6 +123,18 @@ struct GraphClientTests {
         try await client.put("deviceManagement/configurationPolicies/1", version: .beta, body: Data("{}".utf8))
         try await client.post("deviceManagement/deviceCompliancePolicies/1/assign", version: .v1, body: Data("{}".utf8), safeToRepeat: true)
         #expect(server.requests.map(\.method) == ["PATCH", "PATCH", "PUT", "PUT", "POST", "POST"])
+    }
+
+    @Test("send: a POST is never repeated after a server error; PUT, PATCH and DELETE are")
+    func sendRepeatsByMethod() async throws {
+        let calls = Counter()
+        let server = MockServer { _ in calls.next() <= 2 ? .json(503, "{}") : ok }
+        let client = graphClient(server)
+        await #expect(throws: Graph.APIError.self) {
+            _ = try await client.send("POST", "deviceManagement/deviceCompliancePolicies/1/assign", version: .v1, body: Data("{}".utf8))
+        }
+        _ = try await client.send("PATCH", "deviceManagement/deviceShellScripts/1", version: .beta, body: Data("{}".utf8))
+        #expect(server.requests.map(\.method) == ["POST", "PATCH", "PATCH"])
     }
 
     @Test("A delete repeated after a server error that then finds nothing is done")
@@ -171,7 +183,7 @@ struct GraphClientTests {
         #expect(sleeps.recorded == [.seconds(10), .seconds(120), .seconds(120)])
     }
 
-    @Test("Graph's dates read with or without fractional seconds")
+    @Test("Graph’s dates read with or without fractional seconds")
     func dates() throws {
         struct Dated: Decodable { let a: Date; let b: Date }
         let value = try Graph.Client.decode(Dated.self, from: Data(#"{"a":"2026-01-15T10:30:00.1234567Z","b":"2026-01-15T10:30:00Z"}"#.utf8))
@@ -268,7 +280,7 @@ struct GraphErrorTests {
         #expect(error?.message().hasSuffix("The app registration is missing the “DeviceManagementManagedDevices.PrivilegedOperations.All” application permission. Add it in Entra under App registrations › API permissions, then grant admin consent.") == true)
     }
 
-    @Test("The app's hints come before the standard ones")
+    @Test("The app’s hints come before the standard ones")
     func appHintsFirst() async throws {
         let server = MockServer { _ in .json(429, "{}") }
         let error = await graphError { _ = try await graphClient(server, hints: ["App hint."]).post("groups", version: .v1, body: Data()) }
@@ -276,7 +288,7 @@ struct GraphErrorTests {
         #expect(lines.suffix(2) == ["App hint.", "Microsoft Graph is limiting how many requests this app sends. Wait a minute, then try again."])
     }
 
-    @Test("An answer that isn't Graph's error shape shows its start")
+    @Test("An answer that isn’t Graph’s error shape shows its start")
     func plainText() async throws {
         let server = MockServer { _ in MockResponse(status: 502, headers: ["Content-Type": "text/plain"], body: Data("Bad gateway".utf8)) }
         let error = await graphError { _ = try await graphClient(server).post("groups", version: .v1, body: Data()) }
@@ -292,7 +304,7 @@ struct GraphErrorTests {
         #expect(export.contains("0d2f6b1c-6f1e-4d6a-9c1a-2b3c4d5e6f70"))
     }
 
-    @Test("Sign-in errors keep the first line of Microsoft's description, its Trace and Correlation IDs")
+    @Test("Sign-in errors keep the first line of Microsoft’s description, its Trace and Correlation IDs")
     func signInBody() throws {
         let body = try #require(Graph.ErrorBody(data: Data(#"""
         {"error":"invalid_client","error_description":"AADSTS7000215: Invalid client secret provided.\r\nTrace ID: t-1\r\nCorrelation ID: c-1\r\nTimestamp: 2026-10-26 19:00:00Z",
@@ -300,7 +312,7 @@ struct GraphErrorTests {
         """#.utf8)))
         #expect(body.line == "invalid_client: AADSTS7000215: Invalid client secret provided.")
         #expect(body.errorCodes == [7000215])
-        let error = GraphError(.signIn(status: 401, body: body, text: nil), access: .application)
+        let error = Graph.APIError(.signIn(status: 401, body: body, text: nil), access: .application)
         #expect(error.message() == """
             Sign-in failed: HTTP 401 Unauthorized
             invalid_client: AADSTS7000215: Invalid client secret provided.
@@ -314,7 +326,7 @@ struct GraphErrorTests {
           arguments: [(7000222, "has expired"), (700016, "No app with this client ID"), (90002, "tenant wasn’t found"),
                       (900023, "tenant wasn’t found"), (50034, "Check the tenant ID, the client ID and the client secret.")])
     func signInHints(code: Int, phrase: String) {
-        #expect(GraphError.signInHint(status: 400, codes: [code]).contains(phrase))
+        #expect(Graph.APIError.signInHint(status: 400, codes: [code]).contains(phrase))
     }
 }
 
@@ -345,7 +357,7 @@ struct GraphPermissionTests {
         #expect(Graph.Permission.required(method: method, path: path) == permission)
     }
 
-    @Test("Calls outside the table have none; the organization's application name differs")
+    @Test("Calls outside the table have none; the organization’s application name differs")
     func outside() {
         #expect(Graph.Permission.required(method: "GET", path: "users") == nil)
         #expect(Graph.Permission.organizationRead.name(for: .delegated) == "User.Read")
@@ -356,7 +368,7 @@ struct GraphPermissionTests {
 
 @Suite("Graph calls never recorded")
 struct GraphSensitiveTests {
-    @Test("An upload's commit, recovery keys and LAPS passwords", arguments: [
+    @Test("An upload’s commit, recovery keys and LAPS passwords", arguments: [
         "/beta/deviceAppManagement/mobileApps/a1/microsoft.graph.macOSPkgApp/contentVersions/1/files/f1/commit",
         "/beta/deviceAppManagement/mobileApps/a1/microsoft.graph.mobileLobApp/contentVersions/1/files/f1/commit",
         "/v1.0/deviceManagement/managedDevices/d1/getFileVaultKey",
@@ -373,7 +385,7 @@ struct GraphSensitiveTests {
         #expect(!SensitiveRequests.isSensitive(path: "/beta/deviceAppManagement/mobileApps/a1/microsoft.graph.mobileLobApp/contentVersions/1/files/f1"))
     }
 
-    @Test("A commit's failure answer is withheld too")
+    @Test("A commit’s failure answer is withheld too")
     @MainActor
     func commitWithheld() async throws {
         let log = ActivityLog()

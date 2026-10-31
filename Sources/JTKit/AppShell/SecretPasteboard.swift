@@ -1,7 +1,7 @@
 import AppKit
 
 /// Copies a secret (a recovery key, a password, a PIN) to the clipboard the
-/// careful way (decided by Jordy, ROADMAP step 7):
+/// careful way:
 /// - marked concealed (`org.nspasteboard.ConcealedType`), so clipboard
 ///   managers leave it out of their history;
 /// - kept on this Mac (`currentHostOnly`), not sent to other devices through
@@ -10,8 +10,8 @@ import AppKit
 ///   secret: anything copied since is left alone.
 @MainActor
 public enum SecretPasteboard {
-    /// The marker clipboard managers honour (nspasteboard.org).
-    public static let concealedType = NSPasteboard.PasteboardType("org.nspasteboard.ConcealedType")
+    /// The marker clipboard managers honor (nspasteboard.org).
+    static let concealedType = NSPasteboard.PasteboardType("org.nspasteboard.ConcealedType")
 
     public static let clearDelay: Duration = .seconds(60)
 
@@ -38,7 +38,7 @@ public enum SecretPasteboard {
             } catch {
                 return
             }
-            // only our copy: nothing was copied since, and it is still the secret
+            // only the copy made here: nothing was copied since, and it is still the secret
             guard pasteboard.changeCount == count, pasteboard.string(forType: .string) == secret else { return }
             pasteboard.clearContents()
         }

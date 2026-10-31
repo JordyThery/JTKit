@@ -95,7 +95,7 @@ struct DemoWorldDataTests {
         for device in DemoWorld.devices(in: .academy) where device.appleServerID != nil {
             #expect(device.appleServerID == DemoWorld.jamfSchoolServerID && device.managedBy == .jamfSchool)
         }
-        // A device's MDM is the one Apple sends it to, unless it's one of the gaps below.
+        // A device’s MDM is the one Apple sends it to, unless it’s one of the gaps below.
         for device in DemoWorld.devices where device.managedBy != nil && device.appleServerID != nil {
             let expected: DemoWorld.MDM = switch device.appleServerID {
             case DemoWorld.jamfProServerID: .jamfPro
@@ -169,7 +169,24 @@ struct DemoJamfProServerTests {
         #expect(byUDID.hardware?.serialNumber == iPhone.serial && byUDID.general?.assetTag == iPhone.assetTag)
     }
 
-    @Test("ADE instances carry Apple's server ID, PreStage scope can be changed")
+    @Test("One mobile device by ID (v2/mobile-devices/{id}): its general values, no unlock token")
+    func singleMobileDevice() async throws {
+        let iPhone = try #require(DemoWorld.devices.last)
+        let client = try jamfPro(demoMode())
+        let response = try await client.sendThrowing(HTTPRequest(path: "pro/v2/mobile-devices/\(iPhone.number)"))
+        let detail = try JSONDecoder().decode(JamfPro.MobileDeviceDetail.self, from: response.data)
+        #expect(detail.general.displayName == iPhone.name && detail.general.udid == iPhone.udid)
+        #expect(detail.general.assetTag == iPhone.assetTag && detail.general.siteID == "2")
+        #expect(detail.general.supervised == true && detail.general.managementID == iPhone.managementID)
+        #expect(!String(decoding: response.data, as: UTF8.self).contains("unlockToken"))
+
+        let mac = try #require(DemoWorld.devices(managedBy: .jamfPro).first { $0.isComputer })
+        await #expect(throws: JamfPlatform.APIError.self) {
+            _ = try await client.sendThrowing(HTTPRequest(path: "pro/v2/mobile-devices/\(mac.number)"))
+        }
+    }
+
+    @Test("ADE instances carry Apple’s server ID, PreStage scope can be changed")
     func enrollment() async throws {
         let demo = demoMode()
         let client = try jamfPro(demo)
@@ -263,13 +280,13 @@ struct DemoIntuneServerTests {
     func reads() async throws {
         let demo = demoMode()
         let client = try intune(demo)
-        try await client.intuneTestConnection()
+        try await client.testConnection()
         let devices = try await client.intuneDevicesBySerial()
         #expect(devices.count == DemoWorld.devices(managedBy: .intune).count)
         for missing in DemoWorld.missingFromIntune { #expect(devices[missing.serial] == nil) }
     }
 
-    @Test("Pages are followed on Graph's address")
+    @Test("Pages are followed on Graph’s address")
     func paging() async throws {
         let server = DemoIntuneServer(pageSize: 2)
         let network = DemoNetwork(servers: Dictionary(uniqueKeysWithValues: DemoIntuneServer.hosts.map { ($0, server as any DemoServer) }))
@@ -296,14 +313,14 @@ struct DemoIntuneServerTests {
         var other = Connection.demoIntune
         other.tenantID = DemoSamples.uuid(0xe799)
         let client = try Graph.Client(connection: other, secret: { "s" }, session: network.session, log: nil)
-        await #expect(throws: (any Error).self) { try await client.intuneTestConnection() }
+        await #expect(throws: (any Error).self) { try await client.testConnection() }
     }
 }
 
 @Suite("Demo Apple Business and School Manager")
 @MainActor
 struct DemoAppleBusinessServerTests {
-    @Test("Signs in with the launch's key and reads Contoso as DemoWorld has it")
+    @Test("Signs in with the launch’s key and reads Contoso as DemoWorld has it")
     func reads() async throws {
         let demo = demoMode()
         let client = try apple(demo)
@@ -324,7 +341,7 @@ struct DemoAppleBusinessServerTests {
         #expect(!events.events.isEmpty)
     }
 
-    @Test("Lists are paged on Apple's own address")
+    @Test("Lists are paged on Apple’s own address")
     func paging() async throws {
         let key = P256.Signing.PrivateKey()
         let business = DemoAppleBusinessServer(organization: .contoso, pageSize: 7)
@@ -370,11 +387,11 @@ struct DemoAppleBusinessServerTests {
         let source = try source(demo, .demoAppleBusiness)
         let other = P256.Signing.PrivateKey().pemRepresentation
         let client = try ABM.Client(connection: .demoAppleBusiness, privateKey: { other }, session: source.session, log: nil)
-        await #expect(throws: ABM.Error.self) { _ = try await client.mdmServers() }
+        await #expect(throws: ABM.APIError.self) { _ = try await client.mdmServers() }
     }
 }
 
-@Suite("Apple's rate limit: off for the demo organizations only")
+@Suite("Apple’s rate limit: off for the demo organizations only")
 @MainActor
 struct DemoRateLimitTests {
     @Test("Decided by the connection, not the demo switch")
@@ -387,9 +404,9 @@ struct DemoRateLimitTests {
         demo.isOn = true
         defer { demo.isOn = false }
         #expect(ABM.rateLimit(for: real) == ABM.rateLimit, "a real organization keeps it while demo mode is on")
-        #expect(try ABM.Client(connection: real, privateKey: { "" }, log: nil).rateLimit == ABM.rateLimit)
+        #expect(try ABM.Client(connection: real, privateKey: { "" }, session: URLSession(configuration: .ephemeral), log: nil).rateLimit == ABM.rateLimit)
         #expect(try apple(demo).rateLimit == nil)
-        #expect(ABM.Client(service: .business, tokens: StaticToken(), recorder: RequestRecorder(log: nil)).rateLimit
+        #expect(ABM.Client(service: .business, tokens: StaticToken(), recorder: RequestRecorder(session: URLSession(configuration: .ephemeral), log: nil)).rateLimit
                 == ABM.rateLimit, "the default keeps the limit")
     }
 
@@ -400,7 +417,9 @@ struct DemoRateLimitTests {
         let clock = VirtualClock()
         func client(_ connection: Connection) -> ABM.Client {
             let recorder = ABM.recorder(.business, session: source.session, log: nil)
-            let tokens = ABM.TokenProvider(service: .business, clientID: connection.clientID, keyID: connection.keyID,
+            // always the demo organization’s sign-in; only the rate limit follows `connection`
+            let tokens = ABM.TokenProvider(service: .business, clientID: Connection.demoAppleBusiness.clientID,
+                                           keyID: Connection.demoAppleBusiness.keyID,
                                            privateKey: source.secret, recorder: recorder)
             return ABM.Client(service: .business, tokens: tokens, recorder: recorder, rateLimit: ABM.rateLimit(for: connection),
                               sleep: { clock.advance($0) }, now: { clock.now })
@@ -408,9 +427,9 @@ struct DemoRateLimitTests {
         let demoClient = client(.demoAppleBusiness)
         for _ in 0..<25 { _ = try await demoClient.mdmServers() }
         #expect(clock.sleeps == 0)
-        // The same organization behind a connection that isn't a demo one (test only: still the demo network).
-        var real = Connection.demoAppleBusiness
-        real.id = UUID()
+        // The same organization behind a connection that isn’t a demo one (test only: still the demo network).
+        let real = Connection(name: "Real", service: .appleBusinessManager,
+                              clientID: "BUSINESSAPI.\(UUID().uuidString)", keyID: UUID().uuidString)
         #expect(!real.isDemo)
         let realClient = client(real)
         for _ in 0..<25 { _ = try await realClient.mdmServers() }
@@ -441,7 +460,7 @@ private struct StaticToken: BearerTokenSource {
 @Suite("The demo guarantee")
 @MainActor
 struct DemoGuaranteeTests {
-    @Test("Every demo connection's client is answered inside the app; a real connection gets no demo source")
+    @Test("Every demo connection’s client is answered inside the app; a real connection gets no demo source")
     func everyClient() async throws {
         let demo = demoMode()
         _ = try await jamfPro(demo).computers(serials: [DemoWorld.devices[0].serial])
@@ -466,7 +485,7 @@ struct DemoGuaranteeTests {
         #expect(demo.source(for: Connection(name: "Contoso", service: .intune)) == nil)
     }
 
-    @Test("Apple's demo key is made for the launch, kept in memory and never saved")
+    @Test("Apple’s demo key is made for the launch, kept in memory and never saved")
     func throwawayKey() throws {
         let defaults = UserDefaults(suiteName: "jtkit-demo-key-\(UUID().uuidString)")!
         let demo = DemoMode(key: "demoMode", defaults: defaults, arguments: ["app"])
@@ -477,7 +496,7 @@ struct DemoGuaranteeTests {
         #expect(try P256.Signing.PrivateKey(pemRepresentation: pem).publicKey.rawRepresentation.count == 64)
         #expect(try source(demo, .demoAppleSchool).secret() == pem, "the same for the launch")
         #expect(try source(demoMode(), .demoAppleBusiness).secret() != pem, "a new one each launch")
-        // Not in the demo's secret store, its settings or a saved-connections store.
+        // Not in the demo’s secret store, its settings or a saved-connections store.
         #expect(DemoSecretStore().secret(for: Connection.demoAppleBusiness.id.uuidString) != pem)
         let saved = defaults.dictionaryRepresentation().values.compactMap { $0 as? String }
         #expect(!saved.contains { $0.contains("PRIVATE KEY") })
@@ -499,11 +518,11 @@ struct DemoGuaranteeTests {
         #expect(computers.records.isEmpty && computers.failures.count == 1)
         await #expect(throws: (any Error).self) { _ = try await jamfSchool(demo).fleet() }
         await #expect(throws: (any Error).self) { _ = try await intune(demo).intuneDevicesBySerial() }
-        await #expect(throws: ABM.Error.self) { _ = try await apple(demo).mdmServers() }
+        await #expect(throws: ABM.APIError.self) { _ = try await apple(demo).mdmServers() }
     }
 }
 
-@Suite("Demo connections in a role's picker")
+@Suite("Demo connections in a role’s picker")
 @MainActor
 struct DemoConnectionChoiceTests {
     @Test("Starts on the first demo connection; All needs two; the label says Demo")

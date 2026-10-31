@@ -7,9 +7,8 @@ import Foundation
 /// - the exact literal text of numbers (`1.0` stays `1.0`, big integers keep every digit),
 /// - duplicate keys (never expected, but never silently dropped).
 ///
-/// So parts an app does not understand can be sent back byte for byte, which
-/// a Blueprint's merge-patch needs: it replaces the whole `steps` array.
-/// Moved from AppSettings2Blueprint's `JSONValue`.
+/// So parts an app doesn’t understand can be sent back byte for byte, which
+/// a Blueprint’s merge-patch needs: it replaces the whole `steps` array.
 public nonisolated enum LosslessJSON: Hashable, Sendable {
     case null
     case bool(Bool)
@@ -141,7 +140,7 @@ public nonisolated extension Array where Element == LosslessJSON.PathComponent {
 }
 
 public nonisolated extension LosslessJSON {
-    /// Returns the value at `path`, or nil if any component does not resolve.
+    /// Returns the value at `path`, or nil if any component doesn’t resolve.
     func value(at path: [PathComponent]) -> LosslessJSON? {
         var current = self
         for component in path {
@@ -158,7 +157,7 @@ public nonisolated extension LosslessJSON {
     }
 
     /// Replaces the value at `path`. Returns false (leaving `self` untouched) if the
-    /// path does not resolve to an existing container. Object keys that don't exist
+    /// path doesn’t resolve to an existing container. Object keys that don’t exist
     /// yet are appended; array indices must already exist.
     @discardableResult
     mutating func setValue(_ newValue: LosslessJSON, at path: [PathComponent]) -> Bool {

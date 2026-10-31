@@ -1,5 +1,118 @@
 # Changelog
 
+## 0.13.0 (2026-10-30)
+The step 12 review: safer live checks and release check, security and correctness fixes, a tidier public API, and consistent text. Apps don’t have to change to build: every renamed or replaced call still works, marked deprecated, and the next round of app updates clears those warnings.
+- Release check and live checks:
+  - Deleting a Jamf device group through the fallback now picks the right
+    kind (mobile device or computer) from the group’s device type, reads the
+    object back and requires the ledger’s name before deleting, and goes
+    through the safety rules and the ledger like every other request.
+  - A test step counts as passed only when it really ran at least one test
+    with none skipped (read from the result bundle first, then the log,
+    including Xcode 27’s per-test lines); live and cleanup steps also need
+    their own line in the results. A live test or the cleanup is never retried after a crash, so
+    nothing is written twice. Under the release check, a missing setting in a
+    UI test fails instead of skipping.
+  - Jamf writes are checked for scope like Graph writes: never all
+    computers, all mobile devices or all users, and only groups this run
+    made. The ledger reads an object back before it trusts its name, and the
+    sweep only touches a short list of object types.
+  - Earlier runs’ ledgers are picked up for every app, sandboxed or not; a
+    left-over object that can’t be adopted fails stage 1. A create that
+    answers without an ID, or a ledger that can’t be saved, fails the run.
+  - UI smoke tests launch in demo mode by default and check the demo and
+    sandbox launch settings before acting. The release-check lock can’t be
+    taken by two runs at once, the allow-list can’t be redirected by an
+    environment setting, credentials are read only when a stage needs them,
+    and a failed UI test logs labels only and clears the clipboard only after
+    a paste.
+  - The one-time sweep of older test prefixes is removed: an app’s
+    `LEGACY_PREFIXES` is ignored.
+- Security and correctness:
+  - Updates: only a download from the app’s own GitHub releases is
+    accepted, redirects are checked on every hop, and the saved file gets
+    macOS’s quarantine mark, so Gatekeeper checks what you install. A sandbox
+    launch never checks for updates.
+  - Settings › Connections: Test Connection and Load Environments ask for
+    the secret again when the address, service or sign-in method differs
+    from the saved connection, so a saved secret never goes to a mistyped
+    server. Changing the service or sign-in method clears the old secret.
+  - Logs and bug reports hide more: any key that looks like a secret
+    (`clientSecret`, `apiKey`, `privateKey`, `accessToken`…), unredacted
+    response headers in errors, and Jamf Pro device names in the masked
+    export. More secret calls are never recorded (FileVault lists, LAPS
+    history, Activation Lock bypass codes).
+  - Demo mode is enforced where it matters: a demo connection’s requests
+    never leave the demo network, and choosing a saved connection or “All”
+    in the toolbar picker or the Connection menu goes through the app’s
+    “discard unsaved changes?” question (Cancel changes nothing). The demo
+    Jamf Pro’s group list splits `deviceType` (COMPUTER, MOBILE) and
+    `groupType` (SMART, STATIC), as the Platform API does.
+  - Jamf: a lookup of a never-enrolled mobile device no longer reads the
+    call that carries its unlock token; every JTKit call treats an error
+    answer as an error; Blueprint “unchanged” checks compare IDs and content;
+    a batch lookup falls back to one request per serial only when it must.
+  - An Intune device ID with `?`, `#` or `/` is refused before anything is
+    sent; Keychain read failures are told apart from “no secret”; a failed
+    save puts the Keychain back; requests waiting for a turn can be
+    canceled; Apple’s sign-in counts toward its 18-a-minute budget (the
+    sign-in and 17 requests fill the minute); and several smaller leaks
+    and edge cases are fixed.
+- Public API (before 1.0.0):
+  - Removed what no app uses (old privileges and error codes, unused
+    initializers, demo and test helpers), and made about 50 JTKit-only
+    symbols internal.
+  - New: `TestRun` (`isUnitTestHost`, `isSandboxLaunch`, `AttemptLog`, a
+    refusing session) replaces the copies in Checkpoint, Intune Deployer,
+    Serial Number Reader and JamfMigrator.
+  - Deprecated, still working, for the apps’ next update:
+    `JamfTokenProvider` → `JamfPlatform.TokenProvider`, `JamfPlatformError` →
+    `JamfPlatform.APIError`, `EntraTokenProvider` → `Graph.TokenProvider`,
+    `GraphError` → `Graph.APIError`, `IntuneManagedDevice` →
+    `Graph.ManagedDevice`, `JamfSchoolError` → `JamfSchool.APIError`,
+    `JamfPro.Match` → `DeviceMatch`; `verify()` and `intuneTestConnection()`
+    → `testConnection()`; sending a command without an approval from
+    `MDMCommand.Confirmation.approve(...)`; `HTTPRequest`’s `safeToRepeat`
+    and `notFoundAfterRepeatIsDone` → `repeating:`; `ErrorStatus.returned`
+    (use `.thrown` and the error’s status); `Ledger.markRemoved`,
+    `LiveCheckRun.legacyPrefixes` and `isLegacyTestObject`;
+    `Acknowledgement.licence`, `licenceName` and `msalLicence`, and
+    `AboutCopyright.licence` → the American `license`, `licenseName` and
+    `msalLicense`.
+  - Safer by design: irreversible commands need a confirmation’s approval,
+    a Graph POST can’t be marked safe to repeat, rules and allow-list
+    entries can’t be changed after they’re made, and a live request prints
+    only its method, host and path.
+- Text:
+  - American spelling and contractions with a curly apostrophe (doesn’t,
+    can’t) in every message, comment and document; macOS title case for
+    labels (Host Override, Jamf Pro Web Address, Protect Client ID, Protect
+    Client Secret, Read Device Groups, Unnamed Connection); “server URL”,
+    “username”, “MDM server”, “Private key” for the Apple sign-in and “Apple
+    Business Manager” in full, also as the activity log’s service name.
+  - One sentence per condition: “Enter a 6-digit PIN.”, the Entra wording
+    for a client ID that isn’t a UUID, “Network error: …”, “Sign-in failed:
+    HTTP 401 Unauthorized” (also Apple’s), “Unexpected response from
+    <service>: …”, the `ApplePrivateKey` wording for an Apple key that
+    can’t be used, one sentence for an Environment ID that isn’t a UUID,
+    per-device lines as lowercase fragments after “SERIAL: ”, and Apple’s
+    limit stated once.
+  - Clearer messages: “GitHub answered with HTTP 404.”, “Installed: 1.2.”
+    in the update window, its own message for a key file that can’t be read,
+    its own message (not Apple’s) when checking on an Apple write fails
+    (`ABM.ActivityOutcome.watchFailed`), the Keychain’s error code in the
+    message when it refuses a secret (`ConnectionStoreError.keychainRefused(status:)`,
+    `SecretWriteError`, `SecretStore.writeSecret(_:for:)`), and “1 result” or
+    “3 results” instead of “result(s)”.
+  - Command confirmations say what will happen, without comparing
+    vendors (“The Jamf management framework … will be reinstalled …”), and
+    a command the Platform API can’t carry says so by name: “Renew MDM
+    Profile doesn’t work over the Platform API. Use a Jamf Pro connection.”
+  - Apps’ tests that compare the old sentences word for word are updated in
+    the apps’ next update.
+  - Comments no longer carry roadmap steps, version tags or who decided
+    what; README, ROADMAP and CLAUDE.md match the code.
+
 ## 0.12.7 (2026-10-30)
 Release check: a check that can't run fails the run, by name; Entra's recycle bin in the live checks. No app has to change.
 - `Scripts/release-check-lib.sh`: 0.12.6's "not removed fails the run" check

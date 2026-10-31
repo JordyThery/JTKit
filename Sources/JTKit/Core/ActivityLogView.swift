@@ -6,7 +6,7 @@ import SwiftUI
 /// ActivityLogWindow(log: activityLog, emptyDescription: "Calls to Jamf appear here as they happen.")
 /// ```
 public struct ActivityLogWindow: Scene {
-    /// The window's scene identifier, for `openWindow(id:)`.
+    /// The window’s scene identifier, for `openWindow(id:)`.
     public static let id = "activity-log"
 
     private let log: ActivityLog
@@ -33,8 +33,9 @@ public struct ActivityLogWindow: Scene {
     }
 }
 
-/// The window's toolbar actions in the menu bar, so every command is there
-/// too: File › Export…, Edit › Clear Activity Log…, View › Show Problems Only.
+/// The window’s toolbar actions in the menu bar, so every command is there
+/// too: File › Export Activity Log for Bug Report… and Export Activity Log
+/// Unmasked…, Edit › Clear Activity Log…, View › Show Problems Only.
 /// Dimmed unless the Activity Log window is in front.
 struct ActivityLogCommands: Commands {
     @FocusedValue(\.activityLogActions) private var actions
@@ -79,11 +80,11 @@ extension FocusedValues {
     }
 }
 
-/// Newest-first table of activity entries with the selected entry's details
+/// Newest-first table of activity entries with the selected entry’s details
 /// below it, for the Activity Log window. Search matches every column,
 /// including the source; "Problems Only" shows failures and warnings.
 @MainActor
-public struct ActivityLogView: View {
+struct ActivityLogView: View {
     private var log: ActivityLog
     private let emptyDescription: String
     private let app: ActivityLogAppInfo
@@ -93,6 +94,7 @@ public struct ActivityLogView: View {
     @State private var selection: ActivityLogEntry.ID?
     @State private var confirmingClear = false
     @State private var export: PendingExport?
+    @State private var isPreparingExport = false
 
     public init(log: ActivityLog, emptyDescription: String, app: ActivityLogAppInfo = .current) {
         self.log = log
@@ -287,8 +289,8 @@ public struct ActivityLogView: View {
                 Button("Export for Bug Report…") { prepareExport(masked: true) }
                 Button("Export Unmasked…") { prepareExport(masked: false) }
             }
-            .help("Export the whole log as text. The bug report replaces serial numbers, user names and other identifiers with placeholders.")
-            .disabled(log.entries.isEmpty)
+            .help("Export the whole log as text. The bug report replaces serial numbers, usernames and other identifiers with placeholders.")
+            .disabled(log.entries.isEmpty || isPreparingExport)
             Button("Clear", systemImage: "trash") {
                 confirmingClear = true
             }
@@ -297,17 +299,26 @@ public struct ActivityLogView: View {
         }
     }
 
+    /// Builds the text away from the main thread, so a full log doesn’t
+    /// stop the window, then asks where to save it.
     private func prepareExport(masked: Bool) {
-        let text = ActivityLogExport.text(log.entries, masked: masked, app: app)
-        export = PendingExport(
-            document: TextExportDocument(text: text),
-            filename: masked ? "\(app.name) Activity Log" : "\(app.name) Activity Log (Unmasked)"
-        )
+        guard !isPreparingExport else { return }
+        isPreparingExport = true
+        let entries = log.entries
+        let app = app
+        Task {
+            let text = await ActivityLogExport.textInBackground(entries, masked: masked, app: app)
+            export = PendingExport(
+                document: TextExportDocument(text: text),
+                filename: masked ? "\(app.name) Activity Log" : "\(app.name) Activity Log (Unmasked)"
+            )
+            isPreparingExport = false
+        }
     }
 }
 
 /// The status, red with a failure symbol when failed, a warning symbol for
-/// warnings: colour is never the only signal, and VoiceOver hears the meaning.
+/// warnings: color is never the only signal, and VoiceOver hears the meaning.
 private struct StatusCell: View {
     let entry: ActivityLogEntry
 

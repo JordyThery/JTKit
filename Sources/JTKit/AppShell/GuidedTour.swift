@@ -6,7 +6,7 @@ public nonisolated struct TourStep<AnchorID: Hashable & Sendable>: Sendable {
     public var text: String
     /// The view the step points at; nil for full-screen steps like Welcome.
     public var anchorID: AnchorID?
-    /// Toolbar items can't carry anchor preferences, so toolbar steps pin the
+    /// Toolbar items can’t carry anchor preferences, so toolbar steps pin the
     /// card top-trailing with an upward arrow instead of a spotlight.
     public var pointsAtToolbar: Bool
 
@@ -33,8 +33,8 @@ public final class TourState<AnchorID: Hashable & Sendable> {
     @ObservationIgnored private let defaults: UserDefaults
 
     /// - Parameters:
-    ///   - firstLaunchDefaultsKey: the app's own `UserDefaults` key for "tour seen".
-    ///   - defaults: where that key lives; the app's standard defaults.
+    ///   - firstLaunchDefaultsKey: the app’s own `UserDefaults` key for "tour seen".
+    ///   - defaults: where that key lives; the app’s standard defaults.
     public init(
         steps: [TourStep<AnchorID>],
         firstLaunchDefaultsKey: String,
@@ -73,7 +73,7 @@ public final class TourState<AnchorID: Hashable & Sendable> {
     }
 
     /// Marks the tour seen *before* starting it, so skipping and relaunching
-    /// doesn't restart it.
+    /// doesn’t restart it.
     public func startOnFirstLaunch() {
         guard !defaults.bool(forKey: firstLaunchDefaultsKey) else { return }
         defaults.set(true, forKey: firstLaunchDefaultsKey)
@@ -179,8 +179,8 @@ private struct TourOverlay<AnchorID: Hashable & Sendable>: View {
     }
 
     private func dimLayer(cutout: CGRect?) -> some View {
-        // Extend beyond the proxy's bounds so the dim covers title bar and
-        // safe areas without relying on the overlay's own coordinate space.
+        // Extend beyond the proxy’s bounds so the dim covers title bar and
+        // safe areas without relying on the overlay’s own coordinate space.
         var path = Path()
         let full = CGRect(
             x: -200, y: -200,

@@ -2,7 +2,7 @@ import Foundation
 
 extension JamfPlatform {
     /// A device group (`DeviceGroupListReadRepresentationV1`). Types the app
-    /// doesn't know are kept, not dropped.
+    /// doesn’t know are kept, not dropped.
     public struct DeviceGroup: Identifiable, Hashable, Sendable {
         public enum DeviceType: Hashable, Sendable {
             case computer
@@ -79,9 +79,9 @@ extension JamfPlatform {
     }
 
     /// Building RSQL filters for list requests, e.g. `deviceType=="COMPUTER"`.
-    public enum RSQL {
+    enum RSQL {
         /// `field=="value"`, with quotes and backslashes in the value escaped,
-        /// so a value can't change the meaning of the filter.
+        /// so a value can’t change the meaning of the filter.
         public static func equals(_ field: String, _ value: String) -> String {
             "\(field)==\(quoted(value))"
         }
@@ -98,7 +98,7 @@ extension JamfPlatform.Client {
     /// Every device group (permission `device-groups:read`), following all pages.
     ///
     /// - Parameters:
-    ///   - filter: an RSQL filter, e.g. `JamfPlatform.RSQL.equals("deviceType", "COMPUTER")`.
+    ///   - filter: an RSQL filter, e.g. `deviceType=="COMPUTER"`.
     ///   - sort: by name by default.
     public func deviceGroups(filter: String? = nil, sort: String = "name", pageSize: Int = 100, maxPages: Int = 1_000) async throws -> [JamfPlatform.DeviceGroup] {
         var query = [URLQueryItem(name: "sort", value: sort)]

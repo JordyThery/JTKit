@@ -4,10 +4,10 @@ import SwiftUI
 /// What an app tells the About window about itself. The icon and version are
 /// read from the app bundle.
 public nonisolated struct AboutConfiguration: Sendable {
-    /// The app's display name, e.g. `"AppSettings2Blueprint"`.
+    /// The app’s display name, e.g. `"AppSettings2Blueprint"`.
     public var appName: String
-    /// The copyright line under the version. JTKit writes it; the app's
-    /// `NSHumanReadableCopyright` is not used.
+    /// The copyright line under the version. JTKit writes it; the app’s
+    /// `NSHumanReadableCopyright` isn’t used.
     public var copyright: AboutCopyright?
     /// A line under the copyright, e.g. `"Created by Jordy Thery"`.
     public var author: String?
@@ -17,7 +17,7 @@ public nonisolated struct AboutConfiguration: Sendable {
     public var links: [AboutLink]
     /// Third-party code the app includes or is based on. Leave empty when there is none.
     public var acknowledgements: [Acknowledgement]
-    /// A closing note, e.g. that the app is not affiliated with a vendor.
+    /// A closing note, e.g. that the app isn’t affiliated with a vendor.
     public var disclaimer: String?
 
     public init(
@@ -42,25 +42,36 @@ public nonisolated struct AboutConfiguration: Sendable {
     public var windowTitle: String { "About \(appName)" }
 }
 
-/// Who holds the app's copyright and the licence it is released under. The
+/// Who holds the app’s copyright and the license it is released under. The
 /// About window shows it as "© 2026 Jordy Thery. Released under the MIT License."
 public nonisolated struct AboutCopyright: Sendable, Hashable {
     /// The year, or a range such as `"2024–2026"`.
     public var year: String
     /// e.g. `"Jordy Thery"`.
     public var holder: String
-    /// The licence's name as it is usually written, e.g. `"MIT License"`.
-    public var licence: String
+    /// The license’s name as it is usually written, e.g. `"MIT License"`.
+    public var license: String
 
-    public init(year: String, holder: String, licence: String = "MIT License") {
+    public init(year: String, holder: String, license: String = "MIT License") {
         self.year = year
         self.holder = holder
-        self.licence = licence
+        self.license = license
+    }
+
+    @available(*, deprecated, renamed: "init(year:holder:license:)")
+    public init(year: String, holder: String, licence: String) {
+        self.init(year: year, holder: holder, license: licence)
+    }
+
+    @available(*, deprecated, renamed: "license")
+    public var licence: String {
+        get { license }
+        set { license = newValue }
     }
 
     /// "© 2026 Jordy Thery. Released under the MIT License."
     public var text: String {
-        "© \(year) \(holder). Released under the \(licence)."
+        "© \(year) \(holder). Released under the \(license)."
     }
 }
 
@@ -76,46 +87,58 @@ public nonisolated struct AboutLink: Sendable, Hashable, Identifiable {
         self.url = url
     }
 
-    /// Nil when `address` is not a valid URL, so a typo drops the link instead of crashing.
+    /// Nil when `address` isn’t a valid URL, so a typo drops the link instead of crashing.
     public init?(_ title: String, address: String) {
         guard let url = URL(string: address) else { return nil }
         self.init(title, url: url)
     }
 }
 
-/// Credit for one piece of third-party code, with its licence as published.
+/// Credit for one piece of third-party code, with its license as published.
 public nonisolated struct Acknowledgement: Sendable, Hashable, Identifiable {
-    /// The project's name, e.g. `"App Settings Utility"`.
+    /// The project’s name, e.g. `"App Settings Utility"`.
     public var name: String
     /// Who made it, e.g. `"Anthony Darlow"`.
     public var author: String?
     /// What the app uses it for.
     public var summary: String?
     public var links: [AboutLink]
-    /// The full licence text, unchanged from the project.
-    public var licence: String?
-    /// The label the app gave for the licence, e.g. `"MPL-2.0"`.
-    private var givenLicenceName: String?
+    /// The full license text, unchanged from the project.
+    public var license: String?
+    /// The label the app gave for the license, e.g. `"MPL-2.0"`.
+    private var givenLicenseName: String?
 
     public var id: String { name }
 
-    /// - Parameter licenceName: the licence's label in the About window. Give it
-    ///   when the text doesn't start with the licence's name, e.g. when it opens
-    ///   with a copyright line. Without it the label is the text's first line.
+    /// - Parameter licenseName: the license’s label in the About window. Give it
+    ///   when the text doesn’t start with the license’s name, e.g. when it opens
+    ///   with a copyright line. Without it the label is the text’s first line.
     public init(
         name: String,
         author: String? = nil,
         summary: String? = nil,
         links: [AboutLink] = [],
-        licence: String? = nil,
-        licenceName: String? = nil
+        license: String? = nil,
+        licenseName: String? = nil
     ) {
         self.name = name
         self.author = author
         self.summary = summary
         self.links = links
-        self.licence = licence
-        self.givenLicenceName = licenceName
+        self.license = license
+        self.givenLicenseName = licenseName
+    }
+
+    @available(*, deprecated, renamed: "init(name:author:summary:links:license:licenseName:)")
+    public init(
+        name: String,
+        author: String? = nil,
+        summary: String? = nil,
+        links: [AboutLink] = [],
+        licence: String?,
+        licenceName: String? = nil
+    ) {
+        self.init(name: name, author: author, summary: summary, links: links, license: licence, licenseName: licenceName)
     }
 
     /// "App Settings Utility by Anthony Darlow".
@@ -123,14 +146,23 @@ public nonisolated struct Acknowledgement: Sendable, Hashable, Identifiable {
         author.map { "\(name) by \($0)" } ?? name
     }
 
-    /// The licence's label: the name the app gave, otherwise the text's first
-    /// non-empty line ("MIT License"). Nil when there is no licence text.
-    public var licenceName: String? {
-        guard let licence else { return nil }
-        return givenLicenceName ?? licence.split(separator: "\n").lazy
+    /// The license’s label: the name the app gave, otherwise the text’s first
+    /// non-empty line ("MIT License"). Nil when there is no license text.
+    public var licenseName: String? {
+        guard let license else { return nil }
+        return givenLicenseName ?? license.split(separator: "\n").lazy
             .map { $0.trimmingCharacters(in: .whitespaces) }
             .first { !$0.isEmpty }
     }
+
+    @available(*, deprecated, renamed: "license")
+    public var licence: String? {
+        get { license }
+        set { license = newValue }
+    }
+
+    @available(*, deprecated, renamed: "licenseName")
+    public var licenceName: String? { licenseName }
 }
 
 /// The About window. Open it only from the app menu (`AppInfoCommands`); it is
@@ -140,7 +172,7 @@ public nonisolated struct Acknowledgement: Sendable, Hashable, Identifiable {
 /// AboutWindow(configuration: .myApp)
 /// ```
 public struct AboutWindow: Scene {
-    /// The window's scene identifier, for `openWindow(id:)`.
+    /// The window’s scene identifier, for `openWindow(id:)`.
     public static let id = "jtkit-about"
 
     let configuration: AboutConfiguration
@@ -156,7 +188,7 @@ public struct AboutWindow: Scene {
         }
         .windowResizability(.contentSize)
         .defaultPosition(.center)
-        // Mac apps don't list About in the Window menu.
+        // Mac apps don’t list About in the Window menu.
         .commandsRemoved()
     }
 }
@@ -191,7 +223,7 @@ private struct DimWindowButtons: NSViewRepresentable {
     }
 }
 
-/// The app menu's first items: "About [App]" and "Check for Updates…".
+/// The app menu’s first items: "About [App]" and "Check for Updates…".
 ///
 /// ```swift
 /// .commands { AppInfoCommands(appName: "MyApp") { updates.checkManually() } }
@@ -218,10 +250,10 @@ public struct AppInfoCommands: Commands {
     }
 }
 
-/// The About window's content: icon, name, version, copyright, author, summary,
+/// The About window’s content: icon, name, version, copyright, author, summary,
 /// links, disclaimer and acknowledgements. Update controls live in the app menu and
 /// in Settings (`UpdateSettingsSection`), not here.
-public struct AboutView: View {
+struct AboutView: View {
     let configuration: AboutConfiguration
 
     public init(configuration: AboutConfiguration) {
@@ -292,7 +324,7 @@ public struct AboutView: View {
                     .padding(.top, 6)
             }
 
-            // Above the acknowledgements, so it isn't buried under long licences.
+            // Above the acknowledgements, so it isn’t buried under long licenses.
             if let disclaimer = configuration.disclaimer {
                 Text(disclaimer)
                     .font(.callout)
@@ -313,9 +345,9 @@ public struct AboutView: View {
     }
 }
 
-/// The Acknowledgements part of the About window: each project's credit, links
-/// and full licence text.
-public struct AcknowledgementsView: View {
+/// The Acknowledgements part of the About window: each project’s credit, links
+/// and full license text.
+struct AcknowledgementsView: View {
     let acknowledgements: [Acknowledgement]
 
     public init(acknowledgements: [Acknowledgement]) {
@@ -337,7 +369,7 @@ public struct AcknowledgementsView: View {
 
 private struct AcknowledgementRow: View {
     let acknowledgement: Acknowledgement
-    @State private var showsLicence = false
+    @State private var showsLicense = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -351,11 +383,11 @@ private struct AcknowledgementRow: View {
             if !acknowledgement.links.isEmpty {
                 LinkRow(links: acknowledgement.links, alignment: .leading)
             }
-            if let licence = acknowledgement.licence {
+            if let license = acknowledgement.license {
                 // Collapsed by default: MPL-2.0 and Apache-2.0 run to hundreds of lines.
-                DisclosureGroup(isExpanded: $showsLicence) {
-                    Text(licence)
-                        // Licences are wrapped at about 80 columns; at this size a line fits.
+                DisclosureGroup(isExpanded: $showsLicense) {
+                    Text(license)
+                        // Licenses are wrapped at about 80 columns; at this size a line fits.
                         .font(.system(.caption, design: .monospaced))
                         .textSelection(.enabled)
                         .fixedSize(horizontal: false, vertical: true)
@@ -365,16 +397,16 @@ private struct AcknowledgementRow: View {
                         .padding(.top, 4)
                 } label: {
                     // The name opens it too, not only the small triangle.
-                    Text(acknowledgement.licenceName ?? "Licence")
+                    Text(acknowledgement.licenseName ?? "License")
                         .contentShape(Rectangle())
-                        .onTapGesture { showsLicence.toggle() }
+                        .onTapGesture { showsLicense.toggle() }
                 }
             }
         }
     }
 }
 
-/// Links side by side, or stacked when they don't fit on one line.
+/// Links side by side, or stacked when they don’t fit on one line.
 private struct LinkRow: View {
     let links: [AboutLink]
     let alignment: HorizontalAlignment
@@ -401,7 +433,7 @@ private struct LinkRow: View {
         author: "Created by Jordy Thery",
         summary: "A short sentence on what the app does.",
         links: [AboutLink("github.com/JordyThery/Example", address: "https://github.com/JordyThery/Example")].compactMap { $0 },
-        acknowledgements: [Acknowledgement(name: "Some Library", author: "Someone", summary: "Used for one thing.", licence: "MIT License\n\nCopyright (c) 2026 Someone")],
+        acknowledgements: [Acknowledgement(name: "Some Library", author: "Someone", summary: "Used for one thing.", license: "MIT License\n\nCopyright (c) 2026 Someone")],
         disclaimer: "An independent project."
     ))
 }

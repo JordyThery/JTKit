@@ -8,17 +8,14 @@ public nonisolated struct TextExportDocument: FileDocument {
     ]
 
     public var text: String
-    public var contentType: UTType
 
-    public init(text: String, contentType: UTType = .plainText) {
+    public init(text: String) {
         self.text = text
-        self.contentType = contentType
     }
 
+    /// Export only: nothing opens these.
     public init(configuration: ReadConfiguration) throws {
-        let data = configuration.file.regularFileContents ?? Data()
-        text = String(data: data, encoding: .utf8) ?? ""
-        contentType = .plainText
+        throw CocoaError(.featureUnsupported)
     }
 
     public func fileWrapper(configuration: WriteConfiguration) throws -> FileWrapper {

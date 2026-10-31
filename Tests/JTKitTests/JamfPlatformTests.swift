@@ -6,7 +6,7 @@ import JTKitTestSupport
 private let environmentID = "e77c1408-10c8-4007-b177-abc9157fbcaa"
 private let gateway = URL(string: "https://eu.api.jamfcloud.com")!
 
-/// A client on a fake server, signed in with a fixed token; retries don't wait.
+/// A client on a fake server, signed in with a fixed token; retries don’t wait.
 private func platformClient(
     _ server: MockServer,
     log: ActivityLog? = nil,
@@ -25,14 +25,14 @@ private func platformConnection(environment: String = environmentID, hostOverrid
 }
 
 /// The error a call threw, or nil.
-private func thrown(_ body: @Sendable () async throws -> Void) async -> JamfPlatformError? {
+private func thrown(_ body: @Sendable () async throws -> Void) async -> JamfPlatform.APIError? {
     do {
         try await body()
         return nil
-    } catch let error as JamfPlatformError {
+    } catch let error as JamfPlatform.APIError {
         return error
     } catch {
-        Issue.record("Not a JamfPlatformError: \(error)")
+        Issue.record("Not a JamfPlatform.APIError: \(error)")
         return nil
     }
 }
@@ -42,7 +42,7 @@ private func thrown(_ body: @Sendable () async throws -> Void) async -> JamfPlat
 @Suite("Jamf Platform client")
 @MainActor
 struct JamfPlatformClientTests {
-    @Test("Built from a connection: the region's gateway, a sign-in, the Environment ID header")
+    @Test("Built from a connection: the region’s gateway, a sign-in, the Environment ID header")
     func fromConnection() async throws {
         let server = MockServer { $0.path == "/auth/token" ? .json(200, tokenJSON("tok-1")) : .json(200, "{}") }
         let client = try JamfPlatform.Client(connection: platformConnection(), secret: { "s3cr3t" },
@@ -55,7 +55,7 @@ struct JamfPlatformClientTests {
         #expect(server.requests.first?.bodyString.contains("client_id=client-1") == true)
     }
 
-    @Test("A host override replaces the region's gateway")
+    @Test("A host override replaces the region’s gateway")
     func hostOverride() async throws {
         let server = MockServer { $0.path == "/auth/token" ? .json(200, tokenJSON("t")) : .json(200, "{}") }
         let client = try JamfPlatform.Client(connection: platformConnection(hostOverride: "staging.example.com"),
@@ -64,15 +64,15 @@ struct JamfPlatformClientTests {
         #expect(server.requests.allSatisfy { $0.url.host() == "staging.example.com" })
     }
 
-    @Test("An Environment ID that isn't a UUID is refused before anything is sent")
+    @Test("An Environment ID that isn’t a UUID is refused before anything is sent")
     func invalidEnvironmentID() async {
         let server = MockServer { _ in .json(200, "{}") }
-        let error = #expect(throws: JamfPlatformError.self) {
+        let error = #expect(throws: JamfPlatform.APIError.self) {
             _ = try JamfPlatform.Client(connection: platformConnection(environment: "env-1"), secret: { "s" },
                                         recorder: RequestRecorder(session: server.session, log: nil))
         }
         guard case .invalidEnvironmentID("env-1")? = error?.kind else { Issue.record("Got \(String(describing: error))"); return }
-        #expect(error?.message().contains("not a UUID") == true)
+        #expect(error?.message().hasPrefix("The Environment ID isn’t a UUID (8-4-4-4-12 hexadecimal characters). Copy it from Jamf Account.") == true)
         #expect(server.requests.isEmpty)
     }
 
@@ -87,7 +87,7 @@ struct JamfPlatformClientTests {
         #expect(server.requests[1].header("X-Environment-Id") == nil)
     }
 
-    @Test("The app's allow-list is checked before sending")
+    @Test("The app’s allow-list is checked before sending")
     func allowList() async throws {
         let server = MockServer { _ in .json(200, "{}") }
         let client = try platformClient(server, permits: { $0.method == "GET" })
@@ -96,7 +96,7 @@ struct JamfPlatformClientTests {
         #expect(server.requests.isEmpty)
     }
 
-    @Test("The app's own hints come with every error the client throws, before the standard ones")
+    @Test("The app’s own hints come with every error the client throws, before the standard ones")
     func appHints() async throws {
         let server = MockServer { _ in .json(403, #"{"httpStatus":403,"errors":[{"code":"BAD_PERMISSIONS"}]}"#) }
         let client = try JamfPlatform.Client(
@@ -116,6 +116,29 @@ struct JamfPlatformClientTests {
         #expect(response.status == 403)
     }
 
+    @Test("With errorStatus .returned, JTKit’s own calls still throw an error status",
+          arguments: [403, 404, 409, 500])
+    func ownCallsThrowOnReturningClient(status: Int) async throws {
+        let server = MockServer { _ in .json(status, #"{"httpStatus":\#(status),"errors":[]}"#) }
+        let client = try platformClient(server, errorStatus: .returned)
+        let blueprints = JamfPlatform.Blueprints(client: client)
+        let id = "6b9a3c1e-3f0e-4d5e-9c1a-0e1f2a3b4c5d"
+        let calls: [(String, @Sendable () async throws -> Void)] = [
+            ("deploy", { try await blueprints.deploy(id: id) }),
+            ("patchSteps", { try await blueprints.patchSteps(id: id, steps: .array([])) }),
+            ("patchScope", { try await blueprints.patchScope(id: id, deviceGroups: ["g"]) }),
+            ("delete", { try await blueprints.delete(id: id) }),
+            ("detail", { _ = try await blueprints.detail(id: id) }),
+            ("json", { _ = try await client.json("/blueprints/v1/blueprints") }),
+            ("setAssetTag computer", { try await client.setAssetTag("A", computerID: "1") }),
+            ("setAssetTag mobile", { try await client.setAssetTag("A", mobileDeviceID: "1") }),
+        ]
+        for (name, call) in calls {
+            let error = await thrown { try await call() }
+            #expect(error?.status == status, "\(name)")
+        }
+    }
+
     @Test("A refused sign-in is thrown, also with errorStatus .returned")
     func refusedSignIn() async throws {
         let server = MockServer { _ in .json(401, #"{"error":"invalid_client","error_description":"Bad credentials"}"#) }
@@ -127,7 +150,7 @@ struct JamfPlatformClientTests {
         #expect(error?.message().contains("Check the client ID, client secret and region") == true)
     }
 
-    @Test("A redirect to another host is not followed")
+    @Test("A redirect to another host isn’t followed")
     func redirectRefused() async throws {
         let server = MockServer { request in
             request.url.host() == "eu.api.jamfcloud.com"
@@ -165,7 +188,7 @@ struct JamfPlatformClientTests {
         #expect(error?.server == .jamfPro)
     }
 
-    @Test("Extra headers go with every request; JTKit's User-Agent is sent unless the app sets its own")
+    @Test("Extra headers go with every request; JTKit’s User-Agent is sent unless the app sets its own")
     func headersAndUserAgent() async throws {
         let server = MockServer { _ in .json(200, "{}") }
         let recorder = RequestRecorder(session: server.session, log: nil)
@@ -223,12 +246,12 @@ struct UserAgentTests {
 @Suite("Jamf Platform errors")
 @MainActor
 struct JamfPlatformErrorTests {
-    private func error(_ status: Int, _ body: String, duringSignIn: Bool = false) -> JamfPlatformError {
-        JamfPlatformError(HTTPError.status(HTTPResponse(status: status, headers: ["Content-Type": "application/json"], data: Data(body.utf8)),
+    private func error(_ status: Int, _ body: String, duringSignIn: Bool = false) -> JamfPlatform.APIError {
+        JamfPlatform.APIError(HTTPError.status(HTTPResponse(status: status, headers: ["Content-Type": "application/json"], data: Data(body.utf8)),
                                            method: "PATCH", path: "/blueprints/v1/blueprints/b1", duringSignIn: duringSignIn))
     }
 
-    @Test("The gateway's errors as one object or a list")
+    @Test("The gateway’s errors as one object or a list")
     func gatewayShapes() throws {
         let object = try #require(JamfPlatform.ErrorBody(data: Data(#"{"httpStatus":409,"traceId":"abc-123","errors":{"code":"DIVISION_PATCH_NOT_ALLOWED","field":null,"description":"Assigned to a division"}}"#.utf8)))
         #expect(object.httpStatus == 409 && object.traceID == "abc-123")
@@ -237,7 +260,7 @@ struct JamfPlatformErrorTests {
         #expect(list.errors.map(\.code) == ["A", "B"])
     }
 
-    @Test("The benchmarks' and the sign-in's shapes")
+    @Test("The benchmarks’ and the sign-in’s shapes")
     func otherShapes() throws {
         let benchmarks = try #require(JamfPlatform.ErrorBody(data: Data(#"{"message":"title already exists","error":"Conflict","statusCode":409,"logref":"log-9"}"#.utf8)))
         #expect(benchmarks.errors == [.init(code: "Conflict", description: "title already exists")])
@@ -246,7 +269,7 @@ struct JamfPlatformErrorTests {
         #expect(oauth.errors == [.init(code: "invalid_client", description: "Bad credentials")])
     }
 
-    @Test("Other answers are not mistaken for errors", arguments: [#"{"results":[]}"#, "<html>busy</html>", "", "[1]"])
+    @Test("Other answers aren’t mistaken for errors", arguments: [#"{"results":[]}"#, "<html>busy</html>", "", "[1]"])
     func notErrors(body: String) {
         #expect(JamfPlatform.ErrorBody(data: Data(body.utf8)) == nil)
     }
@@ -263,7 +286,7 @@ struct JamfPlatformErrorTests {
             """)
     }
 
-    @Test("The app's own hints come first, and a hint is never shown twice")
+    @Test("The app’s own hints come first, and a hint is never shown twice")
     func appHints() {
         let failure = error(409, #"{"httpStatus":409,"errors":[{"code":"DIVISION_PATCH_NOT_ALLOWED","description":"Assigned"}]}"#)
         let standard = "This Blueprint is assigned to a division and can’t be changed through the API."
@@ -281,9 +304,9 @@ struct JamfPlatformErrorTests {
         #expect(error(404, "{}").standardHints.isEmpty)
     }
 
-    @Test("Secrets in a server's text never reach the message")
+    @Test("Secrets in a server’s text never reach the message")
     func redacted() {
-        let failure = JamfPlatformError(HTTPError.status(
+        let failure = JamfPlatform.APIError(HTTPError.status(
             HTTPResponse(status: 400, headers: ["Content-Type": "text/plain"], data: Data("bad request client_secret=abc123 Bearer tok-999".utf8)),
             method: "GET", path: "/x", duringSignIn: false))
         let message = failure.message()
@@ -296,7 +319,7 @@ struct JamfPlatformErrorTests {
         #expect(error(404, #"{"httpStatus":404,"errors":[]}"#).report.hasPrefix("Request: PATCH /blueprints/v1/blueprints/b1\nHTTP 404"))
     }
 
-    @Test("The Trace ID stays unmasked in the bug-report export; a serial number doesn't")
+    @Test("The Trace ID stays unmasked in the bug-report export; a serial number doesn’t")
     func traceIDInExport() async throws {
         let log = ActivityLog()
         let traceID = "4bf92f3577b34da6a3ce929d0e0e4736"
@@ -347,7 +370,7 @@ struct JamfPlatformPagingTests {
     @Test("Reaching the page limit is an error, not a quiet cut-off")
     func limit() async {
         let full = JamfPlatform.Page(results: [1, 2], hasNext: true)
-        let error = await #expect(throws: JamfPlatformError.self) {
+        let error = await #expect(throws: JamfPlatform.APIError.self) {
             _ = try await pages([full, full, full], maxPages: 3)
         }
         guard case .pageLimitReached("/x", 3)? = error?.kind else { Issue.record("Got \(String(describing: error))"); return }
@@ -503,7 +526,7 @@ struct JamfPlatformPermissionTests {
                 == "Add the privileges for “Scripts” and “Read Blueprints” to the API role in Jamf Pro under Settings › API Roles and Clients.")
     }
 
-    @Test("Test Connection's message names what is missing, and why a check couldn't run")
+    @Test("Test Connection’s message names what is missing, and why a check couldn’t run")
     func problem() throws {
         #expect(JamfPlatform.PermissionProblem([(.blueprintsRead, .allowed), (.deviceGroupsRead, .allowed)]) == nil)
 
@@ -513,7 +536,7 @@ struct JamfPlatformPermissionTests {
         #expect(missing.errorDescription == "Signed in, but the API integration is missing a permission: blueprints:read.")
         #expect(missing.failureReason == """
             Add the “blueprints:read” permission to the API integration in Jamf Account.
-            Read device groups couldn’t be checked: not found (HTTP 404)
+            Read Device Groups couldn’t be checked: not found (HTTP 404)
             """)
 
         let unchecked = try #require(JamfPlatform.PermissionProblem([
@@ -521,7 +544,7 @@ struct JamfPlatformPermissionTests {
         ]))
         #expect(unchecked.missing.isEmpty)
         #expect(unchecked.errorDescription == "Signed in, but not every permission could be checked.")
-        #expect(unchecked.failureReason == "Read Blueprints couldn’t be checked: HTTP 500\nRead device groups couldn’t be checked: offline")
+        #expect(unchecked.failureReason == "Read Blueprints couldn’t be checked: HTTP 500\nRead Device Groups couldn’t be checked: offline")
     }
 }
 
@@ -575,7 +598,7 @@ struct JamfPlatformBlueprintTests {
         #expect(!detail.isUnchanged(in: newer))
     }
 
-    @Test("An ID can't reach another resource: one with a slash is refused before sending")
+    @Test("An ID can’t reach another resource: one with a slash is refused before sending")
     func escapedID() async throws {
         #expect(JamfPlatform.pathSegment("a/b c") == "a%2Fb%20c")
         let server = MockServer { _ in .json(200, #"{"id":"a/b"}"#) }
@@ -603,7 +626,7 @@ struct JamfPlatformBlueprintTests {
         let server = MockServer { _ in MockResponse(status: 204, body: Data()) }
         try await blueprints(server).patchScope(id: blueprintID, deviceGroups: ["g1", "g2"])
         #expect(server.requests.first?.bodyString == #"{"scope":{"deviceGroups":["g1","g2"]}}"#)
-        await #expect(throws: JamfPlatformError.self) { try await blueprints(server).patchScope(id: blueprintID, deviceGroups: []) }
+        await #expect(throws: JamfPlatform.APIError.self) { try await blueprints(server).patchScope(id: blueprintID, deviceGroups: []) }
         #expect(server.requests.count == 1)
     }
 
@@ -616,11 +639,11 @@ struct JamfPlatformBlueprintTests {
         #expect(body.objectValue?.keys == ["name", "scope", "steps"])
 
         let failing = MockServer { _ in .json(503, "{}") }
-        await #expect(throws: JamfPlatformError.self) {
+        await #expect(throws: JamfPlatform.APIError.self) {
             _ = try await blueprints(failing).create(name: "n", description: "d", deviceGroups: ["g"], steps: [])
         }
         #expect(failing.requests.count == 1)
-        await #expect(throws: JamfPlatformError.self) {
+        await #expect(throws: JamfPlatform.APIError.self) {
             _ = try await blueprints(failing).create(name: "n", description: nil, deviceGroups: [], steps: [])
         }
         #expect(failing.requests.count == 1, "No device group: nothing sent")
@@ -633,7 +656,7 @@ struct JamfPlatformBlueprintTests {
         try await blueprints(server).deploy(id: blueprintID)
         #expect(server.requests.map(\.path) == [blueprintPath + "/deploy", blueprintPath + "/deploy"])
         let failing = MockServer { _ in .json(503, "{}") }
-        await #expect(throws: JamfPlatformError.self) { try await blueprints(failing).deploy(id: blueprintID) }
+        await #expect(throws: JamfPlatform.APIError.self) { try await blueprints(failing).deploy(id: blueprintID) }
         #expect(failing.requests.count == 1)
     }
 
@@ -647,6 +670,35 @@ struct JamfPlatformBlueprintTests {
         #expect(server.requests.last?.method == "DELETE")
         let counts = MockServer { _ in .json(200, #"{"succeeded":3,"failed":1,"pending":2}"#) }
         #expect(try await blueprints(counts).report(id: blueprintID) == .init(succeeded: 3, failed: 1, pending: 2))
+    }
+
+    @Test("isUnchanged needs the same Blueprint and both updated times; without them only an identical answer counts")
+    func unchangedNeedsIDAndDates() throws {
+        func detail(_ text: String) throws -> JamfPlatform.BlueprintDetail {
+            try JamfPlatform.BlueprintDetail(data: Data(text.utf8))
+        }
+        let base = try detail(blueprintJSON())
+        let other = try detail(blueprintJSON().replacingOccurrences(of: blueprintID, with: "11111111-2222-3333-4444-555555555555"))
+        #expect(!base.isUnchanged(in: other), "another Blueprint with the same updated time")
+        let undated = try detail(blueprintJSON().replacingOccurrences(of: #""updated":"2026-10-02T09:30:00.222222Z","#, with: ""))
+        #expect(!base.isUnchanged(in: undated))
+        #expect(!undated.isUnchanged(in: base))
+        #expect(undated.isUnchanged(in: try detail(blueprintJSON().replacingOccurrences(of: #""updated":"2026-10-02T09:30:00.222222Z","#, with: ""))))
+        let changedUndated = try detail(blueprintJSON(state: "NOT_DEPLOYED").replacingOccurrences(of: #""updated":"2026-10-02T09:30:00.222222Z","#, with: ""))
+        #expect(!undated.isUnchanged(in: changedUndated), "two missing times aren’t the same time")
+    }
+
+    @Test("A delete repeated after a server error counts a 404 as done; a first 404 is still an error")
+    func deleteNotFoundAfterRepeat() async throws {
+        let calls = Counter()
+        let server = MockServer { _ in calls.next() == 1 ? .json(503, "{}") : .json(404, #"{"httpStatus":404,"errors":[]}"#) }
+        try await blueprints(server).delete(id: blueprintID)
+        #expect(server.requests.map(\.method) == ["DELETE", "DELETE"])
+
+        let missing = MockServer { _ in .json(404, #"{"httpStatus":404,"errors":[]}"#) }
+        let gone = try blueprints(missing)
+        let error = await thrown { try await gone.delete(id: blueprintID) }
+        #expect(error?.status == 404)
     }
 
     @Test("Deploy and watch follows the new deployment, not the previous one")
@@ -746,8 +798,10 @@ struct JamfPlatformEnvironmentTests {
         #expect(call.path == "/organization/v1/environments")
         #expect(call.header("X-Environment-Id") == nil)
 
-        let older = MockServer { _ in .json(200, #"{"environments":[{"id":"x"}]}"#) }
-        #expect(try await platformClient(older, scope: .organization).environments() == [.init(id: "x", name: "x")])
+        // only `results` is read: an answer without it is unexpected
+        let other = MockServer { _ in .json(200, #"{"environments":[{"id":"x"}]}"#) }
+        let error = await thrown { _ = try await platformClient(other, scope: .organization).environments() }
+        guard case .invalidResponse? = error?.kind else { Issue.record("Got \(String(describing: error))"); return }
     }
 
     @Test("An integration scoped to one environment: said plainly, with where to find the ID", arguments: [401, 403, 404])
@@ -771,7 +825,7 @@ struct JamfPlatformEnvironmentTests {
         guard case .signIn(401, _, _)? = error?.kind else { Issue.record("Got \(String(describing: error))"); return }
     }
 
-    @Test("The editor's picker: a typed ID in the list is chosen, one not in it isn't")
+    @Test("The editor’s picker: a typed ID in the list is chosen, one not in it isn’t")
     func editorChoice() {
         let list = [JamfPlatform.Environment(id: "E77C1408-10C8-4007-B177-ABC9157FBCAA", name: "Production")]
         #expect(EnvironmentListState.choice(for: " \(environmentID) ", in: list) == list[0].id)
@@ -791,5 +845,20 @@ struct JamfPlatformEnvironmentTests {
         var pro = connection
         pro.service = .jamfPro
         #expect(!EnvironmentListState.canLoad(pro, typedSecret: "s", hasStoredSecret: true))
+    }
+}
+
+@Suite("Names before 1.0: the old names still mean the same types")
+struct RenamedTypeTests {
+    @Test("Nested like ABM’s: the token providers, errors and Intune’s device record")
+    @available(*, deprecated)
+    func oldNames() {
+        #expect(JamfTokenProvider.self == JamfPlatform.TokenProvider.self)
+        #expect(JamfPlatformError.self == JamfPlatform.APIError.self)
+        #expect(EntraTokenProvider.self == Graph.TokenProvider.self)
+        #expect(GraphError.self == Graph.APIError.self)
+        #expect(IntuneManagedDevice.self == Graph.ManagedDevice.self)
+        #expect(JamfSchoolError.self == JamfSchool.APIError.self)
+        #expect(JamfPro.Match<String>.self == DeviceMatch<String>.self)
     }
 }

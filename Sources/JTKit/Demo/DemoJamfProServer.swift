@@ -3,12 +3,13 @@ import Foundation
 /// An in-memory Jamf Pro (direct, API client sign-in) holding `DemoWorld`'s
 /// Jamf Pro devices: sign-in, version, inventory looked up by serial (the
 /// batched RSQL filters JTKit sends), ADE instances whose `serverUuid` is
-/// Apple's server ID, PreStages and their scope, sites, departments,
+/// Apple’s server ID, PreStages and their scope, sites, departments,
 /// buildings, Classic groups, DDM status, MDM commands, asset tag and site
 /// changes, unmanage and delete. Secrets read back obviously fake values.
 ///
 /// Every request needs the token from its sign-in, as on a server; the
-/// `missingPermission` scenario refuses inventory and commands with 403.
+/// `missingPermission` scenario refuses inventory, commands and record
+/// deletes with 403.
 ///
 /// Given an object store (`init(objects:)`), the server answers from it
 /// instead: a tenant whose objects an app copies (JamfMigrator), with no
@@ -20,7 +21,7 @@ public nonisolated final class DemoJamfProServer: DemoServer, @unchecked Sendabl
         public static let recoveryLock = "demo-recovery-lock-not-real"
         public static let deviceLockPIN = "123456"
         public static let localAdminPassword = "Demo-Not-A-Real-Password"
-        public static let localAdminAccount = "contosoadmin"
+        static let localAdminAccount = "contosoadmin"
     }
 
     struct Record {
@@ -79,7 +80,7 @@ public nonisolated final class DemoJamfProServer: DemoServer, @unchecked Sendabl
         self.objects = objects
     }
 
-    /// A device's current asset tag, or nil once deleted.
+    /// A device’s current asset tag, or nil once deleted.
     public func assetTag(serial: String) -> String? {
         lock.withLock { records.values.first { $0.device.serial == serial.uppercased() }?.assetTag }
     }
@@ -134,6 +135,10 @@ public nonisolated final class DemoJamfProServer: DemoServer, @unchecked Sendabl
         case ("GET", let p) where p.count == 4 && p[0] == "v2" && p[1] == "mobile-devices" && p[3] == "detail":
             guard mobile(p[2]) != nil else { return Self.notFound() }
             return DemoJSON.response(200, ["ios": ["unlockToken": "ZGVtby11bmxvY2stdG9rZW4="]])
+        case ("GET", let p) where p.count == 3 && p[0] == "v2" && p[1] == "mobile-devices":
+            if refused { return Self.forbidden() }
+            guard let record = mobile(p[2]).flatMap({ records[$0] }) else { return Self.notFound() }
+            return DemoJSON.response(200, singleMobileJSON(record))
         case ("GET", ["v1", "sites"]):
             return DemoJSON.response(200, Self.sites.map { ["id": $0.0, "name": $0.1] })
         case ("GET", ["v1", "departments"]):
@@ -212,6 +217,7 @@ public nonisolated final class DemoJamfProServer: DemoServer, @unchecked Sendabl
             return DemoJSON.response(202, ["id": DemoSamples.uuid(0x9000 + commandsValue.count)])
         case ("DELETE", let p) where p.count == 3 && p[0] == "v4" && p[1] == "computers-inventory":
             guard let number = computer(p[2]) else { return Self.notFound() }
+            if refused { return Self.forbidden() }
             records[number] = nil
             return DemoJSON.empty(204)
         case ("GET", let p) where p.count == 4 && p[0] == "v4" && p[1] == "computers-inventory":
@@ -262,6 +268,7 @@ public nonisolated final class DemoJamfProServer: DemoServer, @unchecked Sendabl
                                                                    "mobile_devices": members(group.3)]])
         case ("DELETE", let p) where p.count == 3 && p[0] == "mobiledevices" && p[1] == "id":
             guard let number = mobile(p[2]) else { return Self.notFound() }
+            if scenario == .missingPermission { return Self.forbidden() }
             records[number] = nil
             return DemoJSON.response(200, [:])
         case ("POST", let p) where p.count == 5 && p[0] == "mobiledevicecommands" && p[1] == "command" && p[3] == "id":
@@ -355,6 +362,31 @@ public nonisolated final class DemoJamfProServer: DemoServer, @unchecked Sendabl
         ]
     }
 
+    /// `v2/mobile-devices/{id}`: the general values at the top level, no
+    /// unlock token (that one is `…/detail`).
+    private func singleMobileJSON(_ record: Record) -> [String: Any] {
+        let device = record.device
+        let contact = DemoWorld.iso(daysAgo: Double(device.lastContactDaysAgo) + 0.1, from: now)
+        return [
+            "id": "\(device.number)",
+            "name": device.name,
+            "serialNumber": device.serial,
+            "udid": device.udid,
+            "assetTag": record.assetTag,
+            "osVersion": device.osVersion,
+            "osBuild": device.osVersion.hasPrefix("27") ? "24A5321" : "23G93",
+            "managed": record.managed,
+            "managementId": device.managementID,
+            "lastInventoryUpdateTimestamp": contact,
+            "lastContactTimestamp": contact,
+            "lastEnrollmentTimestamp": DemoWorld.iso(daysAgo: 150 + Double(device.number), from: now),
+            "mdmProfileExpirationTimestamp": DemoWorld.iso(daysAgo: -500, from: now),
+            "site": ["id": record.siteID, "name": Self.sites.first { $0.0 == record.siteID }?.1 ?? ""],
+            "ios": ["supervised": true, "model": device.model, "modelIdentifier": device.modelIdentifier] as [String: Any],
+            "type": "ios",
+        ]
+    }
+
     private func members(_ numbers: ClosedRange<Int>) -> [[String: Any]] {
         numbers.compactMap { records[$0] }.map { ["id": $0.device.number, "name": $0.device.name, "serial_number": $0.device.serial] }
     }
@@ -417,7 +449,7 @@ public nonisolated final class DemoJamfProServer: DemoServer, @unchecked Sendabl
         Int(id).flatMap { records[$0]?.device.isComputer == false ? $0 : nil }
     }
 
-    /// Jamf Pro's `page` / `page-size` paging, with `totalCount`.
+    /// Jamf Pro’s `page` / `page-size` paging, with `totalCount`.
     private func page(_ items: [[String: Any]], _ request: DemoRequest) -> DemoResponse {
         let size = max(Int(request.query["page-size"] ?? "") ?? 100, 1)
         let index = max(Int(request.query["page"] ?? "") ?? 0, 0)
@@ -440,6 +472,6 @@ public nonisolated final class DemoJamfProServer: DemoServer, @unchecked Sendabl
     private static func notFound() -> DemoResponse { error(404, "NOT_FOUND", "Not found") }
 
     private static func forbidden() -> DemoResponse {
-        error(403, "INVALID_PRIVILEGE", "Forbidden: the demo's missingPermission scenario")
+        error(403, "INVALID_PRIVILEGE", "Forbidden: the demo’s missingPermission scenario")
     }
 }

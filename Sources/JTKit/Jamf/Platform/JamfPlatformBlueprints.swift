@@ -38,7 +38,7 @@ extension JamfPlatform {
         }
     }
 
-    /// A Blueprint's `deploymentState`: its state and its last deployment.
+    /// A Blueprint’s `deploymentState`: its state and its last deployment.
     public struct DeploymentState: Hashable, Sendable {
         public var state: BlueprintState
         /// The exact server text, so one deployment can be told from the next.
@@ -103,7 +103,7 @@ extension JamfPlatform {
     }
 
     /// A whole Blueprint from `GET …/blueprints/{id}`, kept exactly as received,
-    /// so anything an app doesn't edit can be sent back as it was. The
+    /// so anything an app doesn’t edit can be sent back as it was. The
     /// accessors only read.
     public struct BlueprintDetail: Identifiable, Sendable {
         /// One component of a step.
@@ -134,10 +134,10 @@ extension JamfPlatform {
             do {
                 json = try LosslessJSON(data: data)
             } catch {
-                throw JamfPlatformError(.invalidResponse("The Blueprint is not valid JSON: \(error.localizedDescription)"))
+                throw JamfPlatform.APIError(.invalidResponse("The Blueprint isn’t valid JSON: \(error.localizedDescription)"))
             }
             guard let overview = BlueprintOverview(json: json) else {
-                throw JamfPlatformError(.invalidResponse("The Blueprint has no \"id\"."))
+                throw JamfPlatform.APIError(.invalidResponse("The Blueprint has no \"id\"."))
             }
             self.overview = overview
             self.json = json
@@ -150,7 +150,7 @@ extension JamfPlatform {
             scope?["deviceGroups"]?.arrayValue?.compactMap(\.stringValue) ?? []
         }
 
-        /// A Blueprint assigned to a division can't be changed through the API
+        /// A Blueprint assigned to a division can’t be changed through the API
         /// (a PATCH answers 409 `DIVISION_PATCH_NOT_ALLOWED`).
         public var isDivisionLocked: Bool {
             guard let division = json["divisionId"] else { return false }
@@ -166,13 +166,19 @@ extension JamfPlatform {
             }
         }
 
-        /// True when `latest` still has the `updated` time this copy was read with.
+        /// True when `latest` is the same Blueprint and still has the
+        /// `updated` time this copy was read with. When either copy has no
+        /// `updated` time, only an identical answer counts as unchanged.
         public func isUnchanged(in latest: BlueprintDetail) -> Bool {
-            overview.updated == latest.overview.updated
+            guard overview.id == latest.overview.id else { return false }
+            guard let updated = overview.updated, let latestUpdated = latest.overview.updated else {
+                return json == latest.json
+            }
+            return updated == latestUpdated
         }
     }
 
-    /// Where a deployment stands: the Blueprint's last deployment and its report.
+    /// Where a deployment stands: the Blueprint’s last deployment and its report.
     public struct DeploymentStatus: Hashable, Sendable {
         /// `PENDING`, `DEPLOYING`, `SUCCEEDED` or `FAILED`; nil until the new
         /// deployment shows up.
@@ -224,7 +230,7 @@ extension JamfPlatform {
         }
 
         public func detail(id: String) async throws -> BlueprintDetail {
-            let response = try await client.send(HTTPRequest(path: Self.itemPath(id)))
+            let response = try await client.sendThrowing(HTTPRequest(path: Self.itemPath(id)))
             return try BlueprintDetail(data: response.data)
         }
 
@@ -232,16 +238,16 @@ extension JamfPlatform {
         /// Only retried after a 429, so a Blueprint is never created twice.
         public func create(name: String, description: String?, deviceGroups: [String], steps: [LosslessJSON]) async throws -> String {
             guard !deviceGroups.isEmpty else {
-                throw JamfPlatformError(.invalidResponse("Refusing to create: a Blueprint needs at least one device group."))
+                throw JamfPlatform.APIError(.invalidResponse("Refusing to create: a Blueprint needs at least one device group."))
             }
             var body = LosslessJSON.Object(["name": .string(name)])
             if let description, !description.isEmpty { body["description"] = .string(description) }
             body["scope"] = Self.scope(deviceGroups)
             body["steps"] = .array(steps)
-            let response = try await client.send(HTTPRequest(
+            let response = try await client.sendThrowing(HTTPRequest(
                 method: "POST", path: Self.path, body: LosslessJSON.object(body).serialized(), contentType: "application/json"))
             guard let json = try? LosslessJSON(data: response.data), let id = json["id"]?.stringValue else {
-                throw JamfPlatformError(.invalidResponse("The create response has no Blueprint id."))
+                throw JamfPlatform.APIError(.invalidResponse("The create response has no Blueprint id."))
             }
             return id
         }
@@ -250,7 +256,7 @@ extension JamfPlatform {
         /// complete array: merge-patch replaces arrays whole. Safe to repeat.
         public func patchSteps(id: String, steps: LosslessJSON) async throws {
             guard steps.arrayValue != nil else {
-                throw JamfPlatformError(.invalidResponse("Refusing to PATCH: steps is not an array."))
+                throw JamfPlatform.APIError(.invalidResponse("Refusing to PATCH: steps isn’t an array."))
             }
             try await mergePatch(id: id, LosslessJSON.Object(["steps": steps]))
         }
@@ -259,7 +265,7 @@ extension JamfPlatform {
         /// list, at least one group (the API requires one). Safe to repeat.
         public func patchScope(id: String, deviceGroups: [String]) async throws {
             guard !deviceGroups.isEmpty else {
-                throw JamfPlatformError(.invalidResponse("Refusing to PATCH: a Blueprint scope needs at least one device group."))
+                throw JamfPlatform.APIError(.invalidResponse("Refusing to PATCH: a Blueprint scope needs at least one device group."))
             }
             try await mergePatch(id: id, LosslessJSON.Object(["scope": Self.scope(deviceGroups)]))
         }
@@ -267,28 +273,30 @@ extension JamfPlatform {
         /// `POST …/deploy`. Only retried after a 429, so a deployment is never
         /// started twice.
         public func deploy(id: String) async throws {
-            _ = try await client.send(HTTPRequest(method: "POST", path: Self.itemPath(id) + "/deploy"))
+            _ = try await client.sendThrowing(HTTPRequest(method: "POST", path: Self.itemPath(id) + "/deploy"))
         }
 
         /// The status report; nil while there is none (404).
         public func report(id: String) async throws -> BlueprintReport? {
             do {
                 return BlueprintReport(json: try await client.json(Self.itemPath(id) + "/report"))
-            } catch let error as JamfPlatformError where error.status == 404 {
+            } catch let error as JamfPlatform.APIError where error.status == 404 {
                 return nil
             }
         }
 
-        /// `DELETE`. Safe to repeat.
+        /// `DELETE`. Safe to repeat: a 404 after a repeat means an earlier
+        /// attempt already deleted it.
         public func delete(id: String) async throws {
-            _ = try await client.send(HTTPRequest(method: "DELETE", path: Self.itemPath(id), safeToRepeat: true))
+            _ = try await client.sendThrowing(HTTPRequest(method: "DELETE", path: Self.itemPath(id),
+                                                          repeating: .safeNotFoundIsDone))
         }
 
         // MARK: Deploy and watch
 
         /// Starts a deployment: reads the Blueprint first and returns when its
         /// last deployment started, so the watch can tell the new deployment
-        /// from the previous one (also one started since the caller's copy
+        /// from the previous one (also one started since the caller’s copy
         /// was read).
         public func startDeployment(id: String) async throws -> String? {
             let previous = try await detail(id: id).overview.deploymentState?.lastDeploymentStarted
@@ -297,7 +305,7 @@ extension JamfPlatform {
         }
 
         /// Follows the deployment that replaced `previousStart` until it
-        /// succeeds or fails, or the poller's time limit is reached (5 minutes
+        /// succeeds or fails, or the poller’s time limit is reached (5 minutes
         /// by default). Each check reads the Blueprint and its report.
         public func watchDeployment(
             id: String,
@@ -340,9 +348,9 @@ extension JamfPlatform {
         }
 
         private func mergePatch(id: String, _ body: LosslessJSON.Object) async throws {
-            _ = try await client.send(HTTPRequest(
+            _ = try await client.sendThrowing(HTTPRequest(
                 method: "PATCH", path: Self.itemPath(id), body: LosslessJSON.object(body).serialized(),
-                contentType: "application/merge-patch+json", safeToRepeat: true))
+                contentType: "application/merge-patch+json", repeating: .safe))
         }
     }
 }

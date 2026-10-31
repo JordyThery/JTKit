@@ -1,7 +1,7 @@
 import SwiftUI
 
 /// The "Demo Mode" switch, the same in every app: put it in the connection
-/// picker's and the Connection menu's slot for the app's own items.
+/// picker’s and the Connection menu’s slot for the app’s own items.
 ///
 /// ```swift
 /// ConnectionPicker(store: connections, selection: selection,
@@ -38,7 +38,7 @@ extension ConnectionPickerLabel {
                                                    accessibilityLabel: "Connection in use: Demo Mode")
 
     /// The picker naming the demo connection in use, e.g. "Contoso (Demo)",
-    /// as Checkpoint's does.
+    /// as Checkpoint’s does.
     public static func demo(_ connection: Connection) -> ConnectionPickerLabel {
         ConnectionPickerLabel(connection.name, systemImage: "testtube.2",
                               accessibilityLabel: "Connection in use: \(connection.name)")
@@ -46,7 +46,7 @@ extension ConnectionPickerLabel {
 }
 
 extension View {
-    /// The app's question before demo mode is turned on or off while it has
+    /// The app’s question before demo mode is turned on or off while it has
     /// unsaved work (`DemoMode.asksBeforeSwitching`), e.g. "Turn on Demo Mode
     /// and discard unsaved changes?". Put it on the window where the switch is.
     /// - Parameter discarding: what switching discards, e.g. "unsaved changes".
@@ -96,9 +96,9 @@ struct DemoModeConnectionsNote: View {
     }
 }
 
-/// One role's demo connections while demo mode is on, e.g. Checkpoint's two
+/// One role’s demo connections while demo mode is on, e.g. Checkpoint’s two
 /// demo organizations, and which is in use: one of them, or all of them.
-/// Kept in memory for the session only; nothing is saved, and the role's
+/// Kept in memory for the session only; nothing is saved, and the role’s
 /// saved choice is left as it was. Give it to the role
 /// (`ConnectionRole(…, demo:)`): the picker and the Connection menu then list
 /// the demo connections above the saved ones, the picker reads e.g.
@@ -136,7 +136,7 @@ public final class DemoConnectionChoice {
         usesAll ? connections : selected.map { [$0] } ?? []
     }
 
-    /// What the role's picker shows, e.g. "Contoso (Demo)" or "All Organizations (Demo)".
+    /// What the role’s picker shows, e.g. "Contoso (Demo)" or "All Organizations (Demo)".
     func label(allTitle: String?, roleName: String) -> ConnectionPickerLabel {
         let name = usesAll ? "\(allTitle ?? "All") (Demo)" : selected?.name ?? "Demo"
         return ConnectionPickerLabel(name, systemImage: "testtube.2",

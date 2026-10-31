@@ -1,11 +1,11 @@
 import Foundation
 
-/// Microsoft Graph, for Intune (ROADMAP step 8). Microsoft's public cloud only.
+/// Microsoft Graph, for Intune. Microsoft’s public cloud only.
 public nonisolated enum Graph {
     public static let host = "graph.microsoft.com"
     public static let baseURL = URL(string: "https://graph.microsoft.com")!
-    /// Graph's limit for this app's requests at a time.
-    public static let maxConcurrent = 4
+    /// Graph’s limit for this app’s requests at a time.
+    static let maxConcurrent = 4
     /// More pages than any real list has; reaching it is an error.
     public static let maxPages = 1_000
 
@@ -15,12 +15,12 @@ public nonisolated enum Graph {
     }
 
     /// The recorder for Graph requests: category and service "Intune", so
-    /// the activity log's Source column says "Intune" (ROADMAP step 8).
-    public static func recorder(session: URLSession = .shared, log: ActivityLog?, connection: String? = nil) -> RequestRecorder {
+    /// the activity log’s Source column says "Intune".
+    public static func recorder(session: URLSession, log: ActivityLog?, connection: String? = nil) -> RequestRecorder {
         RequestRecorder(session: session, log: log, category: "Intune", service: "Intune", connection: connection)
     }
 
-    /// Sends requests to Microsoft Graph on JTKit's `HTTPClient`, so the
+    /// Sends requests to Microsoft Graph on JTKit’s `HTTPClient`, so the
     /// shared retry rules apply: at most 4 attempts, 429 retried for every
     /// request, server errors and network drops only for reads and the edits
     /// marked safe to repeat, a 401 gets a new token and one more try.
@@ -30,21 +30,21 @@ public nonisolated enum Graph {
     /// - Every request carries a new `client-request-id`.
     /// - Lists follow `@odata.nextLink` only to `https://graph.microsoft.com`;
     ///   an answer without `value` is an error, and so is reaching 1,000 pages.
-    /// - Errors are `GraphError`s, naming the permission a refused request needs.
+    /// - Errors are `Graph.APIError`s, naming the permission a refused request needs.
     public final class Client: Sendable {
         public let access: Graph.Access
-        /// The app's own hints, added to every error.
+        /// The app’s own hints, added to every error.
         public let hints: [String]
         private let http: HTTPClient
         private let requestID: @Sendable () -> String
 
-        /// Records every attempt; also for requests that don't go to Graph,
-        /// such as Intune Deployer's uploads to Azure Storage.
+        /// Records every attempt; also for requests that don’t go to Graph,
+        /// such as Intune Deployer’s uploads to Azure Storage.
         public var recorder: RequestRecorder { http.recorder }
 
         /// - Parameters:
-        ///   - tokens: `EntraTokenProvider` for an app sign-in, or the
-        ///     interactive sign-in's token source (`JTKitMSAL`).
+        ///   - tokens: `Graph.TokenProvider` for an app sign-in, or the
+        ///     interactive sign-in’s token source (`JTKitMSAL`).
         ///   - access: how it signs in, which decides who grants a missing
         ///     permission.
         ///   - recorder: usually `Graph.recorder(session:log:connection:)`.
@@ -67,31 +67,30 @@ public nonisolated enum Graph {
                               sleep: sleep, random: random, now: now)
         }
 
-        /// An Intune connection that signs in with its app registration's
+        /// An Intune connection that signs in with its app registration’s
         /// client secret.
         ///
-        /// - Throws: `GraphError.Kind.invalidConnection` for another service
+        /// - Throws: `Graph.APIError.Kind.invalidConnection` for another service
         ///   or sign-in method, or an unusable tenant or client ID.
         public convenience init(connection: Connection, secret: @escaping @Sendable () throws -> String,
-                                session: URLSession = .shared, log: ActivityLog?, hints: [String] = []) throws {
+                                session: URLSession, log: ActivityLog?, hints: [String] = []) throws {
             let recorder = Graph.recorder(session: session, log: log, connection: connection.name)
-            let tokens = try EntraTokenProvider(connection: connection, secret: secret, recorder: recorder)
+            let tokens = try Graph.TokenProvider(connection: connection, secret: secret, recorder: recorder)
             self.init(tokens: tokens, access: .application, recorder: recorder, hints: hints)
         }
 
         // MARK: - Requests
 
-        /// Sends one request; returns the answer's body.
+        /// Sends one request; returns the answer’s body. Repeated after a
+        /// server error or a dropped connection as the method allows: reads,
+        /// PUT, PATCH and DELETE are, POST never is (a POST that replaces
+        /// what’s there goes through `post(_:version:body:safeToRepeat:)`).
         ///
-        /// - Parameters:
-        ///   - path: relative to the version, with or without a query
-        ///     (`me?$select=id`), or a whole next-page link.
-        ///   - safeToRepeat: an edit that can be sent twice without harm
-        ///     (updates, `/assign`); creates never are.
-        public func send(_ method: String, _ path: String, version: Version, body: Data? = nil,
-                         safeToRepeat: Bool = false) async throws -> Data {
-            try await send(method, path, version: version, body: body, safeToRepeat: safeToRepeat,
-                           notFoundAfterRepeatIsDone: false, recordsBodies: false).data
+        /// - Parameter path: relative to the version, with or without a query
+        ///   (`me?$select=id`), or a whole next-page link.
+        public func send(_ method: String, _ path: String, version: Version, body: Data? = nil) async throws -> Data {
+            let repeating: HTTPRequest.Repeating = ["PUT", "PATCH", "DELETE"].contains(method.uppercased()) ? .safe : .standard
+            return try await send(method, path, version: version, body: body, repeating: repeating, recordsBodies: false).data
         }
 
         public func get<T: Decodable>(_ type: T.Type, _ path: String, version: Version) async throws -> T {
@@ -104,28 +103,28 @@ public nonisolated enum Graph {
 
         /// A create or an action. Not repeated after a server error or a
         /// dropped connection unless `safeToRepeat` (e.g. `/assign`, which
-        /// replaces what's there).
+        /// replaces what’s there).
         @discardableResult
         public func post(_ path: String, version: Version, body: Data, safeToRepeat: Bool = false) async throws -> Data {
-            try await send("POST", path, version: version, body: body, safeToRepeat: safeToRepeat)
+            try await send("POST", path, version: version, body: body, repeating: safeToRepeat ? .safe : .standard,
+                           recordsBodies: false).data
         }
 
         /// A partial update; safe to repeat.
         @discardableResult
         public func patch(_ path: String, version: Version, body: Data) async throws -> Data {
-            try await send("PATCH", path, version: version, body: body, safeToRepeat: true)
+            try await send("PATCH", path, version: version, body: body)
         }
 
         /// A full replace; safe to repeat.
         @discardableResult
         public func put(_ path: String, version: Version, body: Data) async throws -> Data {
-            try await send("PUT", path, version: version, body: body, safeToRepeat: true)
+            try await send("PUT", path, version: version, body: body)
         }
 
         /// Safe to repeat: a 404 after a repeat counts as already gone.
         public func delete(_ path: String, version: Version) async throws {
-            _ = try await send("DELETE", path, version: version, body: nil, safeToRepeat: true,
-                               notFoundAfterRepeatIsDone: true, recordsBodies: false)
+            _ = try await send("DELETE", path, version: version, body: nil, repeating: .safeNotFoundIsDone, recordsBodies: false)
         }
 
         /// Every item of a list, decoded, following the next pages.
@@ -148,14 +147,14 @@ public nonisolated enum Graph {
             while let current = next {
                 try Task.checkCancellation()
                 guard pages < maxPages else {
-                    throw GraphError(.pageLimitReached(path: Self.shownPath(path), pages: pages), appHints: hints, access: access)
+                    throw Graph.APIError(.pageLimitReached(path: Self.shownPath(path), pages: pages), appHints: hints, access: access)
                 }
-                let data = try await send("GET", current, version: version, body: nil, safeToRepeat: false,
-                                          notFoundAfterRepeatIsDone: false, recordsBodies: recordsBodies).data
+                let data = try await send("GET", current, version: version, body: nil, repeating: .standard,
+                                          recordsBodies: recordsBodies).data
                 pages += 1
                 guard let page = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
                       let value = page["value"] as? [Any] else {
-                    throw GraphError(.invalidResponse("The answer to \(Self.shownPath(path)) has no list (“value”)."),
+                    throw Graph.APIError(.invalidResponse("The answer to \(Self.shownPath(path)) has no list (“value”)."),
                                      appHints: hints, access: access)
                 }
                 for element in value {
@@ -174,12 +173,12 @@ public nonisolated enum Graph {
             if path.lowercased().hasPrefix("https://") || path.lowercased().hasPrefix("http://") {
                 guard let url = URL(string: path), url.scheme?.lowercased() == "https",
                       url.host()?.lowercased() == Graph.host, url.port == nil, url.user() == nil else {
-                    throw GraphError(.nextPageElsewhere(URL(string: path)?.host() ?? "another address"))
+                    throw Graph.APIError(.nextPageElsewhere(URL(string: path)?.host() ?? "another address"))
                 }
                 var linkPath = url.path(percentEncoded: true)
                 while linkPath.hasPrefix("/") { linkPath.removeFirst() }
                 guard linkPath.hasPrefix("v1.0/") || linkPath.hasPrefix("beta/") else {
-                    throw GraphError(.nextPageElsewhere("\(Graph.host)/\(linkPath)"))
+                    throw Graph.APIError(.nextPageElsewhere("\(Graph.host)/\(linkPath)"))
                 }
                 return (linkPath, url.query(percentEncoded: true))
             }
@@ -187,7 +186,7 @@ public nonisolated enum Graph {
             var relative = String(split[0])
             while relative.hasPrefix("/") { relative.removeFirst() }
             let encodedPath = relative.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? relative
-            // characters a query can't hold (spaces, quotes) are encoded;
+            // characters a query can’t hold (spaces, quotes) are encoded;
             // existing escapes and the &/= separators are kept, so callers can
             // pre-encode values that contain & or +
             var allowed = CharacterSet.urlQueryAllowed
@@ -196,7 +195,7 @@ public nonisolated enum Graph {
             return ("\(version.rawValue)/\(encodedPath)", query)
         }
 
-        /// Graph's dates come with or without fractional seconds.
+        /// Graph’s dates come with or without fractional seconds.
         public nonisolated static func decode<T: Decodable>(_ type: T.Type, from data: Data) throws -> T {
             let decoder = JSONDecoder()
             decoder.dateDecodingStrategy = .custom { decoder in
@@ -207,23 +206,23 @@ public nonisolated enum Graph {
                     formatter.formatOptions = options
                     if let date = formatter.date(from: string) { return date }
                 }
-                throw DecodingError.dataCorruptedError(in: container, debugDescription: "Unrecognised date: \(string)")
+                throw DecodingError.dataCorruptedError(in: container, debugDescription: "Unrecognized date: \(string)")
             }
             do {
                 return try decoder.decode(type, from: data)
             } catch {
-                throw GraphError(.invalidResponse("\(T.self): \(error.localizedDescription)"))
+                throw Graph.APIError(.invalidResponse("\(T.self): \(error.localizedDescription)"))
             }
         }
 
         // MARK: - Private
 
-        private func send(_ method: String, _ path: String, version: Version, body: Data?, safeToRepeat: Bool,
-                          notFoundAfterRepeatIsDone: Bool, recordsBodies: Bool) async throws -> HTTPResponse {
+        private func send(_ method: String, _ path: String, version: Version, body: Data?,
+                          repeating: HTTPRequest.Repeating, recordsBodies: Bool) async throws -> HTTPResponse {
             let parts: (path: String, query: String?)
             do {
                 parts = try Self.parts(of: path, version: version)
-            } catch var error as GraphError {
+            } catch var error as Graph.APIError {
                 await recorder.note(method, Self.shownPath(path), note: error.message(), category: "Blocked", isWarning: true)
                 error.appHints = hints
                 error.access = access
@@ -233,13 +232,12 @@ public nonisolated enum Graph {
             let permission = Graph.Permission.required(method: method, path: pathInVersion.removingPercentEncoding ?? pathInVersion)
             let request = HTTPRequest(method: method, path: parts.path, body: body,
                                       headers: ["client-request-id": requestID()],
-                                      safeToRepeat: safeToRepeat, recordsBodies: recordsBodies, encodedQuery: parts.query,
-                                      notFoundAfterRepeatIsDone: notFoundAfterRepeatIsDone)
+                                      repeating: repeating, recordsBodies: recordsBodies, encodedQuery: parts.query)
             do {
                 return try await http.send(request)
             } catch let error as HTTPError {
-                throw GraphError(error, access: access, permission: permission, appHints: hints)
-            } catch var error as GraphError {
+                throw Graph.APIError(error, access: access, permission: permission, appHints: hints)
+            } catch var error as Graph.APIError {
                 // from the sign-in
                 error.appHints = hints + error.appHints
                 throw error

@@ -14,7 +14,7 @@ public nonisolated struct ActivityLogAppInfo: Sendable, Hashable {
         self.system = system
     }
 
-    /// The running app, from its Info.plist, and this Mac's macOS version.
+    /// The running app, from its Info.plist, and this Mac’s macOS version.
     public static var current: ActivityLogAppInfo {
         let info = Bundle.main.infoDictionary ?? [:]
         return ActivityLogAppInfo(
@@ -28,7 +28,7 @@ public nonisolated struct ActivityLogAppInfo: Sendable, Hashable {
 
 /// Plain-text activity log: one entry (the detail pane, Copy) or the whole
 /// log (the exports). "Export for Bug Report…" masks identifiers;
-/// "Export Unmasked…" and a copied entry don't.
+/// "Export Unmasked…" and a copied entry don’t.
 public nonisolated enum ActivityLogExport {
     static let separator = String(repeating: "-", count: 72)
 
@@ -54,8 +54,8 @@ public nonisolated enum ActivityLogExport {
             "Exported \(formatter.string(from: exported))",
             "\(entries.count) \(entries.count == 1 ? "entry" : "entries"), newest first. Secrets are never recorded.",
             masked
-                ? "Device identifiers, user names and IP addresses are replaced with placeholders."
-                : "Not masked: device identifiers, user names and IP addresses are shown as recorded.",
+                ? "Device identifiers, usernames and IP addresses are replaced with placeholders."
+                : "Not masked: device identifiers, usernames and IP addresses are shown as recorded.",
             "",
         ]
         let masker = masked ? IdentifierMasker(entries.flatMap(\.identifiers)) : nil
@@ -66,6 +66,18 @@ public nonisolated enum ActivityLogExport {
             lines.append("")
         }
         return lines.joined(separator: "\n")
+    }
+
+    /// `text(…)`, built on a background thread, for the export of a full log.
+    static func textInBackground(
+        _ entries: [ActivityLogEntry],
+        masked: Bool,
+        app: ActivityLogAppInfo,
+        exported: Date = .now
+    ) async -> String {
+        await Task.detached(priority: .userInitiated) {
+            text(entries, masked: masked, app: app, exported: exported)
+        }.value
     }
 
     static func transcript(of entry: ActivityLogEntry, dateFormatter: DateFormatter) -> String {

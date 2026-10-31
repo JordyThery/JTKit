@@ -1,14 +1,13 @@
 import Foundation
 
-// The four secrets Jamf Pro holds for a Mac (ROADMAP step 7, JTKit 0.8.2,
-// from Checkpoint): the FileVault recovery key, the Recovery Lock password,
-// the device lock PIN and the managed local administrator (LAPS) password.
+// The four secrets Jamf Pro holds for a Mac: the FileVault recovery key,
+// the Recovery Lock password, the device lock PIN and the managed local
+// administrator (LAPS) password.
 //
-// Every read is on JTKit's never-recorded list, so only its method, path,
+// Every read is on JTKit’s never-recorded list, so only its method, path,
 // status and duration reach the activity log. A failed read throws without
-// anything the server wrote, only the status and JTKit's hints (decided by
-// Jordy): an app records that failure, and the server's words could carry
-// the secret. Viewing a LAPS password makes Jamf Pro rotate it, so every app
+// anything the server wrote, only the status and JTKit’s hints: an app
+// records that failure, and the server’s words could carry the secret. Viewing a LAPS password makes Jamf Pro rotate it, so every app
 // asks first (`Secret.rotatesWhenViewed`).
 
 extension JamfPro {
@@ -37,7 +36,7 @@ extension JamfPro {
             }
         }
 
-        /// Viewing it makes Jamf Pro replace it (after the instance's rotation
+        /// Viewing it makes Jamf Pro replace it (after the instance’s rotation
         /// time), so the app asks before reading it.
         public var rotatesWhenViewed: Bool { self == .localAdminPassword }
 
@@ -49,7 +48,7 @@ extension JamfPro {
                     "Viewing the password for \(account ?? "this account") will cause Jamf Pro to rotate it \(rotation).")
         }
 
-        /// The Action entry's words: that it was read, never the secret.
+        /// The Action entry’s words: that it was read, never the secret.
         public func actionSummary(serial: String, account: String? = nil) -> String {
             switch self {
             case .fileVaultRecoveryKey: "Read the FileVault recovery key for \(serial)"
@@ -73,11 +72,11 @@ extension JamfPro {
     }
 
     /// A managed local administrator account Jamf Pro holds a password for.
-    /// A Mac can have the PreStage's (source MDM), the Jamf binary's (JMF),
+    /// A Mac can have the PreStage’s (source MDM), the Jamf binary’s (JMF),
     /// both or neither, under any username.
     public struct LocalAdminAccount: Hashable, Sendable {
         public var username: String
-        /// Empty when Jamf Pro didn't send one.
+        /// Empty when Jamf Pro didn’t send one.
         public var guid: String
         /// "MDM" or "JMF".
         public var source: String
@@ -91,7 +90,7 @@ extension JamfPro {
 }
 
 extension JamfPlatform.Client {
-    /// A Mac's FileVault personal recovery key; nil when Jamf Pro holds none.
+    /// A Mac’s FileVault personal recovery key; nil when Jamf Pro holds none.
     public func fileVaultKey(computerID: String) async throws -> JamfPro.FileVaultKey? {
         struct Answer: Decodable {
             let personalRecoveryKey: String?
@@ -105,7 +104,7 @@ extension JamfPlatform.Client {
                                     configurationName: answer.diskEncryptionConfigurationName)
     }
 
-    /// A Mac's Recovery Lock password; nil when none is escrowed.
+    /// A Mac’s Recovery Lock password; nil when none is escrowed.
     public func recoveryLockPassword(computerID: String) async throws -> String? {
         struct Answer: Decodable { let recoveryLockPassword: String? }
         return try await secret(Answer.self, "pro/v4/computers-inventory/\(JamfPlatform.pathSegment(computerID))/view-recovery-lock-password",
@@ -138,7 +137,7 @@ extension JamfPlatform.Client {
                 guard let username = item.username, !username.isEmpty else { return nil }
                 return JamfPro.LocalAdminAccount(username: username, guid: item.guid ?? "", source: item.userSource ?? "")
             } ?? []
-        } catch let error as JamfPlatformError where error.status == 403 || error.status == 404 {
+        } catch let error as JamfPlatform.APIError where error.status == 403 || error.status == 404 {
             return []
         }
     }
@@ -157,21 +156,21 @@ extension JamfPlatform.Client {
     }
 
     /// How long after being viewed a LAPS password is rotated, in seconds;
-    /// nil when the setting can't be read.
+    /// nil when the setting can’t be read.
     public func localAdminRotationTime() async -> Int? {
         struct Answer: Decodable { let passwordRotationTime: Int? }
-        // Jamf Pro's API description lists this privilege for reading the setting
+        // Jamf Pro’s API description lists this privilege for reading the setting
         return try? await decoded(Answer.self, HTTPRequest(path: "pro/v2/local-admin-password/settings"),
                                   privileges: [.readUserInitiatedEnrollment]).passwordRotationTime
     }
 
     /// Reads a secret: nil for "none held" (404, or 400 `NOT_FOUND` where
-    /// allowed); a failure carries only the status and JTKit's hints.
+    /// allowed); a failure carries only the status and JTKit’s hints.
     private func secret<T: Decodable>(_ type: T.Type, _ path: String, _ secret: JamfPro.Secret,
                                       absentOnNotFound: Bool = false) async throws -> T? {
         do {
             return try await decoded(type, HTTPRequest(path: path), privileges: [secret.privilege])
-        } catch let error as JamfPlatformError {
+        } catch let error as JamfPlatform.APIError {
             if error.status == 404 || (absentOnNotFound && error.status == 400 && error.hasCode(.notFound)) { return nil }
             throw error.withoutServerText
         }

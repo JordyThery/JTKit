@@ -1,8 +1,8 @@
 import SwiftUI
 
-/// The items of an app's connection picker: the saved connections (the one in
+/// The items of an app’s connection picker: the saved connections (the one in
 /// use checked), then "Edit Connections…", which opens Settings › Connections.
-/// The toolbar's `ConnectionPicker` and the menu bar's `ConnectionCommands`
+/// The toolbar’s `ConnectionPicker` and the menu bar’s `ConnectionCommands`
 /// show these same items, as every toolbar control needs a menu bar command.
 ///
 /// A role with "All" (`ConnectionRole.all`) lists it below its connections,
@@ -13,9 +13,9 @@ import SwiftUI
 /// tabs by name (`SettingsWindow(opensTabsByName: true)`).
 ///
 /// An app can add its own items below the connections (`extraItems`), e.g.
-/// Profile2Blueprint's "Offline Demo Mode"; the picker and the menu show them
+/// Profile2Blueprint’s "Offline Demo Mode"; the picker and the menu show them
 /// both, so they stay the same.
-public struct ConnectionMenuItems<Record: ConnectionRecord, Extra: View>: View {
+struct ConnectionMenuItems<Record: ConnectionRecord, Extra: View>: View {
     let store: ConnectionStore<Record>
     let roles: [ConnectionRole]
     let editTitle: String
@@ -23,14 +23,14 @@ public struct ConnectionMenuItems<Record: ConnectionRecord, Extra: View>: View {
     let extraItems: Extra
 
     /// - Parameters:
-    ///   - store: the app's saved connections.
+    ///   - store: the app’s saved connections.
     ///   - roles: the ways the app uses a connection; each gets its own
-    ///     choice, under the role's title when there are several (JamfMigrator's
-    ///     Source and Destination, Checkpoint's Apple and MDM). A role lists
+    ///     choice, under the role’s title when there are several (JamfMigrator’s
+    ///     Source and Destination, Checkpoint’s Apple and MDM). A role lists
     ///     only the connections it accepts.
     ///   - editTitle: e.g. `"Edit Tenants…"`; "Add Connection…" while the list is empty.
-    ///   - itemTitle: a connection's name in the menu; its name by default.
-    ///   - extraItems: the app's own items, below the connections.
+    ///   - itemTitle: a connection’s name in the menu; its name by default.
+    ///   - extraItems: the app’s own items, below the connections.
     public init(
         store: ConnectionStore<Record>,
         roles: [ConnectionRole],
@@ -81,7 +81,7 @@ public struct ConnectionMenuItems<Record: ConnectionRecord, Extra: View>: View {
         }
     }
 
-    /// While demo mode is on: the role's demo connections and "All", above
+    /// While demo mode is on: the role’s demo connections and "All", above
     /// the saved ones (which stay, so you can switch back).
     @ViewBuilder
     private func demoChoice(for role: ConnectionRole) -> some View {
@@ -118,7 +118,7 @@ public struct ConnectionMenuItems<Record: ConnectionRecord, Extra: View>: View {
 }
 
 extension ConnectionMenuItems where Extra == EmptyView {
-    public init(
+    init(
         store: ConnectionStore<Record>,
         roles: [ConnectionRole],
         editTitle: String = ConnectionMenuText.editTitle,
@@ -127,7 +127,7 @@ extension ConnectionMenuItems where Extra == EmptyView {
         self.init(store: store, roles: roles, editTitle: editTitle, itemTitle: itemTitle) { EmptyView() }
     }
 
-    public init(
+    init(
         store: ConnectionStore<Record>,
         selection: Binding<UUID?>,
         editTitle: String = ConnectionMenuText.editTitle,
@@ -173,14 +173,14 @@ public struct ConnectionPicker<Record: ConnectionRecord, Extra: View>: View {
     let extraItems: Extra
 
     /// - Parameters:
-    ///   - store: the app's saved connections.
+    ///   - store: the app’s saved connections.
     ///   - selection: the connection in use, saved by the app.
     ///   - editTitle: e.g. `"Edit Tenants…"`.
-    ///   - itemTitle: a connection's name in the toolbar and the menu; its name by default.
+    ///   - itemTitle: a connection’s name in the toolbar and the menu; its name by default.
     ///   - label: shown instead of the connection in use, e.g. "Offline Demo".
     ///   - help: the tooltip; "The connection in use" by default.
-    ///   - extraItems: the app's own items, below the connections; give the
-    ///     app's `ConnectionCommands` the same ones.
+    ///   - extraItems: the app’s own items, below the connections; give the
+    ///     app’s `ConnectionCommands` the same ones.
     public init(
         store: ConnectionStore<Record>,
         selection: Binding<UUID?>,
@@ -194,7 +194,7 @@ public struct ConnectionPicker<Record: ConnectionRecord, Extra: View>: View {
                   help: help, label: label, extraItems: extraItems)
     }
 
-    /// The picker of one role, for apps with a picker per role (Checkpoint's
+    /// The picker of one role, for apps with a picker per role (Checkpoint’s
     /// Apple and MDM). It lists the connections the role accepts, and "All"
     /// when the role has it.
     ///
@@ -219,7 +219,8 @@ public struct ConnectionPicker<Record: ConnectionRecord, Extra: View>: View {
     }
 
     public var body: some View {
-        if store.records.isEmpty && Extra.self == EmptyView.self {
+        if ConnectionMenuText.showsAddButton(isEmpty: store.records.isEmpty, hasExtraItems: Extra.self != EmptyView.self,
+                                             usesDemo: role.usesDemo) {
             SettingsTabLink(SettingsTabName.connections) {
                 Label(ConnectionMenuText.addTitle, systemImage: "plus")
             }
@@ -275,8 +276,8 @@ extension ConnectionPicker where Extra == EmptyView {
     }
 }
 
-/// The menu bar's "Connection" menu, with the same items as the toolbar's
-/// `ConnectionPicker`. Add it to the app's commands:
+/// The menu bar’s "Connection" menu, with the same items as the toolbar’s
+/// `ConnectionPicker`. Add it to the app’s commands:
 ///
 /// ```swift
 /// .commands {
@@ -292,7 +293,7 @@ public struct ConnectionCommands<Record: ConnectionRecord, Extra: View>: Command
     let extraItems: Extra
 
     /// - Parameters:
-    ///   - title: the menu's name, e.g. `"Tenant"`.
+    ///   - title: the menu’s name, e.g. `"Tenant"`.
     ///   - store, roles, editTitle, itemTitle, extraItems: as for `ConnectionMenuItems`.
     public init(
         _ title: String = ConnectionMenuText.menuTitle,
@@ -358,21 +359,28 @@ extension ConnectionCommands where Extra == EmptyView {
 public nonisolated enum ConnectionMenuText {
     public static let menuTitle = "Connection"
     public static let editTitle = "Edit Connections…"
-    public static let addTitle = "Add Connection…"
+    static let addTitle = "Add Connection…"
     static let noConnections = "No Connections"
     static let noneChosen = "No Connection"
-    /// The toolbar picker's symbol while "All" is in use.
+    /// The toolbar picker’s symbol while "All" is in use.
     static let allSymbol = "square.stack.3d.up"
-    static let unnamed = "Unnamed connection"
+    static let unnamed = "Unnamed Connection"
 
-    /// A connection's name, or "Unnamed connection" as in the Connections tab.
+    /// A connection’s name, or “Unnamed Connection” as in the Connections tab.
     public static func name(of connection: Connection) -> String {
         connection.name.isEmpty ? unnamed : connection.name
     }
 
-    /// The toolbar picker's title: the connection in use, if there is one.
+    /// The toolbar picker’s title: the connection in use, if there is one.
     static func pickerTitle(_ current: String?) -> String {
         current ?? noneChosen
+    }
+
+    /// Whether the toolbar picker is only "Add Connection…": nothing saved
+    /// and no items of the app’s own. Not in demo mode, where the demo
+    /// connections are the menu, even with none saved.
+    static func showsAddButton(isEmpty: Bool, hasExtraItems: Bool, usesDemo: Bool) -> Bool {
+        isEmpty && !hasExtraItems && !usesDemo
     }
 
     static func linkTitle(isEmpty: Bool, editTitle: String) -> String {

@@ -21,7 +21,7 @@ Bump `JTKit.version`, add a CHANGELOG entry, commit, tag the version (`0.2.0`, â
 
 ## Status
 
-0.1.0 is an empty scaffold. Components are moved in one at a time; see [CLAUDE.md](CLAUDE.md) for the plan and the inventory of duplicated code.
+All eight apps use JTKit for their updates, About and Settings windows, saved connections, activity log and demo mode, and for their connections to Jamf, Intune and Apple Business Manager. See [ROADMAP.md](ROADMAP.md) for the plan and [CHANGELOG.md](CHANGELOG.md) for what changed in each version.
 
 ## License
 

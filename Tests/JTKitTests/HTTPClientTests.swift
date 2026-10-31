@@ -26,7 +26,7 @@ struct HTTPClientTests {
                    sleep: { try await sleeps.sleep($0) }, random: { random }, now: { now })
     }
 
-    @Test("Requests carry the token, the app's headers, Accept, and a strictly encoded query")
+    @Test("Requests carry the token, the app’s headers, Accept, and a strictly encoded query")
     func headersAndQuery() async throws {
         let server = MockServer { _ in .json(200, "{}") }
         _ = try await makeClient(server).send(HTTPRequest(
@@ -40,7 +40,7 @@ struct HTTPClientTests {
         #expect(sent.url.absoluteString.hasSuffix("filter=deviceType%3D%3D%22COMPUTER%22"))
     }
 
-    @Test("A request's JSON filter reaches the recorder")
+    @Test("A request’s JSON filter reaches the recorder")
     func recordedJSON() async throws {
         let server = MockServer { _ in .json(200, #"{"keep":1,"drop":2}"#) }
         let log = ActivityLog()
@@ -80,7 +80,7 @@ struct HTTPClientTests {
         #expect(always.requests.count == 2)
     }
 
-    @Test("429 is retried for every method, honouring Retry-After in seconds")
+    @Test("429 is retried for every method, honoring Retry-After in seconds")
     func rateLimit() async throws {
         let calls = Counter()
         let server = MockServer { _ in calls.next() == 1 ? .json(429, "{}", headers: ["Retry-After": "3"]) : .json(201, "{}") }
@@ -139,8 +139,24 @@ struct HTTPClientTests {
         #expect(create.requests.count == 1)
 
         let safeEdit = failingOnce()
-        _ = try await makeClient(safeEdit).send(HTTPRequest(method: "PUT", path: "x", safeToRepeat: true))
+        _ = try await makeClient(safeEdit).send(HTTPRequest(method: "PUT", path: "x", repeating: .safe))
         #expect(safeEdit.requests.count == 2)
+    }
+
+    @Test("One repeat policy: the old two flags map onto it")
+    @available(*, deprecated)
+    func repeatPolicy() {
+        #expect(HTTPRequest(path: "x").repeating == .standard)
+        #expect(HTTPRequest(method: "PUT", path: "x", safeToRepeat: true).repeating == .safe)
+        #expect(HTTPRequest(method: "DELETE", path: "x", safeToRepeat: true, notFoundAfterRepeatIsDone: true).repeating == .safeNotFoundIsDone)
+        var request = HTTPRequest(method: "DELETE", path: "x")
+        request.notFoundAfterRepeatIsDone = true
+        #expect(request.repeating == .safeNotFoundIsDone && request.safeToRepeat)
+        request.notFoundAfterRepeatIsDone = false
+        #expect(request.repeating == .safe)
+        request.safeToRepeat = false
+        #expect(request.repeating == .standard && !request.isRepeatable)
+        #expect(HTTPRequest(path: "x").isRepeatable)
     }
 
     @Test("Short network drops are retried for reads only")
@@ -179,7 +195,7 @@ struct HTTPClientTests {
         #expect(log.entries.last?.request?.attempt == 2)
     }
 
-    @Test("Cancelling stops a wait at once, and nothing more is sent")
+    @Test("Canceling stops a wait at once, and nothing more is sent")
     func cancelDuringWait() async throws {
         let server = MockServer { _ in .json(429, "{}", headers: ["Retry-After": "100"]) }
         let log = ActivityLog()
@@ -193,7 +209,7 @@ struct HTTPClientTests {
         await #expect(throws: CancellationError.self) { _ = try await task.value }
         #expect(ContinuousClock.now - started < .seconds(5))
         #expect(server.requests.count == 1)
-        #expect(log.entries.last?.note == "Cancelled while waiting.")
+        #expect(log.entries.last?.note == "Canceled while waiting.")
     }
 
     @Test("A request the app marks as withholding its contents is recorded like a sensitive call")
@@ -214,7 +230,7 @@ struct HTTPClientTests {
         #expect(!"\(entry)".contains("SERIAL-1"))
     }
 
-    @Test("Requests not on the app's list never reach the network, and are logged")
+    @Test("Requests not on the app’s list never reach the network, and are logged")
     func refused() async throws {
         let server = MockServer { _ in .json(200, "{}") }
         let log = ActivityLog()
@@ -278,4 +294,100 @@ struct HTTPClientTests {
                                 recorder: RequestRecorder(session: server.session, log: nil))
         #expect(try client.url(for: HTTPRequest(path: "/api/x")).absoluteString == "https://jamf.example.com/tenant/api/x")
     }
+
+    @Test("By default a redirect is followed only to HTTPS on the same host")
+    func defaultRedirectRule() async throws {
+        let server = MockServer { request in
+            request.url.host() == "us.api.jamfcloud.com"
+                ? .redirect(to: URL(string: "https://elsewhere.example/x")!)
+                : .json(200, "{}")
+        }
+        let client = HTTPClient(baseURL: base, tokens: FixedToken("tok"),
+                                recorder: RequestRecorder(session: server.session, log: nil))
+        do {
+            _ = try await client.send(HTTPRequest(path: "x"))
+            Issue.record("The redirect was followed")
+        } catch let error as HTTPError {
+            #expect(error.status == 307)
+        }
+        #expect(server.requests.allSatisfy { $0.url.host() == "us.api.jamfcloud.com" })
+    }
+
+    @Test("An error answer’s cookies are redacted, and \"\\(error)\" shows no header value or body")
+    func errorHidesCookies() async throws {
+        let server = MockServer { _ in
+            .json(403, #"{"message":"no"}"#, headers: ["Set-Cookie": "session=abc123secretcookie; Path=/", "X-Request-Id": "r-1"])
+        }
+        do {
+            _ = try await makeClient(server).send(HTTPRequest(path: "x"))
+            Issue.record("Expected an error")
+        } catch let error as HTTPError {
+            guard case let .status(response, _, _, _) = error else { Issue.record("\(error)"); return }
+            #expect(response.header("Set-Cookie") == Redaction.placeholder)
+            #expect(response.header("X-Request-Id") == "r-1")
+            for text in ["\(error)", String(reflecting: error), "\(response)"] {
+                #expect(!text.contains("abc123secretcookie"), "\(text)")
+            }
+            #expect("\(error)".contains("HTTP 403"))
+        }
+        let ok = MockServer { _ in .json(200, "{}", headers: ["Set-Cookie": "kept=1"]) }
+        #expect(try await makeClient(ok).send(HTTPRequest(path: "x")).header("Set-Cookie") == "kept=1", "a success comes as it came")
+    }
+
+    @Test("A request waiting for a turn stops at once when canceled, and doesn’t hold up the others")
+    func cancelWaitingForTurn() async throws {
+        let server = MockServer { _ in .json(200, "{}") }
+        let gate = Gate()
+        let client = HTTPClient(baseURL: base, tokens: GatedToken(gate: gate),
+                                recorder: RequestRecorder(session: server.session, log: nil), maxConcurrent: 1)
+        let first = Task { try await client.send(HTTPRequest(path: "first")) }
+        try await Task.sleep(for: .milliseconds(100))
+        let waiting = Task { try await client.send(HTTPRequest(path: "waiting")) }
+        try await Task.sleep(for: .milliseconds(100))
+        waiting.cancel()
+        await #expect(throws: CancellationError.self) { _ = try await waiting.value }
+        gate.open()
+        _ = try await first.value
+        _ = try await client.send(HTTPRequest(path: "third"))
+        #expect(server.requests.map(\.path) == ["/first", "/third"])
+    }
+}
+
+/// Opens once; everyone waiting goes on.
+private final class Gate: @unchecked Sendable {
+    private let lock = NSLock()
+    private var isOpen = false
+    private var waiting: [CheckedContinuation<Void, Never>] = []
+
+    func wait() async {
+        await withCheckedContinuation { continuation in
+            lock.lock()
+            if isOpen {
+                lock.unlock()
+                continuation.resume()
+            } else {
+                waiting.append(continuation)
+                lock.unlock()
+            }
+        }
+    }
+
+    func open() {
+        lock.lock()
+        isOpen = true
+        let all = waiting
+        waiting = []
+        lock.unlock()
+        all.forEach { $0.resume() }
+    }
+}
+
+/// A token that only comes once the gate is open.
+private struct GatedToken: BearerTokenSource {
+    let gate: Gate
+    func token() async throws -> String {
+        await gate.wait()
+        return "tok"
+    }
+    func forgetToken() async {}
 }

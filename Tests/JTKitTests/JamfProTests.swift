@@ -85,7 +85,7 @@ struct JamfProLookupTests {
         #expect(try JamfPro.validatedIdentifier(" C02XK1JHJG5H ") == "C02XK1JHJG5H")
         #expect(try JamfPro.validatedIdentifier("00008030-001A2B3C4D5E802E") == "00008030-001A2B3C4D5E802E")
         for bad in ["", "C02\"||id==1", "C02 X", "C02,X", "Ç02", String(repeating: "A", count: 65)] {
-            #expect(throws: JamfPlatformError.self) { try JamfPro.validatedIdentifier(bad) }
+            #expect(throws: JamfPlatform.APIError.self) { try JamfPro.validatedIdentifier(bad) }
         }
     }
 
@@ -179,18 +179,19 @@ struct JamfProLookupTests {
         #expect(bySerial.userAndLocation?.email == "cart3@school.example")
     }
 
-    /// A record that never enrolled: Jamf's list has no general section for
+    /// A record that never enrolled: Jamf’s list has no general section for
     /// it (device type "Unknown"), so the lookup reads the record by ID once
-    /// more for its name and asset tag (0.12.3; seen on Jamf Pro 11.33).
+    /// more for its name and asset tag (seen on Jamf Pro 11.33). It reads
+    /// `v2/mobile-devices/{id}`, never `…/detail`, which carries the unlock token.
     @Test("A mobile device that never enrolled gets its name and asset tag from its own record")
     func unenrolledMobileDevice() async throws {
         let listed = #"{"totalCount":1,"results":[{"mobileDeviceId":"9","deviceType":"Unknown","hardware":{"serialNumber":"JTKTEST0001"}}]}"#
         let single = #"{"id":"9","name":"Test iPad","assetTag":"TAG-1","udid":"00000000-0000000000000001","managed":false,"osVersion":"","site":{"id":"-1","name":"None"},"ios":{"supervised":false}}"#
         let server = MockServer { request in
-            request.path.hasSuffix("/9/detail") ? .json(200, single) : .json(200, listed)
+            request.path.hasSuffix("/mobile-devices/9") ? .json(200, single) : .json(200, listed)
         }
         let record = try #require(try await proClient(server).mobileDevice(serial: "JTKTEST0001").record)
-        #expect(server.requests.map(\.path) == ["/api/v2/mobile-devices/detail", "/api/v2/mobile-devices/9/detail"])
+        #expect(server.requests.map(\.path) == ["/api/v2/mobile-devices/detail", "/api/v2/mobile-devices/9"])
         #expect(record.general?.displayName == "Test iPad")
         #expect(record.general?.assetTag == "TAG-1")
         #expect(record.general?.managed == false)
@@ -204,24 +205,23 @@ struct JamfProLookupTests {
         #expect(enrolled.requests.count == 1)
     }
 
-    /// The same for the lookup of many serials at once (0.12.4; found by
-    /// Checkpoint's live check, which showed such a record without a name).
-    @Test("Many serials at once: a mobile device that never enrolled gets its name; an enrolled one isn't read again")
+    /// The same for the lookup of many serials at once.
+    @Test("Many serials at once: a mobile device that never enrolled gets its name; an enrolled one isn’t read again")
     func unenrolledMobileDevicesInABatch() async throws {
         let listed = #"{"totalCount":2,"results":[{"mobileDeviceId":"9","deviceType":"Unknown","hardware":{"serialNumber":"JTKTEST0001"}},\#(mobileJSON())]}"#
         let single = #"{"id":"9","name":"Test iPad","assetTag":"TAG-1","udid":"00000000-0000000000000001","managed":false,"site":{"id":"-1","name":"None"},"ios":{"supervised":false}}"#
         let server = MockServer { request in
-            request.path.hasSuffix("/9/detail") ? .json(200, single) : .json(200, listed)
+            request.path.hasSuffix("/mobile-devices/9") ? .json(200, single) : .json(200, listed)
         }
         let batch = try await proClient(server).mobileDevices(serials: ["JTKTEST0001", "F9FXK2Q3HGMN"])
         #expect(batch.records["JTKTEST0001"]?.general?.displayName == "Test iPad")
         #expect(batch.records["JTKTEST0001"]?.general?.assetTag == "TAG-1")
         #expect(batch.records["F9FXK2Q3HGMN"]?.general != nil)
-        #expect(server.requests.map(\.path) == ["/api/v2/mobile-devices/detail", "/api/v2/mobile-devices/9/detail"])
+        #expect(server.requests.map(\.path) == ["/api/v2/mobile-devices/detail", "/api/v2/mobile-devices/9"])
 
-        // A detail that can't be read leaves the record found, without a name.
+        // A detail that can’t be read leaves the record found, without a name.
         let failing = MockServer { request in
-            request.path.hasSuffix("/9/detail") ? .json(500, "{}") : .json(200, listed)
+            request.path.hasSuffix("/mobile-devices/9") ? .json(500, "{}") : .json(200, listed)
         }
         let partial = try await proClient(failing).mobileDevices(serials: ["JTKTEST0001"])
         #expect(partial.records["JTKTEST0001"] != nil)
@@ -257,7 +257,7 @@ struct JamfProLookupTests {
 
         let fullPage = (0..<100).map { computerJSON(id: "\($0)") }.joined(separator: ",")
         let endless = MockServer { _ in .json(200, #"{"results":[\#(fullPage)]}"#) }
-        let error = await thrown(JamfPlatformError.self) { _ = try await proClient(endless).computers(serials: ["C02XK1JHJG5H"]).records }
+        let error = await thrown(JamfPlatform.APIError.self) { _ = try await proClient(endless).computers(serials: ["C02XK1JHJG5H"]).records }
         #expect(error == nil, "a batch reports it per serial")
         let batch = try await proClient(endless).computers(serials: ["C02XK1JHJG5H"])
         guard case .pageLimitReached? = batch.failures["C02XK1JHJG5H"]?.kind else {
@@ -307,6 +307,18 @@ struct JamfProBatchTests {
         #expect(batch.failures.isEmpty)
     }
 
+    @Test("A 400 that a one-serial lookup gets too fails the whole group after one probe, not one request per serial")
+    func refusedNotForTheFilter() async throws {
+        let server = MockServer { _ in .json(400, #"{"httpStatus":400,"errors":[{"code":"INVALID_FIELD","field":"section","description":"bad"}]}"#) }
+        let serials = (0..<50).map { String(format: "C02S%03d", $0) }
+        let batch = try await proClient(server).computers(serials: serials)
+        #expect(server.requests.count == 2, "the list, then one probe")
+        #expect(server.requests.last?.queryValue("filter") == #"hardware.serialNumber=="C02S000""#)
+        #expect(batch.records.isEmpty)
+        #expect(batch.failures.count == 50)
+        #expect(batch.failures.values.allSatisfy { $0.status == 400 })
+    }
+
     @Test("Another error fails the whole group, with the privilege named")
     func otherError() async throws {
         let server = MockServer { _ in .json(403, #"{"httpStatus":403,"errors":[]}"#) }
@@ -323,7 +335,7 @@ struct JamfProBatchTests {
 @Suite("Jamf Pro asset tags and version")
 @MainActor
 struct JamfProWriteTests {
-    @Test("A computer's asset tag: PATCH v4 detail, the general section, repeated after a server error")
+    @Test("A computer’s asset tag: PATCH v4 detail, the general section, repeated after a server error")
     func computerAssetTag() async throws {
         let calls = Counter()
         let server = MockServer { _ in calls.next() == 1 ? .json(503, "{}") : .json(200, "{}") }
@@ -336,7 +348,7 @@ struct JamfProWriteTests {
         #expect(body == ["general": ["assetTag": "A-2002"]])
     }
 
-    @Test("A mobile device's asset tag: PATCH v2; an empty tag clears it")
+    @Test("A mobile device’s asset tag: PATCH v2; an empty tag clears it")
     func mobileAssetTag() async throws {
         let server = MockServer { _ in .json(200, "{}") }
         try await proClient(server).setAssetTag("", mobileDeviceID: "77")
@@ -345,10 +357,10 @@ struct JamfProWriteTests {
         #expect(sent.bodyString == #"{"assetTag":""}"#)
     }
 
-    @Test("An ID can't reach another path: it is refused before sending")
+    @Test("An ID can’t reach another path: it is refused before sending")
     func pathSegment() async throws {
         let server = MockServer { _ in .json(200, "{}") }
-        let error = await thrown(JamfPlatformError.self) {
+        let error = await thrown(JamfPlatform.APIError.self) {
             try await proClient(server).setAssetTag("x", computerID: "12/../../v1/users")
         }
         #expect(server.requests.isEmpty)
@@ -365,7 +377,7 @@ struct JamfProWriteTests {
         #expect(server.requests.first?.path == "/api/v1/jamf-pro-version")
     }
 
-    @Test("A lookup's answer isn't recorded by default; with .results, only the sections asked for, user and location hidden")
+    @Test("A lookup’s answer isn’t recorded by default; with .results, only the sections asked for, user and location hidden")
     func recording() async throws {
         let log = ActivityLog()
         let server = MockServer { _ in .json(200, computersPage([computerJSON()])) }
@@ -391,14 +403,14 @@ struct JamfProHintTests {
     @Test("A refused request names the privilege: the API role for an API client")
     func privilegeAPIClient() async throws {
         let server = MockServer { _ in .json(403, "{}") }
-        let error = await thrown(JamfPlatformError.self) { _ = try await proClient(server).computer(serial: "C02A") }
+        let error = await thrown(JamfPlatform.APIError.self) { _ = try await proClient(server).computer(serial: "C02A") }
         #expect(error?.message().contains("The API role is missing the “Read Computers” privilege. Add it in Jamf Pro under Settings › API Roles and Clients.") == true)
     }
 
-    @Test("… and the user account's privileges for username and password")
+    @Test("… and the user account’s privileges for username and password")
     func privilegeUser() async throws {
         let server = MockServer { _ in .json(403, "{}") }
-        let error = await thrown(JamfPlatformError.self) {
+        let error = await thrown(JamfPlatform.APIError.self) {
             try await proClient(server, signIn: .usernamePassword).setAssetTag("x", mobileDeviceID: "1")
         }
         #expect(error?.message().contains("The user account is missing the “Update Mobile Devices” privilege. Add it in Jamf Pro under Settings › User Accounts and Groups.") == true)
@@ -407,7 +419,7 @@ struct JamfProHintTests {
     @Test("A paged list that needs several privileges names them all when refused")
     func pagedListPrivileges() async throws {
         let server = MockServer { _ in .json(403, "{}") }
-        let error = await thrown(JamfPlatformError.self) {
+        let error = await thrown(JamfPlatform.APIError.self) {
             _ = try await proClient(server).allPages("pro/v1/things", privileges: [.readSmartUserGroups, .readStaticUserGroups]) { $0 }
         }
         #expect(error?.message().contains("The API role is missing one of these privileges: “Read Smart User Groups”, “Read Static User Groups”.") == true)
@@ -416,7 +428,7 @@ struct JamfProHintTests {
     @Test("Without a known privilege, the general wording")
     func unknownPrivilege() async throws {
         let server = MockServer { _ in .json(403, "{}") }
-        let error = await thrown(JamfPlatformError.self) { _ = try await proClient(server).json("pro/v1/something") }
+        let error = await thrown(JamfPlatform.APIError.self) { _ = try await proClient(server).json("pro/v1/something") }
         #expect(error?.message().contains("The API role is missing a privilege for this request.") == true)
     }
 
@@ -427,7 +439,7 @@ struct JamfProHintTests {
                                     serverURL: proServer.absoluteString, username: "jssadmin")
         let client = try JamfPlatform.Client(connection: connection, secret: { "wrong" },
                                              recorder: RequestRecorder(session: server.session, log: nil))
-        let error = await thrown(JamfPlatformError.self) { try await client.signIn() }
+        let error = await thrown(JamfPlatform.APIError.self) { try await client.signIn() }
         let message = try #require(error?.message())
         #expect(server.requests.first?.path == "/api/v1/auth/token")
         #expect(message.contains("Check the username and password."))
@@ -442,7 +454,7 @@ struct JamfProHintTests {
                                     serverURL: proServer.absoluteString, clientID: "abc")
         let client = try JamfPlatform.Client(connection: connection, secret: { "wrong" },
                                              recorder: RequestRecorder(session: server.session, log: nil))
-        let error = await thrown(JamfPlatformError.self) { try await client.signIn() }
+        let error = await thrown(JamfPlatform.APIError.self) { try await client.signIn() }
         let message = try #require(error?.message())
         #expect(message.contains("Check the client ID and client secret, and that the API client is enabled in Jamf Pro under Settings › API Roles and Clients."))
         #expect(!message.contains("region"))
@@ -451,7 +463,7 @@ struct JamfProHintTests {
     @Test("The Platform API keeps its wording")
     func platformUnchanged() async throws {
         let server = MockServer { _ in .json(403, #"{"httpStatus":403,"errors":[{"code":"BAD_PERMISSIONS"}]}"#) }
-        let error = await thrown(JamfPlatformError.self) { _ = try await gatewayClient(server).computer(serial: "C02A") }
+        let error = await thrown(JamfPlatform.APIError.self) { _ = try await gatewayClient(server).computer(serial: "C02A") }
         let message = try #require(error?.message())
         #expect(message.contains("Check its permissions in Jamf Account."))
         #expect(!message.contains("API Roles and Clients"))
@@ -460,9 +472,9 @@ struct JamfProHintTests {
     @Test("A bad serial is refused with its own message, before anything is sent")
     func invalidIdentifier() async throws {
         let server = MockServer { _ in .json(200, "{}") }
-        let error = await thrown(JamfPlatformError.self) { _ = try await proClient(server).mobileDevice(udid: "x\" or 1==1") }
+        let error = await thrown(JamfPlatform.APIError.self) { _ = try await proClient(server).mobileDevice(udid: "x\" or 1==1") }
         #expect(server.requests.isEmpty)
-        #expect(error?.message().contains("is not a serial number or UDID") == true)
+        #expect(error?.message().contains("isn’t a serial number or UDID") == true)
     }
 }
 
@@ -500,7 +512,7 @@ struct JamfSchoolTests {
         #expect(JamfSchool.baseURL("http://school.jamfcloud.com") == nil)
         #expect(JamfSchool.baseURL("  ") == nil)
         let server = MockServer { _ in .json(200, "{}") }
-        #expect(throws: JamfSchoolError.self) {
+        #expect(throws: JamfSchool.APIError.self) {
             try JamfSchool.Client(address: "school.jamfcloud.com", networkID: "", apiKey: "k",
                                   recorder: RequestRecorder(session: server.session, log: nil))
         }
@@ -525,7 +537,7 @@ struct JamfSchoolTests {
         #expect(device.lastCheckIn != nil)
     }
 
-    @Test("Details: 0/1 flags, the check-in read in the instance's time zone")
+    @Test("Details: 0/1 flags, the check-in read in the instance’s time zone")
     func details() async throws {
         let server = MockServer { _ in .json(200, schoolDetailDevice) }
         let device = try #require(try await schoolClient(server).device(udid: "00008030-001A2B3C4D5E802E"))
@@ -544,15 +556,26 @@ struct JamfSchoolTests {
         let missing = MockServer { _ in .json(404, #"{"code":404,"message":"DeviceNotFound"}"#) }
         #expect(try await schoolClient(missing).device(udid: "00008030-0000") == nil)
         let wrong = MockServer { _ in .json(404, #"{"error":{"message":"Not found","code":404}}"#) }
-        let error = await thrown(JamfSchoolError.self) { _ = try await schoolClient(wrong).device(udid: "00008030-0000") }
+        let error = await thrown(JamfSchool.APIError.self) { _ = try await schoolClient(wrong).device(udid: "00008030-0000") }
         #expect(error?.status == 404)
-        #expect(error?.message().contains("Check the Jamf School address") == true)
+        #expect(error?.message().contains("Check the Jamf School server URL, e.g. https://yourschool.jamfcloud.com.") == true)
+    }
+
+    @Test("DeviceNotFound on a serial lookup is no match, with a 404 or under HTTP 200; another 404 is still an error")
+    func serialNotFound() async throws {
+        for answer in [MockResponse.json(404, #"{"code":404,"message":"DeviceNotFound"}"#), .json(200, #"{"message":"DeviceNotFound"}"#)] {
+            let server = MockServer { _ in answer }
+            #expect(try await schoolClient(server).device(serial: "F9FXK2Q3HGMN") == .none)
+        }
+        let wrong = MockServer { _ in .json(404, #"{"error":{"message":"Not found","code":404}}"#) }
+        let error = await thrown(JamfSchool.APIError.self) { _ = try await schoolClient(wrong).device(serial: "F9FXK2Q3HGMN") }
+        #expect(error?.status == 404)
     }
 
     @Test("A failure under HTTP 200 is a failure, with the API key hint")
     func failureUnder200() async throws {
         let server = MockServer { _ in .json(200, #"{"code":403,"message":"Forbidden"}"#) }
-        let error = await thrown(JamfSchoolError.self) { _ = try await schoolClient(server).groups() }
+        let error = await thrown(JamfSchool.APIError.self) { _ = try await schoolClient(server).groups() }
         #expect(error?.status == 403)
         let message = try #require(error?.message())
         #expect(message.contains("HTTP 403"))
@@ -562,19 +585,19 @@ struct JamfSchoolTests {
     @Test("A known failure message counts without a code")
     func failureMessage() async throws {
         let server = MockServer { _ in .json(200, #"{"message":"DeviceNotActive"}"#) }
-        let error = await thrown(JamfSchoolError.self) { try await schoolClient(server).setAssetTag("x", udid: "ABC") }
+        let error = await thrown(JamfSchool.APIError.self) { try await schoolClient(server).setAssetTag("x", udid: "ABC") }
         #expect(error?.message().contains("trashed or inactive") == true)
     }
 
-    @Test("An answer that isn't a device list is never read as no devices")
+    @Test("An answer that isn’t a device list is never read as no devices")
     func notJamfSchool() async throws {
         let server = MockServer { _ in .json(200, "<html>Sign in</html>", headers: ["Content-Type": "text/html"]) }
-        let error = await thrown(JamfSchoolError.self) { _ = try await schoolClient(server).device(serial: "F9A") }
+        let error = await thrown(JamfSchool.APIError.self) { _ = try await schoolClient(server).device(serial: "F9A") }
         guard case .invalidResponse? = error?.kind else {
             Issue.record("Expected an unreadable answer, got \(String(describing: error))")
             return
         }
-        #expect(error?.message().contains("Check the Jamf School address") == true)
+        #expect(error?.message().contains("Check the Jamf School server URL, e.g. https://yourschool.jamfcloud.com.") == true)
     }
 
     @Test("A 429 is waited out and retried")
@@ -624,7 +647,7 @@ struct JamfSchoolTests {
         try await schoolClient(good).testConnection()
         #expect(good.requests.first?.queryValue("serialnumber") == "CONNECTIONCHECK")
         let wrong = MockServer { _ in .json(200, "{}") }
-        #expect(await thrown(JamfSchoolError.self) { try await schoolClient(wrong).testConnection() } != nil)
+        #expect(await thrown(JamfSchool.APIError.self) { try await schoolClient(wrong).testConnection() } != nil)
     }
 }
 

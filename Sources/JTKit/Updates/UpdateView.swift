@@ -38,6 +38,10 @@ public struct UpdateView: View {
         ) { result in
             switch result {
             case let .success(url):
+                // the saved copy is a download too, for Gatekeeper
+                if case let .available(release) = checker.status, let source = release.downloadURL {
+                    try? UpdateChecker.quarantine(url, from: source, appName: checker.configuration.appName)
+                }
                 statusMessage = "Saved. Quit \(checker.configuration.appName) and replace it in Applications."
                 NSWorkspace.shared.activateFileViewerSelecting([url])
             case let .failure(error):
@@ -66,7 +70,7 @@ public struct UpdateView: View {
             .frame(maxWidth: .infinity, minHeight: 60, alignment: .leading)
         case let .failed(message):
             VStack(alignment: .leading, spacing: 4) {
-                Text("Couldn't Check for Updates")
+                Text("Couldn’t check for updates")
                     .font(.headline)
                 Text(message)
                     .foregroundStyle(.secondary)
@@ -76,7 +80,7 @@ public struct UpdateView: View {
             VStack(alignment: .leading, spacing: 8) {
                 Text("\(release.name) is available")
                     .font(.headline)
-                Text("You have \(checker.currentVersion).")
+                Text("Installed: \(checker.currentVersion).")
                     .font(.callout)
                     .foregroundStyle(.secondary)
                 if !release.notes.isEmpty {
@@ -145,18 +149,13 @@ public struct UpdateView: View {
 
     /// Downloads the zip, then hands it to a save panel so the user picks where it goes.
     private func download(_ release: UpdateChecker.Release) {
-        guard let url = release.downloadURL else { return }
         isDownloading = true
         statusMessage = nil
         Task {
             do {
-                let (data, response) = try await URLSession.shared.data(for: URLRequest(url: url).withDefaultUserAgent())
-                let status = (response as? HTTPURLResponse)?.statusCode ?? 0
-                guard status == 200 else {
-                    throw UpdateChecker.UpdateError(message: "The download failed (HTTP \(status)).")
-                }
-                exportDocument = ZipDocument(data: data)
-                suggestedName = url.lastPathComponent
+                let file = try await checker.download(release)
+                exportDocument = ZipDocument(file: file)
+                suggestedName = file.lastPathComponent
                 isExporting = true
             } catch {
                 statusMessage = error.localizedDescription
@@ -166,21 +165,22 @@ public struct UpdateView: View {
     }
 }
 
-/// Minimal zip document, used only to hand a downloaded update to `fileExporter`.
+/// Minimal zip document, used only to hand a downloaded update to
+/// `fileExporter`: the downloaded file, never read into memory whole.
 nonisolated struct ZipDocument: FileDocument {
     static let readableContentTypes = [UTType.zip]
 
-    var data: Data
+    var file: URL
 
-    init(data: Data) {
-        self.data = data
+    init(file: URL) {
+        self.file = file
     }
 
     init(configuration: ReadConfiguration) throws {
-        data = configuration.file.regularFileContents ?? Data()
+        throw CocoaError(.featureUnsupported)
     }
 
     func fileWrapper(configuration: WriteConfiguration) throws -> FileWrapper {
-        FileWrapper(regularFileWithContents: data)
+        try FileWrapper(url: file)
     }
 }

@@ -1,28 +1,28 @@
 import Foundation
 
 /// An in-memory Intune tenant, "Contoso Intune (Demo)", holding `DemoWorld`'s
-/// Intune devices: Entra's client-credentials sign-in (on
+/// Intune devices: Entra’s client-credentials sign-in (on
 /// `login.microsoftonline.com`) and Graph v1.0 `managedDevices` (on
 /// `graph.microsoft.com`): the list with paging, device actions (answered
 /// 204, accepted, as Graph does) and deleting a record.
 ///
-/// The rest of Graph is a general store of the tenant's objects (Settings
+/// The rest of Graph is a general store of the tenant’s objects (Settings
 /// Catalog, configurations, compliance, scripts, filters, apps, groups and
 /// more; `DemoGraphStore`), with app uploads to a fake storage host
-/// (`storageHost`). It answers the demo sign-in's token
-/// (`DemoMode.microsoftSignIn()`, in place of Microsoft's interactive
+/// (`storageHost`). It answers the demo sign-in’s token
+/// (`DemoMode.microsoftSignIn()`, in place of Microsoft’s interactive
 /// sign-in) as well as the tokens it issued itself.
 ///
 /// Register it for every host in `DemoIntuneServer.hosts`; the demo network
 /// answers them inside the app, so nothing reaches Microsoft.
 public nonisolated final class DemoIntuneServer: DemoServer, @unchecked Sendable {
-    public static let signInHost = "login.microsoftonline.com"
-    public static let graphHost = "graph.microsoft.com"
+    static let signInHost = "login.microsoftonline.com"
+    static let graphHost = "graph.microsoft.com"
     /// Where app content is uploaded in demo mode, in place of Azure Storage.
-    public static let storageHost = "contoso-storage.\(DemoNetwork.reservedDomain)"
+    static let storageHost = "contoso-storage.\(DemoNetwork.reservedDomain)"
     public static let hosts = [signInHost, graphHost, storageHost]
 
-    /// The demo sign-in's access token: fixed, obviously fake, accepted by
+    /// The demo sign-in’s access token: fixed, obviously fake, accepted by
     /// this server only. Never a token from Microsoft.
     public static let delegatedToken = "demo-graph-delegated-token"
 
@@ -43,7 +43,7 @@ public nonisolated final class DemoIntuneServer: DemoServer, @unchecked Sendable
     /// Actions received: `retire`, `rebootNow`, … and the managed device ID.
     public var actions: [(action: String, id: String)] { lock.withLock { actionsValue } }
 
-    /// - Parameter pageSize: devices per page at most (Graph's is 1,000), to test paging.
+    /// - Parameter pageSize: devices per page at most (Graph’s is 1,000), to test paging.
     public init(scenario: DemoScenario? = nil, now: Date = Date(), pageSize: Int = 1_000) {
         self.scenario = scenario
         self.now = now
@@ -59,9 +59,9 @@ public nonisolated final class DemoIntuneServer: DemoServer, @unchecked Sendable
         lock.withLock { records.values.contains { $0.device.serial == serial.uppercased() } }
     }
 
-    // MARK: The tenant's objects
+    // MARK: The tenant’s objects
 
-    /// Adds an app's own sample objects to a list of the tenant, e.g.
+    /// Adds an app’s own sample objects to a list of the tenant, e.g.
     /// `deviceManagement/deviceConfigurations` (the path without the
     /// version). An object with an ID already there replaces it; one without
     /// gets an ID in the fake range.
@@ -70,7 +70,7 @@ public nonisolated final class DemoIntuneServer: DemoServer, @unchecked Sendable
         lock.withLock { store.add(parsed, to: path) }
     }
 
-    /// The tenant's objects in a list (the path without the version), as
+    /// The tenant’s objects in a list (the path without the version), as
     /// stored, as JSON.
     public func objects(at path: String) -> [Data] {
         lock.withLock {
@@ -78,8 +78,8 @@ public nonisolated final class DemoIntuneServer: DemoServer, @unchecked Sendable
         }
     }
 
-    /// Adds Settings Catalog definitions to the tenant's catalog, e.g. the
-    /// ones an app's baseline uses. Contoso's catalog has only what its own
+    /// Adds Settings Catalog definitions to the tenant’s catalog, e.g. the
+    /// ones an app’s baseline uses. Contoso’s catalog has only what its own
     /// policy uses.
     public func add(definitions: [DemoSettingDefinition]) {
         lock.withLock { store.add(definitions) }
@@ -87,10 +87,6 @@ public nonisolated final class DemoIntuneServer: DemoServer, @unchecked Sendable
 
     /// The bytes of every upload completed on the storage host.
     public var uploadedBytes: Int { lock.withLock { store.uploadedBytes } }
-
-    /// Requests answered by the general store and the storage host (not the
-    /// sign-in or `managedDevices`).
-    public var storeRequestCount: Int { lock.withLock { store.requestCount } }
 
     public func respond(to request: DemoRequest) -> DemoResponse {
         lock.withLock {
@@ -159,7 +155,7 @@ public nonisolated final class DemoIntuneServer: DemoServer, @unchecked Sendable
             "@odata.context": "https://graph.microsoft.com/v1.0/$metadata#deviceManagement/managedDevices",
             "value": page.map(json),
         ]
-        if skip + top < all.count, request.query["$top"] != "1" {
+        if skip + top < all.count {
             var components = URLComponents()
             components.scheme = "https"
             components.host = Self.graphHost

@@ -1,13 +1,14 @@
 import Foundation
 
-/// Keeps a live check well under Apple's limit of about 18 requests a minute
-/// per organisation (0.12.4): every request to an Apple organisation, sign-in
-/// included, waits until fewer than `perMinute` were sent in the last
-/// `window`, and once `perRun` were sent in the whole run the next is refused.
+/// Keeps a live check well under Apple’s limit of about 20 requests a minute
+/// per organization (`ABM.Client` sends at most 18): every request to an
+/// Apple organization, sign-in included, waits until fewer than `perMinute`
+/// were sent in the last `window`, and once `perRun` were sent in the whole
+/// run the next is refused.
 ///
-/// With a file (the run's `apple-requests.jsonl`) the count is shared by
+/// With a file (the run’s `apple-requests.jsonl`) the count is shared by
 /// every test process of the run; each line is one request: role and time,
-/// nothing else. Without one it's kept per process.
+/// nothing else. Without one it’s kept per process.
 public nonisolated final class AppleRequestBudget: @unchecked Sendable {
     public let perMinute: Int
     public let perRun: Int
@@ -43,14 +44,14 @@ public nonisolated final class AppleRequestBudget: @unchecked Sendable {
             return Self.withLockedFile(file) { entries in
                 let answer = decide(role: role, entries: entries, now: now)
                 return (answer, answer == .go ? Entry(role: role, time: now.timeIntervalSince1970) : nil)
-            } ?? .refuse("The run's Apple request count can't be read, so no Apple request is sent")
+            } ?? .refuse("The run’s Apple request count can’t be read, so no Apple request is sent")
         }
     }
 
     private func decide(role: String, entries: [Entry], now: Date) -> Answer {
         let mine = entries.filter { $0.role == role }
         guard mine.count < perRun else {
-            return .refuse("\(role) has used this run's Apple budget (\(perRun) requests)")
+            return .refuse("\(role) has used this run’s Apple budget (\(perRun) requests)")
         }
         let since = now.timeIntervalSince1970 - window
         let recent = mine.map(\.time).filter { $0 > since }.sorted()
@@ -59,7 +60,7 @@ public nonisolated final class AppleRequestBudget: @unchecked Sendable {
         return .wait(max(recent[recent.count - perMinute] - since, 0.01))
     }
 
-    /// Requests per role in a run's file.
+    /// Requests per role in a run’s file.
     public static func counts(in file: URL) -> [String: Int] {
         guard let text = try? String(contentsOf: file, encoding: .utf8) else { return [:] }
         let entries = text.split(separator: "\n").compactMap { try? JSONDecoder().decode(Entry.self, from: Data($0.utf8)) }
@@ -90,7 +91,7 @@ public nonisolated final class AppleRequestBudget: @unchecked Sendable {
         if let entry, let line = try? JSONEncoder().encode(entry) {
             let bytes = line + Data("\n".utf8)
             let written = bytes.withUnsafeBytes { write(descriptor, $0.baseAddress, $0.count) }
-            if written != bytes.count { return .refuse("The run's Apple request count can't be written, so no Apple request is sent") }
+            if written != bytes.count { return .refuse("The run’s Apple request count can’t be written, so no Apple request is sent") }
         }
         return answer
     }

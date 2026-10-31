@@ -1,7 +1,7 @@
 import Foundation
 
-/// Jamf Pro's Classic API (`JSSResource/…`, `proclassic/…` through the
-/// gateway): only the plumbing the apps share (ROADMAP step 7). Reading and
+/// Jamf Pro’s Classic API (`JSSResource/…`, `proclassic/…` through the
+/// gateway): only the plumbing the apps share. Reading and
 /// writing XML payloads stays in the apps.
 ///
 /// The calls run on `JamfPlatform.Client`, directly or through the gateway,
@@ -17,7 +17,7 @@ public nonisolated enum JamfClassic {
         path(resource, id: "0")
     }
 
-    /// The ID in Jamf Pro's answer to a create or update, `<id>123</id>`.
+    /// The ID in Jamf Pro’s answer to a create or update, `<id>123</id>`.
     public static func createdID(in data: Data) -> String? {
         let text = String(decoding: data, as: UTF8.self)
         guard let match = text.firstMatch(of: /<id>\s*(\d+)\s*<\/id>/) else { return nil }
@@ -26,7 +26,7 @@ public nonisolated enum JamfClassic {
 
     /// The message of a Classic error page, which is HTML (`<p>Error: Duplicate
     /// name</p>`) or XML, without the markup and the "technical details" link.
-    /// Nil when the answer isn't one.
+    /// Nil when the answer isn’t one.
     public static func errorMessage(in data: Data) -> String? {
         let text = String(decoding: data.prefix(64 * 1024), as: UTF8.self)
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -53,7 +53,7 @@ public nonisolated enum JamfClassic {
 
     /// The items of a Classic list asked for as JSON, e.g.
     /// `{"computer_groups":[…]}`: the one array in the object. Nil when the
-    /// answer isn't such a list.
+    /// answer isn’t such a list.
     public static func listItems(_ json: LosslessJSON) -> [LosslessJSON]? {
         guard let object = json.objectValue else { return nil }
         let arrays = object.members.compactMap(\.value.arrayValue)
@@ -122,7 +122,7 @@ extension JamfPlatform.Client {
     public func classicGroups(_ kind: JamfClassic.GroupKind) async throws -> [JamfClassic.Group] {
         let response = try await sendThrowing(HTTPRequest(path: "proclassic/\(kind.resource)", accept: "application/json"))
         guard let json = try? LosslessJSON(data: response.data), let items = JamfClassic.listItems(json) else {
-            throw failure(JamfPlatformError(.invalidResponse("\(kind.resource) is not a Classic group list.")))
+            throw failure(JamfPlatform.APIError(.invalidResponse("\(kind.resource) isn’t a Classic group list.")))
         }
         return items.compactMap { item in
             guard let id = Self.text(item["id"]) else { return nil }
@@ -131,14 +131,14 @@ extension JamfPlatform.Client {
         }
     }
 
-    /// A group's members, in one request.
+    /// A group’s members, in one request.
     public func classicGroupMembers(_ group: JamfClassic.Group) async throws -> [JamfClassic.Member] {
         let response = try await sendThrowing(HTTPRequest(path: JamfClassic.path(group.kind.resource, id: group.id),
                                                           accept: "application/json"),
                                               privilege: group.kind.readPrivilege(smart: group.isSmart))
         guard let json = try? LosslessJSON(data: response.data),
               let container = json["computer_group"] ?? json["mobile_device_group"] else {
-            throw failure(JamfPlatformError(.invalidResponse("\(group.kind.resource)/\(group.id) is not a Classic group.")))
+            throw failure(JamfPlatform.APIError(.invalidResponse("\(group.kind.resource)/\(group.id) isn’t a Classic group.")))
         }
         let members = (container["computers"] ?? container["mobile_devices"])?.arrayValue ?? []
         return members.map { member in

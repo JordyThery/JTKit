@@ -8,7 +8,7 @@ private func demoMode() -> DemoMode {
     return DemoMode(key: "demoMode", defaults: defaults, arguments: ["app"])
 }
 
-/// JTKit's real client for a demo connection, on the demo network.
+/// JTKit’s real client for a demo connection, on the demo network.
 @MainActor
 private func client(_ demo: DemoMode, _ connection: Connection) throws -> JamfPlatform.Client {
     let source = try #require(demo.source(for: connection))
@@ -35,7 +35,7 @@ private func results(_ response: HTTPResponse) throws -> [[String: Any]] {
     try #require((try json(response) as? [String: Any])?["results"] as? [[String: Any]])
 }
 
-@Suite("Demo Jamf Pro setup pages and the Platform gateway's Jamf Pro (Jamf Deployer)")
+@Suite("Demo Jamf Pro setup pages and the Platform gateway’s Jamf Pro (Jamf Deployer)")
 @MainActor
 struct DemoJamfProSetupTests {
 
@@ -56,7 +56,7 @@ struct DemoJamfProSetupTests {
         #expect(try await JamfPlatform.Blueprints(client: platform).list().isEmpty == false)
     }
 
-    @Test("An app's own route under the gateway comes before its Jamf Pro")
+    @Test("An app’s own route under the gateway comes before its Jamf Pro")
     func appRouteFirst() async throws {
         final class Fixed: DemoServer, @unchecked Sendable {
             func respond(to request: DemoRequest) -> DemoResponse { .json(200, .object(LosslessJSON.Object(["mine": .bool(true)]))) }
@@ -68,7 +68,7 @@ struct DemoJamfProSetupTests {
         #expect(answer["mine"] as? Bool == true)
     }
 
-    @Test("Day 0 pages on Contoso's Platform tenant: ADE, Apps and Books and branding are set up")
+    @Test("Day 0 pages on Contoso’s Platform tenant: ADE, Apps and Books and branding are set up")
     func platformSetup() async throws {
         let demo = demoMode()
         let platform = try client(demo, .demoJamfPlatform)
@@ -129,7 +129,7 @@ struct DemoJamfProSetupTests {
             .contains("ZGVtbw=="))
     }
 
-    @Test("Group lists in Jamf's v1 shapes, from the smart and static groups")
+    @Test("Group lists in Jamf’s v1 shapes, from the smart and static groups")
     func groupLists() async throws {
         let demo = demoMode()
         let source = try client(demo, .demoJamfProSource)

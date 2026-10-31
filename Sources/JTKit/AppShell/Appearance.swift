@@ -38,14 +38,14 @@ public nonisolated enum AppAppearance: String, CaseIterable, Identifiable, Senda
         store.string(forKey: key).flatMap(AppAppearance.init(rawValue:)) ?? .system
     }
 
-    /// Sets this appearance on every window of the app, including JTKit's
+    /// Sets this appearance on every window of the app, including JTKit’s
     /// About and Settings windows.
     @MainActor public func apply() {
         NSApplication.shared.appearance = appearanceName.flatMap(NSAppearance.init(named:))
     }
 }
 
-/// The Appearance picker, always first in the Settings window's General tab.
+/// The Appearance picker, always first in the Settings window’s General tab.
 /// Saves the choice and applies it to the whole app as it changes.
 struct AppearanceSection: View {
     @AppStorage private var rawValue: String

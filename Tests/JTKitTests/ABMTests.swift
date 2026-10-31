@@ -4,8 +4,8 @@ import Testing
 @testable import JTKit
 import JTKitTestSupport
 
-// Apple Business and School Manager (ROADMAP step 9): the private-key
-// sign-in, the client with Apple's limit, paging, errors, records, the
+// Apple Business and School Manager: the private-key
+// sign-in, the client with Apple’s limit, paging, errors, records, the
 // writes with their confirmations and outcomes, and that the private key,
 // the signed sign-in request and the token never reach the activity log,
 // either export or a message. Every test has its own fake Apple, key, clock
@@ -99,14 +99,14 @@ struct AppleRig {
 }
 
 @MainActor
-func appleError(_ body: () async throws -> Void) async -> ABM.Error? {
+func appleError(_ body: () async throws -> Void) async -> ABM.APIError? {
     do {
         try await body()
-        Issue.record("Expected an ABM.Error")
-    } catch let error as ABM.Error {
+        Issue.record("Expected an ABM.APIError")
+    } catch let error as ABM.APIError {
         return error
     } catch {
-        Issue.record("Expected an ABM.Error, got \(error)")
+        Issue.record("Expected an ABM.APIError, got \(error)")
     }
     return nil
 }
@@ -116,7 +116,7 @@ func appleError(_ body: () async throws -> Void) async -> ABM.Error? {
 @Suite("Redaction: private keys, signed tokens, known secrets")
 struct ABMRedactionTests {
 
-    @Test("A PEM private key is hidden, whole, cut short or with JSON's \\n")
+    @Test("A PEM private key is hidden, whole, cut short or with JSON’s \\n")
     func pem() {
         let pem = P256.Signing.PrivateKey().pemRepresentation
         let body = pem.split(separator: "\n")[1]
@@ -128,7 +128,7 @@ struct ABMRedactionTests {
         #expect(!Redaction.text(pem.replacingOccurrences(of: "PRIVATE KEY", with: "EC PRIVATE KEY")).contains(body))
     }
 
-    @Test("A signed token is hidden by its eyJ start, also its remains; ordinary text isn't")
+    @Test("A signed token is hidden by its eyJ start, also its remains; ordinary text isn’t")
     func jwt() {
         let jwt = "eyJhbGciOiJFUzI1NiJ9.eyJpc3MiOiJCVVNJTkVTU0FQSS5hYmMifQ.MEUCIQDx_sig-part"
         #expect(Redaction.text("Assertion \(jwt) is not valid") == "Assertion <redacted> is not valid")
@@ -138,7 +138,7 @@ struct ABMRedactionTests {
         }
     }
 
-    @Test("Apple's signed download address: the signature, and the address in JSON")
+    @Test("Apple’s signed download address: the signature, and the address in JSON")
     func downloadURL() {
         let url = URL(string: "https://store.blobstore.apple.com/a/b?response-content-type=application%2Foctet-stream&Expires=1746123820&Signature=wrYW2gn7UZDM9aO3KOMqT8YWCBo%3D")!
         #expect(!Redaction.url(url).contains("wrYW2gn7"))
@@ -157,14 +157,14 @@ struct ABMRedactionTests {
         #expect(Redaction.removing(["0123456789", "0123456789ABCDEF"], from: "0123456789ABCDEF") == "<redacted>")
     }
 
-    @Test("Apple's sign-in is a sensitive call; the API isn't")
+    @Test("Apple’s sign-in is a sensitive call; the API isn’t")
     func sensitive() {
         #expect(SensitiveRequests.isSensitive(path: "/auth/oauth2/v2/token"))
         #expect(!SensitiveRequests.isSensitive(path: "/v1/orgDevices/C02XK1JHJG5H"))
     }
 }
 
-// MARK: - The HTTP client's new options
+// MARK: - The HTTP client’s new options
 
 @Suite("HTTP client: rate limit, fixed waits, known token")
 @MainActor
@@ -195,6 +195,23 @@ struct HTTPClientLimitTests {
         #expect(note.isWarning)
     }
 
+    @Test("Apple’s sign-in takes one of the requests in the window")
+    func signInCounts() async throws {
+        let server = Apple.server { $0.path == Apple.tokenPath ? nil : .json(200, "{}") }
+        let time = VirtualTime()
+        let log = ActivityLog()
+        let pem = P256.Signing.PrivateKey().pemRepresentation
+        let tokens = ABM.TokenProvider(service: .business, clientID: "BUSINESSAPI.abc", keyID: "key-1",
+                                       privateKey: { pem }, recorder: RequestRecorder(session: server.session, log: log),
+                                       now: { time.now })
+        let http = client(server, time: time, log: log, tokens: tokens)
+        for _ in 0..<2 { _ = try await http.send(HTTPRequest(path: "a")) }
+        #expect(time.waits.isEmpty, "the sign-in and two requests: 3 in the window")
+        _ = try await http.send(HTTPRequest(path: "a"))
+        #expect(time.waits.count == 1)
+        #expect(server.requests.filter { $0.path == Apple.tokenPath }.count == 1)
+    }
+
     @Test("Every attempt counts, retries included")
     func retriesCount() async throws {
         let calls = Counter()
@@ -221,7 +238,7 @@ struct HTTPClientLimitTests {
         task.cancel()
         await #expect(throws: CancellationError.self) { try await task.value }
         #expect(server.requests.count == 1)
-        #expect(log.entries.contains { $0.note == "Cancelled while waiting." })
+        #expect(log.entries.contains { $0.note == "Canceled while waiting." })
     }
 
     @Test("Fixed waits: 5, 15, 45, then 45; Retry-After still comes first")
@@ -231,7 +248,7 @@ struct HTTPClientLimitTests {
         #expect(RetryRules.standard.backoff(afterAttempt: 2, random: 0) == 2)
     }
 
-    @Test("With every network error a drop, a read tries again after any of them; a write doesn't")
+    @Test("With every network error a drop, a read tries again after any of them; a write doesn’t")
     func everyNetworkError() async throws {
         let server = MockServer { _ in throw URLError(.secureConnectionFailed) }
         let time = VirtualTime()
@@ -277,6 +294,16 @@ struct HTTPClientLimitTests {
 @MainActor
 struct ABMSignInTests {
 
+    @Test("Test Connection counts the MDM servers; verify() is its old name")
+    @available(*, deprecated)
+    func testConnection() async throws {
+        let rig = AppleRig(Apple.server {
+            $0.path == "/v1/mdmServers" ? .json(200, #"{"data":[{"id":"S1","type":"mdmServers"},{"id":"S2","type":"mdmServers"}]}"#) : nil
+        }, service: .business)
+        #expect(try await rig.client.testConnection() == 2)
+        #expect(try await rig.client.verify() == 2)
+    }
+
     @Test("The token request: address, form fields and scope", arguments: ABM.Service.allCases)
     func tokenRequest(service: ABM.Service) async throws {
         let rig = AppleRig(Apple.server { $0.path == "/v1/mdmServers" ? .json(200, #"{"data":[]}"#) : nil }, service: service)
@@ -313,21 +340,21 @@ struct ABMSignInTests {
         #expect(key.publicKey.isValidSignature(signature, for: Data("\(parts[0]).\(parts[1])".utf8)))
     }
 
-    @Test("A PKCS#8 key labelled EC PRIVATE KEY (Apple School Manager's files) is read")
+    @Test("A PKCS#8 key labeled EC PRIVATE KEY (Apple School Manager’s files) is read")
     func schoolLabel() throws {
         let key = P256.Signing.PrivateKey()
         let relabelled = key.pemRepresentation.replacingOccurrences(of: "PRIVATE KEY", with: "EC PRIVATE KEY")
         #expect(try ABM.TokenProvider.readPrivateKey(relabelled).rawRepresentation == key.rawRepresentation)
     }
 
-    @Test("A key that can't be read: the standard message, nothing sent, no key in it")
+    @Test("A key that can’t be read: the standard message, nothing sent, no key in it")
     func unreadableKey() async {
         let pem = "-----BEGIN PRIVATE KEY-----\nMIGHAgEAMBMGByqGSM49AgEGCCqGSM49AwEHBG0wawIBAQQgAAAAAAAAAAAAAAAA\n-----END PRIVATE KEY-----"
         let rig = AppleRig(pem: pem)
         let error = await appleError { _ = try await rig.client.mdmServers() }
         guard case .unreadableKey = error?.kind else { Issue.record("not unreadableKey"); return }
         let message = error?.message() ?? ""
-        #expect(message.hasPrefix("Could not read the Apple Business private key."))
+        #expect(message.hasPrefix("The file doesn’t contain a private key. Choose the .pem file downloaded when the API account was created."))
         #expect(!message.contains("MIGHAgEA"))
         #expect(rig.server.requests.isEmpty)
     }
@@ -362,7 +389,7 @@ struct ABMSignInTests {
         #expect(rig.api.count == 2)
     }
 
-    @Test("A refused sign-in shows Apple's error and description, never the rest of its answer")
+    @Test("A refused sign-in shows Apple’s error and description, never the rest of its answer")
     func refused() async {
         let rig = AppleRig(Apple.server { request in
             request.path == Apple.tokenPath
@@ -370,7 +397,7 @@ struct ABMSignInTests {
         })
         let error = await appleError { _ = try await rig.client.mdmServers() }
         #expect(error?.message() == """
-            Apple Business sign-in failed: HTTP 400 Bad Request
+            Sign-in failed: HTTP 400 Bad Request
             invalid_client: Client authentication failed
             Check the client ID and the key ID, and that the private key is the .pem file downloaded when the API account was created in Apple Business Manager. A revoked key can’t sign in; create a new one there.
             """)
@@ -381,11 +408,11 @@ struct ABMSignInTests {
         #expect(entry?.request?.responseBody == nil)
     }
 
-    @Test("An answer that isn't JSON shows only the status")
+    @Test("An answer that isn’t JSON shows only the status")
     func refusedPlain() async {
         let rig = AppleRig(Apple.server { $0.path == Apple.tokenPath ? MockResponse(status: 400, headers: [:], body: Data("SECRET-text".utf8)) : nil })
         let error = await appleError { _ = try await rig.client.mdmServers() }
-        #expect(error?.message().hasPrefix("Apple Business sign-in failed: HTTP 400 Bad Request\nCheck the client ID") == true)
+        #expect(error?.message().hasPrefix("Sign-in failed: HTTP 400 Bad Request\nCheck the client ID") == true)
     }
 }
 
@@ -451,7 +478,7 @@ struct ABMSecretTests {
         var shown: [String?] = []
         do {
             _ = try await rig.client.mdmServers()
-        } catch let error as ABM.Error {
+        } catch let error as ABM.APIError {
             shown = [error.message(), error.report, error.localizedDescription]
         } catch {
             shown = [error.localizedDescription]
@@ -471,7 +498,7 @@ struct ABMSecretTests {
 @MainActor
 struct ABMReadTests {
 
-    @Test("A device: tolerant record; 404 is not in the organization; the serial is checked and uppercased")
+    @Test("A device: tolerant record; 404 isn’t in the organization; the serial is checked and uppercased")
     func device() async throws {
         let extra = #","imei":"35-1","meid":["A1"],"isMdmMigrationCapable":true,"mdmMigrationStatus":"STARTED","mdmMigrationDeadlineDateTime":"2026-11-02T10:00:00.000Z","newField":{"x":1}"#
         let rig = AppleRig(Apple.server { request in
@@ -488,7 +515,7 @@ struct ABMReadTests {
         let refused = await appleError { _ = try await rig.client.device(serial: "C02/../X") }
         #expect(refused?.message() == "“C02/../X” isn’t a serial number: it may hold only letters and digits.")
         #expect(rig.api.count == 2)
-        // a device lookup's answer is recorded
+        // a device lookup’s answer is recorded
         #expect(rig.log.entries.contains { $0.request?.responseBody?.contains("MacBook Air") == true })
     }
 
@@ -507,7 +534,7 @@ struct ABMReadTests {
         #expect(try await rig.client.appleCareCoverage(serial: "B1").isEmpty)
     }
 
-    @Test("Activation Lock: Apple's documented server error is no answer, not retried")
+    @Test("Activation Lock: Apple’s documented server error is no answer, not retried")
     func activationLock() async throws {
         let rig = AppleRig(Apple.server { request in
             switch request.path {
@@ -537,7 +564,7 @@ struct ABMReadTests {
         #expect(try await rig.client.assignedServerID(serial: "C") == nil)
     }
 
-    @Test("Paging: every page on Apple's address; another host is refused, nothing sent there")
+    @Test("Paging: every page on Apple’s address; another host is refused, nothing sent there")
     func paging() async throws {
         let rig = AppleRig(Apple.server { request in
             guard request.path == "/v1/mdmServers" else { return nil }
@@ -566,7 +593,7 @@ struct ABMReadTests {
         guard case .invalidResponse = noData?.kind else { Issue.record("no data accepted"); return }
     }
 
-    @Test("Snapshot: devices, assignments, and a server that can't be read gives unknown assignments")
+    @Test("Snapshot: devices, assignments, and a server that can’t be read gives unknown assignments")
     func snapshot() async throws {
         let rig = AppleRig(Apple.server { request in
             switch request.path {
@@ -649,10 +676,10 @@ struct ABMReadTests {
 @MainActor
 struct ABMRetryTests {
 
-    @Test("Eighteen requests a minute; the nineteenth waits, written to the log")
+    @Test("Eighteen requests a minute, the sign-in included; the next one waits, written to the log")
     func limit() async throws {
         let rig = AppleRig(Apple.server { $0.path == "/v1/mdmServers" ? .json(200, #"{"data":[]}"#) : nil })
-        for _ in 0..<18 { _ = try await rig.client.mdmServers() }
+        for _ in 0..<17 { _ = try await rig.client.mdmServers() }
         #expect(rig.time.waits.isEmpty)
         _ = try await rig.client.mdmServers()
         #expect(rig.time.waits.count == 1)
@@ -671,7 +698,7 @@ struct ABMRetryTests {
         #expect(error?.message() == "HTTP 429 Client Error\nApple allows about 20 requests a minute for each organization. Wait a minute, then try again.")
     }
 
-    @Test("A write isn't repeated after a server error or a dropped connection (decided by Jordy); a read is")
+    @Test("A write isn’t repeated after a server error or a dropped connection; a read is")
     func writesNotRepeated() async throws {
         let rig = AppleRig(Apple.server { $0.path == Apple.tokenPath ? nil : Apple.error(503) })
         _ = await appleError { _ = try await rig.client.submit(try ABM.Activity(.release, serials: ["A"])) }
@@ -739,12 +766,12 @@ struct ABMActivityTests {
                 return error.localizedDescription
             }
         }
-        #expect(refusal(try ABM.Activity(.release, serials: ["A"]), .school) == "Apple School Manager cannot release devices from the organization.")
-        #expect(refusal(try ABM.Activity(.assign, serials: ["A"])) == "Assign to “the Selected Server” needs an MDM server.")
+        #expect(refusal(try ABM.Activity(.release, serials: ["A"]), .school) == "Apple School Manager can’t release devices from the organization.")
+        #expect(refusal(try ABM.Activity(.assign, serials: ["A"])) == "Assign to “the Selected MDM Server” needs an MDM server.")
         #expect(refusal(try ABM.Activity(.updateMigrationDeadline, serials: ["A"])) == "Update Migration Deadline needs a migration deadline.")
         #expect(refusal(try ABM.Activity(.updateMigrationDeadline, serials: ["A"], deadline: now.addingTimeInterval(91 * 86400)))
-                == "Apple Business will not accept a migration deadline more than 90 days from now.")
-        #expect(throws: ABM.Error.self) { try ABM.Activity(.release, serials: ["A B"]) }
+                == "Apple Business Manager won’t accept a migration deadline more than 90 days from now.")
+        #expect(throws: ABM.APIError.self) { try ABM.Activity(.release, serials: ["A B"]) }
     }
 
     @Test("The rules: all six name the organization; three ask for the number from two devices; two are red")
@@ -771,7 +798,7 @@ struct ABMActivityTests {
     func texts() {
         let release = ABM.ActivityType.release.confirmation(serials: ["C02"], organization: "Lab Org", service: .business)
         #expect(release.title == "Release from Organization — C02")
-        #expect(release.message == "The device will be removed from your organization and can no longer be assigned to an MDM server. This cannot be undone through the API.")
+        #expect(release.message == "The device will be removed from your organization and can no longer be assigned to an MDM server. This can’t be undone through the API.")
         #expect(release.actionTitle == "Release from Organization")
         let assign = ABM.ActivityType.assign.confirmation(serials: ["A", "B"], organization: "Lab Org", service: .school, server: "Jamf Pro",
                                                           explanation: "1 device is released and is skipped.")
@@ -797,7 +824,7 @@ struct ABMActivityTests {
         #expect(message(now.addingTimeInterval(-60), current: []).hasPrefix("This deadline is earlier"))
     }
 
-    @Test("Outcomes, from Apple's documented values")
+    @Test("Outcomes, from Apple’s documented values")
     func outcomes() {
         func outcome(_ status: String?, _ sub: String?) -> ABM.ActivityOutcome {
             ABM.ActivityStatus(id: "A", status: status, subStatus: sub).outcome
@@ -820,7 +847,7 @@ struct ABMActivityTests {
     }
 
     /// A fake Apple that accepts a write and reports `states` one per check
-    /// (the last repeats), in Apple's documented format.
+    /// (the last repeats), in Apple’s documented format.
     static func activityServer(_ states: [(String, String)]) -> MockServer {
         let checks = Counter()
         return Apple.server { request in
@@ -846,7 +873,7 @@ struct ABMActivityTests {
         #expect(outcome == .partlyFailed)
         #expect(rig.time.waits == [2, 3])
         #expect(rig.api.filter { $0.method == "GET" }.count == 3)
-        // the signed download address isn't recorded
+        // the signed download address isn’t recorded
         #expect(!ActivityLogExport.text(rig.log.entries, masked: false).contains("wrYW2gn7"))
     }
 
@@ -858,15 +885,17 @@ struct ABMActivityTests {
         #expect(rig.time.waits.reduce(0, +) <= 120.5)
     }
 
-    @Test("A failed check ends the watch as a warning; no ID is not followed")
+    @Test("A failed check ends the watch as a warning; no ID isn’t followed")
     func failedCheck() async throws {
         let rig = AppleRig(Apple.server { request in
             if request.path == "/v1/orgDeviceActivities" { return .json(201, #"{"data":{"id":"X1"}}"#) }
             return request.path == "/v1/orgDeviceActivities/X1" ? Apple.error(400) : nil
         })
         let outcome = try await rig.client.perform(try ABM.Activity(.release, serials: ["A"]))
-        guard case .unknown(let text) = outcome else { Issue.record("not a warning"); return }
-        #expect(text.hasPrefix("checking on it failed"))
+        guard case .watchFailed(let reason) = outcome else { Issue.record("not a watch failure: \(outcome)"); return }
+        #expect(outcome.isWarning && !outcome.isFailure)
+        #expect(outcome.sentence(.business) == "Checking on it failed (\(reason)); check the devices in Apple Business Manager.")
+        #expect(!(outcome.sentence(.business) ?? "").contains("Apple reports"))
         #expect(try await rig.client.watch(activityID: nil) == .notFollowed)
     }
 }

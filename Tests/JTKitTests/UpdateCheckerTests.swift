@@ -56,8 +56,8 @@ struct UpdateCheckerTests {
       "body": "- Fixes",
       "html_url": "https://github.com/JordyThery/TestApp/releases/tag/v2.5",
       "assets": [
-        {"name": "TestApp-2.5.dmg", "browser_download_url": "https://github.com/dl/TestApp-2.5.dmg"},
-        {"name": "TestApp-2.5.zip", "browser_download_url": "https://github.com/dl/TestApp-2.5.zip"}
+        {"name": "TestApp-2.5.dmg", "browser_download_url": "https://github.com/JordyThery/TestApp/releases/download/v2.5/TestApp-2.5.dmg"},
+        {"name": "TestApp-2.5.zip", "browser_download_url": "https://github.com/JordyThery/TestApp/releases/download/v2.5/TestApp-2.5.zip"}
       ]
     }
     """#
@@ -116,7 +116,7 @@ struct UpdateCheckerTests {
         guard case let .failed(message) = checker.status else {
             Issue.record("Expected .failed, got \(checker.status)"); return
         }
-        #expect(message.contains("404"))
+        #expect(message == "GitHub answered with HTTP 404.")
     }
 
     @Test func automaticCheckOffersANewReleaseOnce() async throws {
@@ -126,13 +126,13 @@ struct UpdateCheckerTests {
         await checker.checkAutomatically()
         #expect(checker.status == .available(.init(
             version: "2.5", name: "TestApp 2.5", notes: "- Fixes",
-            downloadURL: URL(string: "https://github.com/dl/TestApp-2.5.zip"),
+            downloadURL: URL(string: "https://github.com/JordyThery/TestApp/releases/download/v2.5/TestApp-2.5.zip"),
             pageURL: URL(string: "https://github.com/JordyThery/TestApp/releases/tag/v2.5")
         )))
         #expect(checker.isPresented)
         #expect(defaults.string(forKey: "lastOfferedUpdate") == "2.5")
 
-        // The same release is not offered again, even after the daily interval.
+        // The same release isn’t offered again, even after the daily interval.
         defaults.removeObject(forKey: "lastUpdateCheck")
         let again = makeChecker(defaults: defaults)
         await again.checkAutomatically()
@@ -170,7 +170,7 @@ struct UpdateCheckerTests {
 
     @Test(arguments: [
         ("https://example.com/TestApp-2.5.zip", "https://github.com/JordyThery/TestApp/releases/tag/v2.5"),
-        ("https://github.com/dl/TestApp-2.5.zip", "https://example.com/releases/v2.5"),
+        ("https://github.com/JordyThery/TestApp/releases/download/v2.5/TestApp-2.5.zip", "https://example.com/releases/v2.5"),
         ("http://github.com/dl/TestApp-2.5.zip", "https://github.com/JordyThery/TestApp/releases/tag/v2.5"),
     ])
     func manualCheckRefusesReleasesOutsideGitHub(downloadURL: String, pageURL: String) async throws {

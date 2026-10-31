@@ -9,7 +9,7 @@ public protocol ConnectionStorage<Record> {
     associatedtype Record
 
     /// The saved records; empty when nothing has been saved yet. Throws when
-    /// saved data exists but can't be read.
+    /// saved data exists but can’t be read.
     func load() throws -> [Record]
 
     func save(_ records: [Record]) throws
@@ -18,44 +18,32 @@ public protocol ConnectionStorage<Record> {
     /// original. Does nothing when nothing is saved yet or a backup exists.
     func backUpOnce() throws
 
-    /// Keeps a copy of data that couldn't be read, next to the original, and
+    /// Keeps a copy of data that couldn’t be read, next to the original, and
     /// says where. The original stays in place.
     func keepUnreadableCopy() -> String?
 }
 
-/// How a JSON connections file is written. Keep the app's current settings so
+/// How a JSON connections file is written. Keep the app’s current settings so
 /// the file stays byte-for-byte the same.
 public nonisolated struct JSONConnectionFormat: Sendable {
-    public enum Dates: Sendable {
-        /// `JSONEncoder`'s default: seconds since 2001.
-        case deferredToDate
-        case iso8601
-    }
-
     public var outputFormatting: JSONEncoder.OutputFormatting
-    public var dates: Dates
 
-    public init(outputFormatting: JSONEncoder.OutputFormatting = [.prettyPrinted, .sortedKeys],
-                dates: Dates = .deferredToDate) {
+    public init(outputFormatting: JSONEncoder.OutputFormatting = [.prettyPrinted, .sortedKeys]) {
         self.outputFormatting = outputFormatting
-        self.dates = dates
     }
 
     func encoder() -> JSONEncoder {
         let encoder = JSONEncoder()
         encoder.outputFormatting = outputFormatting
-        if case .iso8601 = dates { encoder.dateEncodingStrategy = .iso8601 }
         return encoder
     }
 
     func decoder() -> JSONDecoder {
-        let decoder = JSONDecoder()
-        if case .iso8601 = dates { decoder.dateDecodingStrategy = .iso8601 }
-        return decoder
+        JSONDecoder()
     }
 }
 
-/// Names for the copies JTKit makes next to an app's data.
+/// Names for the copies JTKit makes next to an app’s data.
 nonisolated enum ConnectionCopies {
     static let backupSuffix = "backup"
     static let unreadableSuffix = "unreadable"
@@ -69,13 +57,16 @@ nonisolated enum ConnectionCopies {
     }
 }
 
-/// A JSON array of records in one file, e.g. JamfMigrator's `tenants.json`.
+/// A JSON array of records in one file, e.g. JamfMigrator’s `tenants.json`.
 /// Writes are atomic. The backup is `<file>.backup`; a copy of an unreadable
-/// file is `<file>.unreadable-<date and time>`.
+/// file is `<file>.unreadable-<date and time>`, made once however often the
+/// list is read again.
 @MainActor
 public final class JSONFileConnectionStorage<Record: Codable>: ConnectionStorage {
     public let fileURL: URL
     public let format: JSONConnectionFormat
+    /// The copy of the unreadable file, once made.
+    private var unreadableCopy: String?
 
     public init(fileURL: URL, format: JSONConnectionFormat = JSONConnectionFormat()) {
         self.fileURL = fileURL
@@ -104,9 +95,11 @@ public final class JSONFileConnectionStorage<Record: Codable>: ConnectionStorage
     }
 
     public func keepUnreadableCopy() -> String? {
+        if let unreadableCopy { return unreadableCopy }
         let copy = fileURL.appendingPathExtension(ConnectionCopies.unreadableStamp())
         do {
             try FileManager.default.copyItem(at: fileURL, to: copy)
+            unreadableCopy = copy.path
             return copy.path
         } catch {
             return nil
@@ -115,13 +108,17 @@ public final class JSONFileConnectionStorage<Record: Codable>: ConnectionStorage
 }
 
 /// A JSON-encoded array of records under one UserDefaults key, e.g.
-/// AppSettings2Blueprint's `connectionProfiles`. The backup is kept under
-/// `<key>.backup`; a copy of unreadable data under `<key>.unreadable-<date and time>`.
+/// AppSettings2Blueprint’s `connectionProfiles`. The backup is kept under
+/// `<key>.backup`; a copy of unreadable data under `<key>.unreadable-<date and time>`,
+/// made once however often the list is read again. A value that isn’t data
+/// is unreadable too, never "nothing saved", so it is never replaced.
 @MainActor
 public final class UserDefaultsConnectionStorage<Record: Codable>: ConnectionStorage {
     public let key: String
     public let defaults: UserDefaults
     public let format: JSONConnectionFormat
+    /// The copy of the unreadable value, once made.
+    private var unreadableCopy: String?
 
     public init(key: String, defaults: UserDefaults = .standard,
                 format: JSONConnectionFormat = JSONConnectionFormat(outputFormatting: [])) {
@@ -130,11 +127,18 @@ public final class UserDefaultsConnectionStorage<Record: Codable>: ConnectionSto
         self.format = format
     }
 
-    public var backupKey: String { "\(key).\(ConnectionCopies.backupSuffix)" }
+    var backupKey: String { "\(key).\(ConnectionCopies.backupSuffix)" }
 
     public func load() throws -> [Record] {
-        guard let data = defaults.data(forKey: key) else { return [] }
+        guard let value = defaults.object(forKey: key) else { return [] }
+        guard let data = value as? Data else { throw UnreadableValue(type: String(describing: type(of: value))) }
         return try format.decoder().decode([Record].self, from: data)
+    }
+
+    /// The setting holds something other than data, e.g. a string.
+    struct UnreadableValue: LocalizedError, Equatable {
+        let type: String
+        var errorDescription: String? { "the setting holds a \(type), not data" }
     }
 
     public func save(_ records: [Record]) throws {
@@ -148,8 +152,10 @@ public final class UserDefaultsConnectionStorage<Record: Codable>: ConnectionSto
 
     public func keepUnreadableCopy() -> String? {
         guard let existing = defaults.object(forKey: key) else { return nil }
+        if let unreadableCopy { return unreadableCopy }
         let copyKey = "\(key).\(ConnectionCopies.unreadableStamp())"
         defaults.set(existing, forKey: copyKey)
-        return "the setting \(copyKey)"
+        unreadableCopy = "the setting \(copyKey)"
+        return unreadableCopy
     }
 }

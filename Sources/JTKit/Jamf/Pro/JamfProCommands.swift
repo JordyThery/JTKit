@@ -1,16 +1,15 @@
 import Foundation
 
-// Sending MDM commands to Jamf Pro, and deleting device records: the
-// routing Checkpoint built, moved into JTKit with its tests (ROADMAP step 7).
-// Each command goes where Jamf Pro carries it:
+// Sending MDM commands to Jamf Pro, and deleting device records. Each
+// command goes where Jamf Pro carries it:
 // - Lock, Restart, Shut Down: `v2/mdm/commands`, one request per kind of
 //   device. Over the Platform API, Restart and Shut Down use its device
 //   actions instead, after looking the device up by serial.
 // - Wipe, Remove MDM Profile, Redeploy Framework: one request per device.
 // - Renew MDM Profile, Blank Push: one request for all, which can answer
-//   success and still name devices it didn't process.
+//   success and still name devices it didn’t process.
 // - Clear Passcode: the unlock token is read per device, then sent.
-// - Update Inventory: the Classic API's mobile device command.
+// - Update Inventory: the Classic API’s mobile device command.
 //
 // Commands are never repeated after a server error (they are writes); only a
 // 429 is retried, when nothing was done. The requests that carry a PIN or an
@@ -19,24 +18,43 @@ import Foundation
 extension JamfPlatform.Client {
     /// Sends a command to the devices it applies to.
     ///
-    /// - Parameter pin: six digits, for Lock and Wipe Computer.
+    /// - Parameter approval: the answered confirmation, from
+    ///   `MDMCommand.Confirmation.approve(...)`; it carries the PIN of Lock
+    ///   and Wipe Computer. Required for a command that can’t be undone or
+    ///   takes a PIN (`needsApproval(on:)`), and then for exactly this
+    ///   command on Jamf Pro and the devices that receive it.
     /// - Returns: what became of the command on each device, in the order given.
-    /// - Throws: `MDMCommand.Refusal` when nothing is sent at all (not over
-    ///   the Platform API, no PIN, no device with what the address needs);
-    ///   `CancellationError`.
+    /// - Throws: `MDMCommand.Refusal` when nothing is sent at all (no or
+    ///   another approval, not over the Platform API, no PIN, no device with
+    ///   what the address needs); `CancellationError`.
+    public func send(_ command: MDMCommand, to targets: [MDMCommand.Target],
+                     approval: MDMCommand.Confirmation.Approval?) async throws -> MDMCommand.Result {
+        let receiving = command.plan(for: targets, on: .jamfPro, overPlatformAPI: server == .platformAPI).receiving
+        try command.check(approval, on: .jamfPro, receiving: receiving.count)
+        return try await sendCommand(command, to: targets, pin: approval?.pin)
+    }
+
+    /// Sends a command to the devices it applies to, without a confirmation.
+    ///
+    /// - Parameter pin: six digits, for Lock and Wipe Computer.
+    @available(*, deprecated, message: "Confirm with MDMCommand.Confirmation and pass its approve(...) to send(_:to:approval:).")
     public func send(_ command: MDMCommand, to targets: [MDMCommand.Target], pin: String? = nil) async throws -> MDMCommand.Result {
+        try await sendCommand(command, to: targets, pin: pin)
+    }
+
+    private func sendCommand(_ command: MDMCommand, to targets: [MDMCommand.Target], pin: String?) async throws -> MDMCommand.Result {
         let overPlatformAPI = server == .platformAPI
         if overPlatformAPI && !command.worksOverPlatformAPI {
-            throw MDMCommand.Refusal(MDMCommand.unavailableOverPlatformAPI)
+            throw MDMCommand.Refusal(MDMCommand.unavailableOverPlatformAPI(command))
         }
         if command.needsPIN(on: .jamfPro), !MDMCommand.Confirmation.isValidPIN(pin ?? "") {
-            throw MDMCommand.Refusal("The PIN must be exactly 6 digits.")
+            throw MDMCommand.Refusal("Enter a \(MDMCommand.Confirmation.pinLength)-digit PIN.")
         }
         let plan = command.plan(for: targets, on: .jamfPro, overPlatformAPI: overPlatformAPI)
         if plan.receiving.isEmpty && !plan.applicable.isEmpty {
             switch command {
-            case .renewProfile: throw MDMCommand.Refusal("No device UDIDs are known, so the MDM profile cannot be renewed.")
-            case .blankPush: throw MDMCommand.Refusal("No management IDs are known, so a blank push cannot be sent. Run a fresh lookup first.")
+            case .renewProfile: throw MDMCommand.Refusal("No device UDIDs are known, so the MDM profile can’t be renewed.")
+            case .blankPush: throw MDMCommand.Refusal("No management IDs are known, so a blank push can’t be sent. Run a fresh lookup first.")
             default: break
             }
         }
@@ -57,7 +75,7 @@ extension JamfPlatform.Client {
             for target in receiving {
                 try await run.each(target) {
                     guard let token = try await unlockToken(mobileDeviceID: target.recordID) else {
-                        return .failed("Jamf Pro has no escrowed unlock token for this device, so the passcode cannot be cleared.")
+                        return .failed("no escrowed unlock token in Jamf Pro for this device, so the passcode can’t be cleared.")
                     }
                     try await modernCommand(["commandType": "CLEAR_PASSCODE", "unlockToken": token],
                                             managementIDs: [target.managementID ?? ""], privilege: command.privilege(for: .mobileDevice))
@@ -109,15 +127,15 @@ extension JamfPlatform.Client {
         return run.result
     }
 
-    /// Deletes a computer's record (`v4/computers-inventory/{id}`). Can't be
+    /// Deletes a computer’s record (`v4/computers-inventory/{id}`). Can’t be
     /// undone. Needs “Delete Computers”.
     public func deleteComputer(id: String) async throws {
         _ = try await sendThrowing(HTTPRequest(method: "DELETE", path: "pro/v4/computers-inventory/\(JamfPlatform.pathSegment(id))"),
                                    privilege: .deleteComputers)
     }
 
-    /// Deletes a mobile device's record, through the Classic API (Jamf Pro
-    /// has no other way). Can't be undone. Needs “Delete Mobile Devices”.
+    /// Deletes a mobile device’s record, through the Classic API (Jamf Pro
+    /// has no other way). Can’t be undone. Needs “Delete Mobile Devices”.
     public func deleteMobileDevice(id: String) async throws {
         _ = try await sendThrowing(HTTPRequest(method: "DELETE", path: JamfClassic.path("mobiledevices", id: id),
                                                accept: "application/json"),
@@ -159,9 +177,9 @@ extension JamfPlatform.Client {
         _ = try await sendThrowing(request, privilege: privilege)
     }
 
-    /// `v2/mdm/commands`. Jamf Pro's API description names only “View MDM
+    /// `v2/mdm/commands`. Jamf Pro’s API description names only “View MDM
     /// command information in Jamf Pro API” for it; Jamf Pro also checks the
-    /// command's own privilege, so a refusal names both.
+    /// command’s own privilege, so a refusal names both.
     private func modernCommand(_ data: [String: any Sendable], managementIDs: [String], privilege: JamfPro.Privilege) async throws {
         let body = try JSONSerialization.data(withJSONObject: [
             "clientData": managementIDs.map { ["managementId": $0] },
@@ -181,7 +199,7 @@ extension JamfPlatform.Client {
         let response = try await sendThrowing(HTTPRequest(path: "pro/v2/mobile-devices/\(JamfPlatform.pathSegment(id))/detail"),
                                               privilege: .readMobileDevices)
         guard let detail = try? JSONDecoder().decode(Detail.self, from: response.data) else {
-            throw failure(JamfPlatformError(.invalidResponse("The mobile device detail could not be read.")))
+            throw failure(JamfPlatform.APIError(.invalidResponse("The mobile device detail couldn’t be read.")))
         }
         return [detail.ios, detail.tvos, detail.watchos, detail.visionos].compactMap { $0?.unlockToken }.first { !$0.isEmpty }
     }
@@ -213,7 +231,7 @@ extension JamfPlatform.Client {
     /// As the Jamf Pro web interface does it: a DDM sync per device (the entry
     /// in the management history), a DeviceInformation query for devices that
     /// refuse it, then the blank push itself, which names the devices it
-    /// couldn't reach.
+    /// couldn’t reach.
     private func blankPush(_ receiving: [MDMCommand.Target], _ run: inout CommandRun) async throws {
         guard !receiving.isEmpty else { return }
         let managementIDs = receiving.compactMap(\.managementID)
@@ -280,7 +298,7 @@ nonisolated struct CommandRun {
         }
     }
 
-    /// Runs one device's request; a failure becomes that device's outcome.
+    /// Runs one device’s request; a failure becomes that device’s outcome.
     mutating func each(_ target: MDMCommand.Target, _ body: () async throws -> MDMCommand.Outcome) async throws {
         do {
             set(target, try await body())
@@ -293,7 +311,7 @@ nonisolated struct CommandRun {
 
     var result: MDMCommand.Result {
         MDMCommand.Result(command: command,
-                          outcomes: zip(targets, outcomes).map { MDMCommand.DeviceOutcome(target: $0, outcome: $1 ?? .failed("Not sent.")) },
+                          outcomes: zip(targets, outcomes).map { MDMCommand.DeviceOutcome(target: $0, outcome: $1 ?? .failed("not sent.")) },
                           warning: warning)
     }
 }

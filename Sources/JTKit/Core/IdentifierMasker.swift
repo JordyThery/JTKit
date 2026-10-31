@@ -27,11 +27,11 @@ public nonisolated struct FoundIdentifier: Hashable, Sendable {
 /// and masked only at export, so the log itself and a copied entry stay
 /// readable. Each value gets the same placeholder everywhere in one export,
 /// numbered per kind in the order the values first appeared. Generic names
-/// (a Blueprint's, a group's) are never collected; device names only where a
+/// (a Blueprint’s, a group’s) are never collected; device names only where a
 /// field clearly holds one.
 public nonisolated struct IdentifierMasker: Sendable {
     private let assigned: [String: String]
-    /// `assigned` plus each value's percent-encoded form, e.g.
+    /// `assigned` plus each value’s percent-encoded form, e.g.
     /// `jane%40corp.example`, as it appears in a recorded address.
     private let replacements: [String: String]
     private let pattern: NSRegularExpression?
@@ -67,7 +67,7 @@ public nonisolated struct IdentifierMasker: Sendable {
         )
     }
 
-    /// The placeholder for a value, or nil when it isn't masked.
+    /// The placeholder for a value, or nil when it isn’t masked.
     public func placeholder(for value: String) -> String? {
         assigned[value.lowercased()]
     }
@@ -105,7 +105,7 @@ public nonisolated struct IdentifierMasker: Sendable {
         "WiFiMAC", "bluetoothMAC",
     ].map { $0.lowercased() })
 
-    /// Keys that clearly hold a device's name.
+    /// Keys that clearly hold a device’s name.
     static let deviceNameKeys: Set<String> = ["devicename", "device_name", "computername", "computer_name"]
 
     /// Keys whose values identify a person.
@@ -148,27 +148,37 @@ public nonisolated struct IdentifierMasker: Sendable {
         return unique(found + identifiers(inText: text))
     }
 
-    static func identifiers(inJSON value: Any) -> [FoundIdentifier] {
+    /// Keys that hold a device’s name inside a device record only; elsewhere
+    /// they name a Blueprint, a group or a PreStage.
+    static let recordNameKeys: Set<String> = ["name", "displayname"]
+
+    /// - Parameter inDeviceRecord: the dictionary is a device record’s
+    ///   `general` section (Jamf Pro’s inventory keeps the name there, the
+    ///   serial number in `hardware`).
+    static func identifiers(inJSON value: Any, inDeviceRecord: Bool = false) -> [FoundIdentifier] {
         var found = [FoundIdentifier]()
         if let dictionary = value as? [String: Any] {
             if let key = dictionary["key"] as? String, identifierStatusItems.contains(key) {
                 found += strings(in: dictionary["value"] as Any).map { FoundIdentifier(.device, $0) }
             }
-            // a device record: its plain "name" is the device's name
-            let isDeviceRecord = dictionary.keys.contains { deviceKeys.contains($0.lowercased()) }
+            // a device record: its plain "name" is the device’s name
+            let isDeviceRecord = inDeviceRecord || dictionary.keys.contains { deviceKeys.contains($0.lowercased()) }
             for key in dictionary.keys.sorted() {
                 let inner = dictionary[key] as Any
                 if let kind = kind(forKey: key) {
                     found += strings(in: inner)
                         .filter { kind != .address || looksLikeIPAddress($0) }
                         .map { FoundIdentifier(kind, $0) }
-                } else if isDeviceRecord && key.lowercased() == "name" {
+                } else if isDeviceRecord && recordNameKeys.contains(key.lowercased()) {
                     found += strings(in: inner).map { FoundIdentifier(.device, $0) }
                 }
-                found += identifiers(inJSON: inner)
+                // only `general` carries the record on: other sections have
+                // names of their own (`operatingSystem.name` is "macOS")
+                let carries = isDeviceRecord && inner is [String: Any] && key.lowercased() == "general"
+                found += identifiers(inJSON: inner, inDeviceRecord: carries)
             }
         } else if let array = value as? [Any] {
-            found += array.flatMap(identifiers(inJSON:))
+            found += array.flatMap { identifiers(inJSON: $0) }
         }
         return found
     }
@@ -201,7 +211,7 @@ public nonisolated struct IdentifierMasker: Sendable {
     }
 
     /// Identifiers in a request path and query: values that look like a
-    /// serial number, Apple's UDID formats, and a UUID right after `udid`.
+    /// serial number, Apple’s UDID formats, and a UUID right after `udid`.
     /// A plain UUID elsewhere is an object ID (a Blueprint, a group), not a device.
     public static func identifiers(inPath path: String) -> [FoundIdentifier] {
         let decoded = path.removingPercentEncoding ?? path

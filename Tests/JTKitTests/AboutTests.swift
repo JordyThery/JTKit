@@ -20,12 +20,12 @@ struct AboutTests {
 
     @Test func copyrightLineDefaultsToMIT() {
         let copyright = AboutCopyright(year: "2026", holder: "Jordy Thery")
-        #expect(copyright.licence == "MIT License")
+        #expect(copyright.license == "MIT License")
         #expect(copyright.text == "© 2026 Jordy Thery. Released under the MIT License.")
     }
 
-    @Test func copyrightLineUsesTheGivenYearAndLicence() {
-        let copyright = AboutCopyright(year: "2024–2026", holder: "Someone", licence: "Apache License 2.0")
+    @Test func copyrightLineUsesTheGivenYearAndLicense() {
+        let copyright = AboutCopyright(year: "2024–2026", holder: "Someone", license: "Apache License 2.0")
         #expect(copyright.text == "© 2024–2026 Someone. Released under the Apache License 2.0.")
     }
 
@@ -46,24 +46,37 @@ struct AcknowledgementTests {
         #expect(Acknowledgement(name: "OpenTofu").heading == "OpenTofu")
     }
 
-    @Test func licenceNameIsItsFirstLine() {
-        let mit = Acknowledgement(name: "X", licence: "\n  MIT License\n\nCopyright (c) 2026 Someone")
-        #expect(mit.licenceName == "MIT License")
-        #expect(Acknowledgement(name: "Y").licenceName == nil)
+    @Test func licenseNameIsItsFirstLine() {
+        let mit = Acknowledgement(name: "X", license: "\n  MIT License\n\nCopyright (c) 2026 Someone")
+        #expect(mit.licenseName == "MIT License")
+        #expect(Acknowledgement(name: "Y").licenseName == nil)
     }
 
-    /// For texts that open with a copyright line, as OpenTofu's MPL-2.0 does.
-    @Test func licenceNameCanBeGiven() {
-        let tofu = Acknowledgement(name: "X", licence: "Copyright (c) The OpenTofu Authors\n\nMozilla Public License, version 2.0", licenceName: "MPL-2.0")
-        #expect(tofu.licenceName == "MPL-2.0")
-        #expect(tofu.licence == "Copyright (c) The OpenTofu Authors\n\nMozilla Public License, version 2.0")
-        // A label without a text shows nothing: there is no licence to unfold.
-        #expect(Acknowledgement(name: "Y", licenceName: "MPL-2.0").licenceName == nil)
+    /// For texts that open with a copyright line, as OpenTofu’s MPL-2.0 does.
+    @Test func licenseNameCanBeGiven() {
+        let tofu = Acknowledgement(name: "X", license: "Copyright (c) The OpenTofu Authors\n\nMozilla Public License, version 2.0", licenseName: "MPL-2.0")
+        #expect(tofu.licenseName == "MPL-2.0")
+        #expect(tofu.license == "Copyright (c) The OpenTofu Authors\n\nMozilla Public License, version 2.0")
+        // A label without a text shows nothing: there is no license to unfold.
+        #expect(Acknowledgement(name: "Y", licenseName: "MPL-2.0").licenseName == nil)
     }
 
-    @Test func licenceTextIsKeptUnchanged() {
+    @Test func licenseTextIsKeptUnchanged() {
         let text = "MIT License\n\n    Indented line\nTHE SOFTWARE IS PROVIDED \"AS IS\""
-        #expect(Acknowledgement(name: "X", licence: text).licence == text)
+        #expect(Acknowledgement(name: "X", license: text).license == text)
+    }
+
+    /// The British spellings still build, for apps not yet updated.
+    @Test @available(*, deprecated)
+    func britishSpellingsStillWork() {
+        let old = Acknowledgement(name: "X", licence: "Copyright (c) 2026 Someone\n\nMIT", licenceName: "MIT License")
+        #expect(old.license == "Copyright (c) 2026 Someone\n\nMIT")
+        #expect(old.licenceName == "MIT License")
+        #expect(old.licence == old.license)
+        var copyright = AboutCopyright(year: "2026", holder: "Someone", licence: "Apache License 2.0")
+        #expect(copyright.license == "Apache License 2.0")
+        copyright.licence = "MIT License"
+        #expect(copyright.text == "© 2026 Someone. Released under the MIT License.")
     }
 }
 
@@ -99,8 +112,8 @@ struct SettingsWindowTests {
         #expect(SettingsLayout.generalSymbol == "gearshape")
     }
 
-    /// Serial Number Reader's Settings preview passes only tabs, with one
-    /// trailing closure; 0.4.2 stopped accepting that and broke its build.
+    /// Serial Number Reader’s Settings preview passes only tabs, with one
+    /// trailing closure; a change that stops accepting that breaks its build.
     @MainActor @Test func contentAcceptsOnlyTabs() {
         let tabs = SettingsTabs {
             SettingsTab("Connections", systemImage: "network") {
@@ -112,7 +125,7 @@ struct SettingsWindowTests {
         #expect(generalIsEmpty(tabs))
     }
 
-    /// The same for the window, as Serial Number Reader's app uses it, and with
+    /// The same for the window, as Serial Number Reader’s app uses it, and with
     /// no tabs at all.
     @MainActor @Test func windowAcceptsOnlyTabsOrNothing() {
         let original = NSApplication.shared.appearance

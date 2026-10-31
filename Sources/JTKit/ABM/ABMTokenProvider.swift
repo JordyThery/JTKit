@@ -2,24 +2,25 @@ import CryptoKit
 import Foundation
 
 extension ABM {
-    /// Signs in to Apple Business or School Manager with the API account's
+    /// Signs in to Apple Business or School Manager with the API account’s
     /// private key (OAuth client credentials with an ES256-signed client
     /// assertion) and keeps the token.
     ///
-    /// - Asks `account.apple.com/auth/oauth2/v2/token` for the service's scope.
-    /// - Renews the token 60 s before it expires (decided by Jordy).
+    /// - Asks `account.apple.com/auth/oauth2/v2/token` for the service’s scope.
+    /// - Renews the token 60 s before it expires.
     /// - Requests that need a token at the same time share one sign-in.
     /// - Reads the private key only when it signs in, and keeps neither it
     ///   nor the signed request afterwards. Each sign-in signs a new request.
-    /// - The sign-in is one of JTKit's sensitive calls: only its method,
+    /// - The sign-in is one of JTKit’s sensitive calls: only its method,
     ///   path, status and duration are recorded, never the signed request or
-    ///   the token. A refused sign-in shows only Apple's `error` and
+    ///   the token. A refused sign-in shows only Apple’s `error` and
     ///   `error_description`, with the key and the signed request taken out.
     /// - Redirects are followed only to HTTPS on the same host.
+    /// - On `ABM.Client`, each sign-in takes one of the 18 requests a minute.
     public actor TokenProvider: BearerTokenSource {
         public static let tokenURL = URL(string: "https://account.apple.com/auth/oauth2/v2/token")!
         /// How long a signed request is valid.
-        public static let assertionLifetime = 1200
+        static let assertionLifetime = 1200
 
         public nonisolated let service: Service
         public nonisolated let clientID: String
@@ -57,7 +58,7 @@ extension ABM {
 
         /// Signs in with an Apple Business or School Manager connection.
         ///
-        /// - Throws: `ABM.Error.Kind.invalidRequest` for another service.
+        /// - Throws: `ABM.APIError.Kind.invalidRequest` for another service.
         public init(
             connection: Connection,
             privateKey: @escaping @Sendable () throws -> String,
@@ -66,13 +67,28 @@ extension ABM {
             now: @escaping @Sendable () -> Date = { Date() }
         ) throws {
             guard let service = Service(connection.service) else {
-                throw ABM.Error(.invalidRequest("\(connection.service.displayName) isn’t Apple Business or School Manager."))
+                throw ABM.APIError(.invalidRequest("\(connection.service.displayName) isn’t Apple Business Manager or Apple School Manager."))
             }
             self.init(service: service, clientID: connection.clientID, keyID: connection.keyID, privateKey: privateKey,
                       recorder: recorder, refreshMargin: refreshMargin, now: now)
         }
 
         public func token() async throws -> String {
+            try await token(beforeSigningIn: {})
+        }
+
+        /// As `token()`; `beforeSigningIn` runs before a sign-in this call
+        /// starts (the client’s rate limit: Apple counts the sign-in too), not
+        /// when it shares one already under way.
+        public func token(beforeSigningIn: @escaping @Sendable () async throws -> Void) async throws -> String {
+            if let cached, cached.expiresAt.timeIntervalSince(now()) > cached.margin {
+                return cached.value
+            }
+            if let inFlight {
+                return try await inFlight.value.0
+            }
+            try await beforeSigningIn()
+            // another request may have signed in while this one waited
             if let cached, cached.expiresAt.timeIntervalSince(now()) > cached.margin {
                 return cached.value
             }
@@ -122,48 +138,48 @@ extension ABM {
                                                            withholdsContents: true, knownSecrets: secrets)
             } catch let error as URLError {
                 let message = Redaction.removing(secrets, from: Redaction.text(error.localizedDescription))
-                throw ABM.Error(.transport(method: "POST", path: Self.tokenURL.path(), code: error.code, message: message),
+                throw ABM.APIError(.transport(method: "POST", path: Self.tokenURL.path(), code: error.code, message: message),
                                 service: service)
             }
             guard (200..<300).contains(response.statusCode) else {
                 throw Self.signInError(status: response.statusCode, data: data, secrets: secrets, service: service)
             }
             guard let token = try? JSONDecoder().decode(Token.self, from: data), !token.accessToken.isEmpty else {
-                throw ABM.Error(.invalidResponse("The sign-in answer has no access token."), service: service)
+                throw ABM.APIError(.invalidResponse("The sign-in answer has no access token."), service: service)
             }
             let lifetime = TimeInterval(token.expiresIn ?? 3600)
             // a short-lived token is renewed halfway, not never trusted
             return (token.accessToken, issuedAt.addingTimeInterval(lifetime), min(refreshMargin, lifetime / 2))
         }
 
-        /// Only Apple's `error` and `error_description`, cleaned and with the
+        /// Only Apple’s `error` and `error_description`, cleaned and with the
         /// key and the signed request taken out; nothing of an answer that
-        /// isn't JSON.
-        static func signInError(status: Int, data: Data, secrets: [String], service: Service) -> ABM.Error {
+        /// isn’t JSON.
+        static func signInError(status: Int, data: Data, secrets: [String], service: Service) -> ABM.APIError {
             let object = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
             func cleaned(_ value: Any?) -> String? {
                 guard let text = value as? String, !text.isEmpty else { return nil }
                 let clean = Redaction.removing(secrets, from: Redaction.text(text))
                 return String(clean.prefix(300))
             }
-            return ABM.Error(.signIn(status: status, code: cleaned(object?["error"]),
+            return ABM.APIError(.signIn(status: status, code: cleaned(object?["error"]),
                                      description: cleaned(object?["error_description"])), service: service)
         }
 
         // MARK: - The signed request
 
         /// The signed client assertion (a JWT): ES256, the key ID, the client
-        /// ID as issuer and subject, Apple's token address as audience, valid
+        /// ID as issuer and subject, Apple’s token address as audience, valid
         /// 20 minutes, a new ID each time.
         ///
-        /// - Throws: `ABM.Error.Kind.unreadableKey`, never with the key in it.
+        /// - Throws: `ABM.APIError.Kind.unreadableKey`, never with the key in it.
         static func clientAssertion(clientID: String, keyID: String, privateKey pem: String, service: Service,
                                     issuedAt: Date, id: String = UUID().uuidString) throws -> String {
             let key: P256.Signing.PrivateKey
             do {
                 key = try readPrivateKey(pem)
             } catch {
-                throw ABM.Error(.unreadableKey, service: service)
+                throw ABM.APIError(.unreadableKey, service: service)
             }
             let iat = Int(issuedAt.timeIntervalSince1970)
             let header: [String: Any] = ["alg": "ES256", "kid": keyID, "typ": "JWT"]
@@ -173,16 +189,16 @@ extension ABM {
             ]
             let signingInput = try base64URL(json: header) + "." + base64URL(json: claims)
             guard let signature = try? key.signature(for: Data(signingInput.utf8)) else {
-                throw ABM.Error(.unreadableKey, service: service)
+                throw ABM.APIError(.unreadableKey, service: service)
             }
             return signingInput + "." + base64URL(signature.rawRepresentation)
         }
 
         /// Reads the downloaded key.
         ///
-        /// Apple School Manager hands out a key whose armour says `EC PRIVATE
+        /// Apple School Manager hands out a key whose armor says `EC PRIVATE
         /// KEY`, the SEC1 label, around a PKCS#8 body. CryptoKit believes the
-        /// label and fails; the armour is swapped and tried again, which
+        /// label and fails; the armor is swapped and tried again, which
         /// still rejects a key that is really wrong.
         static func readPrivateKey(_ pem: String) throws -> P256.Signing.PrivateKey {
             let trimmed = pem.trimmingCharacters(in: .whitespacesAndNewlines)

@@ -1,8 +1,8 @@
 import Foundation
 
-/// A Contoso Intune tenant's objects, in memory, as Microsoft Graph keeps
-/// them: the general store behind `DemoIntuneServer` for Intune Deployer
-/// (ROADMAP step 10). Lists with paging, `$filter`, `$select` and `$expand`;
+/// A Contoso Intune tenant’s objects, in memory, as Microsoft Graph keeps
+/// them: the general store behind `DemoIntuneServer` for Intune Deployer.
+/// Lists with paging, `$filter`, `$select` and `$expand`;
 /// create, update (PATCH and PUT), delete; `/assign`, compliance rules,
 /// Settings Catalog settings and definitions; groups, `me`, the organization
 /// and its Apple tokens; and app uploads to a fake storage host
@@ -10,8 +10,8 @@ import Foundation
 ///
 /// What Graph does that a client has to cope with is kept: v1.0 and beta show
 /// the same objects but beta-only lists refuse v1.0; script lists leave out
-/// `scriptContent`; a Settings Catalog policy's settings are their own list;
-/// compliance rules come only with `$expand`; an upload's states move on when
+/// `scriptContent`; a Settings Catalog policy’s settings are their own list;
+/// compliance rules come only with `$expand`; an upload’s states move on when
 /// they are read, so nothing has to wait. Not thread-safe on its own: the
 /// server calls it under its lock.
 nonisolated final class DemoGraphStore {
@@ -68,7 +68,7 @@ nonisolated final class DemoGraphStore {
         seed()
     }
 
-    // MARK: - For the server's public API
+    // MARK: - For the server’s public API
 
     func add(_ objects: [Object], to path: String) {
         let key = Self.key(path.split(separator: "/").map(String.init))
@@ -120,8 +120,8 @@ nonisolated final class DemoGraphStore {
         }
     }
 
-    /// Graph's own 403 for a write the signed-in account's token isn't
-    /// allowed: Entra's wording for groups, Intune's for the rest.
+    /// Graph’s own 403 for a write the signed-in account’s token isn’t
+    /// allowed: Entra’s wording for groups, Intune’s for the rest.
     private func refusedWrite(_ key: String) -> DemoResponse {
         if key.hasPrefix("groups") {
             return Self.error(403, "Authorization_RequestDenied", "Insufficient privileges to complete the operation.")
@@ -167,7 +167,7 @@ nonisolated final class DemoGraphStore {
     private func list(_ objects: [Object], key: String, _ request: DemoRequest) -> DemoResponse {
         var matching = objects
         if let filter = request.query["$filter"], !filter.isEmpty {
-            // the catalog's platform filter is the service's business; the
+            // the catalog’s platform filter is the service’s business; the
             // demo catalog holds only what an app adds
             if key != "deviceManagement/configurationSettings" {
                 guard let predicate = Self.predicate(filter) else {
@@ -241,7 +241,7 @@ nonisolated final class DemoGraphStore {
 
     private func post(_ key: String, _ request: DemoRequest) -> DemoResponse {
         guard let body = DemoJSON.object(request.body) ?? (request.body.isEmpty ? [:] : nil) else {
-            return Self.error(400, "BadRequest", "The request body isn't valid JSON.")
+            return Self.error(400, "BadRequest", "The request body isn’t valid JSON.")
         }
         let action = key.split(separator: "/").last.map(String.init) ?? ""
         if Self.actions.contains(action) {
@@ -279,7 +279,7 @@ nonisolated final class DemoGraphStore {
         return object
     }
 
-    /// A Settings Catalog policy's settings live in their own list.
+    /// A Settings Catalog policy’s settings live in their own list.
     private func storeSettings(_ object: inout Object, policy: String) -> Int {
         let settings = object["settings"] as? [Object] ?? []
         object["settings"] = nil
@@ -301,7 +301,7 @@ nonisolated final class DemoGraphStore {
                 entry["id"] = id
                 return Entry(id: id, object: entry)
             }
-            // apps and scripts answer 204; the others list what's assigned
+            // apps and scripts answer 204; the others list what’s assigned
             if target.hasPrefix("deviceAppManagement") || target.contains("ShellScripts") {
                 return DemoJSON.empty(204)
             }
@@ -310,7 +310,7 @@ nonisolated final class DemoGraphStore {
             update(target) { $0["scheduledActionsForRule"] = body["deviceComplianceScheduledActionForRules"] ?? [] }
             return DemoJSON.empty(204)
         case "commit":
-            // the encryption key in the body isn't kept
+            // the encryption key in the body isn’t kept
             let fileID = Self.lastSegment(target)
             let complete = blobs[fileID] != nil
             update(target) { $0["uploadState"] = complete ? "commitFilePending" : "commitFileFailed" }
@@ -327,7 +327,7 @@ nonisolated final class DemoGraphStore {
 
     private func patch(_ key: String, _ request: DemoRequest) -> DemoResponse {
         guard let body = DemoJSON.object(request.body) else {
-            return Self.error(400, "BadRequest", "The request body isn't valid JSON.")
+            return Self.error(400, "BadRequest", "The request body isn’t valid JSON.")
         }
         guard item(key) != nil else { return Self.notFound() }
         let stamp = DemoWorld.iso(daysAgo: 0, from: now)
@@ -341,7 +341,7 @@ nonisolated final class DemoGraphStore {
 
     private func put(_ key: String, _ request: DemoRequest) -> DemoResponse {
         guard var body = DemoJSON.object(request.body) else {
-            return Self.error(400, "BadRequest", "The request body isn't valid JSON.")
+            return Self.error(400, "BadRequest", "The request body isn’t valid JSON.")
         }
         guard let old = item(key) else { return Self.notFound() }
         body["id"] = old["id"]
@@ -491,7 +491,7 @@ nonisolated final class DemoGraphStore {
                                              "innerError": ["request-id": DemoSamples.uuid(0xeeee), "date": "2026-10-27T10:00:00"]]])
     }
 
-    // MARK: - Contoso's tenant
+    // MARK: - Contoso’s tenant
 
     static let userID = DemoSamples.uuid(0xe711)
     static let username = "demo.sample@contoso.example"
@@ -586,12 +586,12 @@ nonisolated final class DemoGraphStore {
     }
 }
 
-/// A Settings Catalog setting definition in the demo tenant's catalog, e.g.
-/// one an app's baseline uses (`DemoIntuneServer.add(definitions:)`).
+/// A Settings Catalog setting definition in the demo tenant’s catalog, e.g.
+/// one an app’s baseline uses (`DemoIntuneServer.add(definitions:)`).
 public nonisolated struct DemoSettingDefinition: Sendable {
     public let id: String
     public let displayName: String
-    /// A choice setting's options: their IDs and names.
+    /// A choice setting’s options: their IDs and names.
     public let options: [(id: String, displayName: String)]
 
     public init(id: String, displayName: String, options: [(id: String, displayName: String)] = []) {

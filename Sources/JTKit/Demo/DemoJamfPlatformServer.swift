@@ -14,7 +14,7 @@ public nonisolated enum DemoScenario: String, Sendable, CaseIterable {
 
 /// An in-memory Jamf Platform API: sign-in, device groups, environments and
 /// Blueprints (list, detail, create, merge-patch, deploy, report). It answers
-/// what JTKit's client sends, with the behaviour seen on the real service:
+/// what JTKit’s client sends, with the behavior seen on the real service:
 ///
 /// - on create and patch, `com.jamf.ddm-configuration-profile` payloads are
 ///   stored the way the service stores them (payload UUID = identifier, a few
@@ -22,16 +22,18 @@ public nonisolated enum DemoScenario: String, Sendable, CaseIterable {
 /// - a patch replaces whole values (JSON merge-patch, arrays wholesale);
 /// - patching `steps` of a Blueprint without a scope fails with 400 NotBlank
 ///   `scopeId`; a scope-only patch works;
-/// - a Blueprint assigned to a division can't be patched (409
+/// - a Blueprint assigned to a division can’t be patched (409
 ///   `DIVISION_PATCH_NOT_ALLOWED`);
 /// - changing a deployed Blueprint makes it Out of Date;
 /// - a deployment moves `PENDING → DEPLOYING → SUCCEEDED` over successive reads.
 ///
-/// Errors come in the gateway's shape, so JTKit reads them as from a tenant.
+/// Every request but the sign-in needs a token the sign-in gave out, as on
+/// the gateway. Errors come in the gateway’s shape, so JTKit reads them as
+/// from a tenant.
 /// An app can add its own device groups (`add(groups:)`) and its own services
 /// under a path (`route(_:to:)`), e.g. Classic API profiles behind the gateway.
-/// Given a Jamf Pro object store (`jamfPro`), the gateway's `/pro/…` and
-/// `/proclassic/…` are answered from it; an app's own route comes first.
+/// Given a Jamf Pro object store (`jamfPro`), the gateway’s `/pro/…` and
+/// `/proclassic/…` are answered from it; an app’s own route comes first.
 public nonisolated final class DemoJamfPlatformServer: DemoServer, @unchecked Sendable {
     private struct Stored {
         var blueprint: LosslessJSON.Object
@@ -47,9 +49,10 @@ public nonisolated final class DemoJamfPlatformServer: DemoServer, @unchecked Se
     private var deployCountValue = 0
     private var patchCountValue = 0
     private var tokenCount = 0
+    private var tokens: Set<String> = []
     private var requestCountValue = 0
     private var groups: [JamfPlatform.DeviceGroup]
-    /// An app's own services under a path of this server (`route(_:to:)`).
+    /// An app’s own services under a path of this server (`route(_:to:)`).
     private var routes: [(path: [String], server: any DemoServer)] = []
     private let scenario: DemoScenario?
     /// The Jamf Pro behind the gateway: `/pro/…` is its Jamf Pro API,
@@ -65,8 +68,8 @@ public nonisolated final class DemoJamfPlatformServer: DemoServer, @unchecked Se
     public var requestCount: Int { lock.withLock { requestCountValue } }
 
     /// - Parameters:
-    ///   - groups: the device groups; Contoso's by default.
-    ///   - blueprints: the Blueprints to start with, oldest first; Contoso's by default.
+    ///   - groups: the device groups; Contoso’s by default.
+    ///   - blueprints: the Blueprints to start with, oldest first; Contoso’s by default.
     ///   - scenario: e.g. `.jamfSchool`.
     ///   - pollsToSucceed: reads of a deploying Blueprint before it reports success.
     ///   - failDeployments: deployments end as failed instead.
@@ -104,8 +107,8 @@ public nonisolated final class DemoJamfPlatformServer: DemoServer, @unchecked Se
         return id
     }
 
-    /// Adds Blueprints, e.g. an app's own sample data, after the ones already
-    /// there. They're stored the way the service stores them, as on create
+    /// Adds Blueprints, e.g. an app’s own sample data, after the ones already
+    /// there. They’re stored the way the service stores them, as on create
     /// (`com.jamf.ddm-configuration-profile` payloads included), so they read
     /// back as from a tenant and an unchanged payload stays unchanged when
     /// patched. One whose ID is already there replaces it in place; one
@@ -128,7 +131,7 @@ public nonisolated final class DemoJamfPlatformServer: DemoServer, @unchecked Se
         lock.withLock { blueprints[id]?.blueprint }
     }
 
-    /// Adds device groups, e.g. an app's own sample groups, after the ones
+    /// Adds device groups, e.g. an app’s own sample groups, after the ones
     /// already there. One whose ID is already there replaces it in place.
     public func add(groups newGroups: [JamfPlatform.DeviceGroup]) {
         lock.withLock {
@@ -143,9 +146,9 @@ public nonisolated final class DemoJamfPlatformServer: DemoServer, @unchecked Se
     }
 
     /// Hands every request whose path starts with `path` (e.g. `"proclassic"`)
-    /// to `server`, an app's own fake service behind this one, so the app's
-    /// requests there run through JTKit's real client like the rest. Sign-in
-    /// stays this server's. The longest matching path wins; a path given
+    /// to `server`, an app’s own fake service behind this one, so the app’s
+    /// requests there run through JTKit’s real client like the rest. Sign-in
+    /// stays this server’s. The longest matching path wins; a path given
     /// again replaces its server.
     public func route(_ path: String, to server: any DemoServer) {
         let segments = path.split(separator: "/").map(String.init)
@@ -162,12 +165,18 @@ public nonisolated final class DemoJamfPlatformServer: DemoServer, @unchecked Se
     public func respond(to request: DemoRequest) -> DemoResponse {
         let parts = request.pathSegments
         let method = request.method
+        let isSignIn = method == "POST" && parts == ["auth", "token"]
+        let signedIn = DemoJSON.bearer(request).map { token in lock.withLock { tokens.contains(token) } } ?? false
+        guard isSignIn || signedIn else {
+            lock.withLock { requestCountValue += 1 }
+            return Self.error(401, "INVALID_TOKEN", "Unauthorized")
+        }
         let routed: (any DemoServer)? = lock.withLock {
             routes.first { parts.starts(with: $0.path) }?.server
         }
         if let routed {
             lock.withLock { requestCountValue += 1 }
-            // Outside the lock: the app's server may take its time or ask this one.
+            // Outside the lock: the app’s server may take its time or ask this one.
             return routed.respond(to: request)
         }
         if let jamfPro, let first = parts.first, first == "pro" || first == "proclassic", parts.count > 1 {
@@ -177,8 +186,9 @@ public nonisolated final class DemoJamfPlatformServer: DemoServer, @unchecked Se
         }
         return lock.withLock {
             requestCountValue += 1
-            if method == "POST", parts == ["auth", "token"] {
+            if isSignIn {
                 tokenCount += 1
+                tokens.insert("demo-token-\(tokenCount)")
                 return .json(200, .object(LosslessJSON.Object([
                     "access_token": .string("demo-token-\(tokenCount)"),
                     "token_type": .string("Bearer"),
@@ -304,7 +314,7 @@ public nonisolated final class DemoJamfPlatformServer: DemoServer, @unchecked Se
             return Self.error(400, "INVALID_FIELD", "The body is not valid JSON.")
         }
         if let division = stored.blueprint["divisionId"], division != .null {
-            return Self.error(409, "DIVISION_PATCH_NOT_ALLOWED", "Blueprints assigned to a division can't be changed through the API.")
+            return Self.error(409, "DIVISION_PATCH_NOT_ALLOWED", "Blueprints assigned to a division can’t be changed through the API.")
         }
         let scope = request["scope"] ?? stored.blueprint["scope"]
         let groups = scope?["deviceGroups"]?.arrayValue?.compactMap(\.stringValue) ?? []
@@ -326,7 +336,7 @@ public nonisolated final class DemoJamfPlatformServer: DemoServer, @unchecked Se
         }
         patchCountValue += 1
         stored.blueprint["updated"] = .string(Self.now())
-        // Any change to a deployed Blueprint leaves the devices behind until it's deployed again.
+        // Any change to a deployed Blueprint leaves the devices behind until it’s deployed again.
         if stored.blueprint["deploymentState"]?["state"]?.stringValue == "DEPLOYED",
            request["steps"] != nil || request["scope"] != nil {
             var deployment = stored.blueprint["deploymentState"]?.objectValue ?? LosslessJSON.Object()
@@ -435,16 +445,16 @@ public nonisolated final class DemoJamfPlatformServer: DemoServer, @unchecked Se
         ]))
     }
 
-    /// The service's storage of a `com.jamf.ddm-configuration-profile` configuration.
+    /// The service’s storage of a `com.jamf.ddm-configuration-profile` configuration.
     private static func canonicalise(_ configuration: LosslessJSON) -> LosslessJSON {
         guard var object = configuration.objectValue else { return configuration }
         let payloads = object["payloadContent"]?.arrayValue ?? []
         object["payloadContent"] = .array(payloads.map { payload in
             guard var item = payload.objectValue else { return payload }
-            // Observed live: these payload-level keys are not stored.
+            // Observed live: these payload-level keys aren’t stored.
             item["PayloadDescription"] = nil
             item["PayloadEnabled"] = nil
-            // Observed live: the API overwrites each payload's UUID with its identifier.
+            // Observed live: the API overwrites each payload’s UUID with its identifier.
             if let identifier = item["payloadIdentifier"] { item["payloadUUID"] = identifier }
             if item["payloadVersion"] == nil { item["payloadVersion"] = .number(.init(1)) }
             if item["payloadOrganization"] == nil { item["payloadOrganization"] = .string("Jamf") }
@@ -456,7 +466,7 @@ public nonisolated final class DemoJamfPlatformServer: DemoServer, @unchecked Se
         return .object(object)
     }
 
-    /// An error in the gateway's shape.
+    /// An error in the gateway’s shape.
     private static func error(_ status: Int, _ code: String, _ description: String, field: String? = nil) -> DemoResponse {
         var item = LosslessJSON.Object(["code": .string(code)])
         if let field { item["field"] = .string(field) }
@@ -469,7 +479,7 @@ public nonisolated final class DemoJamfPlatformServer: DemoServer, @unchecked Se
     }
 
     private static func notFound() -> DemoResponse {
-        error(404, "NOT_FOUND", "Blueprint doesn't exist")
+        error(404, "NOT_FOUND", "Blueprint doesn’t exist")
     }
 
     private static func raw(_ type: JamfPlatform.DeviceGroup.DeviceType) -> String {

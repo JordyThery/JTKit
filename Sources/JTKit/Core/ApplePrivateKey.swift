@@ -4,15 +4,16 @@ import UniformTypeIdentifiers
 /// The private key of an Apple Business or School Manager API account: the
 /// .pem file Apple offers once, when the account is created. The editor
 /// imports it from that file and never shows its text.
-public nonisolated enum ApplePrivateKey {
+nonisolated enum ApplePrivateKey {
 
-    /// Why a file can't be used, in plain language.
+    /// Why a file can’t be used, in plain language.
     public enum ImportError: LocalizedError, Equatable, Sendable {
         case empty
         case tooLarge
         case notText
         case encrypted
         case notPrivateKey
+        case unreadable
 
         public var errorDescription: String? {
             switch self {
@@ -26,6 +27,8 @@ public nonisolated enum ApplePrivateKey {
                 "The private key is protected with a password. Use the .pem file as Apple downloaded it."
             case .notPrivateKey:
                 "The file doesn’t contain a private key. Choose the .pem file downloaded when the API account was created."
+            case .unreadable:
+                "The file couldn’t be read."
             }
         }
     }
@@ -40,7 +43,7 @@ public nonisolated enum ApplePrivateKey {
 
     private static let headers = ["PRIVATE KEY", "EC PRIVATE KEY"]
 
-    /// The key as it is stored: the file's text without surrounding white space.
+    /// The key as it is stored: the file’s text without surrounding white space.
     public static func read(_ data: Data) throws(ImportError) -> String {
         guard !data.isEmpty else { throw .empty }
         guard data.count <= maximumSize else { throw .tooLarge }
@@ -55,11 +58,11 @@ public nonisolated enum ApplePrivateKey {
         return pem
     }
 
-    /// Reads a file the person chose, inside or outside the app's sandbox.
+    /// Reads a file the person chose, inside or outside the app’s sandbox.
     public static func read(contentsOf url: URL) throws(ImportError) -> String {
         let hasAccess = url.startAccessingSecurityScopedResource()
         defer { if hasAccess { url.stopAccessingSecurityScopedResource() } }
-        guard let data = try? Data(contentsOf: url) else { throw .notText }
+        guard let data = try? Data(contentsOf: url) else { throw .unreadable }
         return try read(data)
     }
 }
