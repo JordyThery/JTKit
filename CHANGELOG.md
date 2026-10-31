@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+- `Scripts/check-versions.sh`: run from an app’s folder at the start of a
+  conversation. Prints the app’s resolved JTKit version against JTKit’s
+  latest tag on GitHub (with the CHANGELOG entries in between) and, for
+  information, the number of unreleased commits since the app’s latest
+  GitHub release. Reads only; exits 1 only when the JTKit version is behind
+  the latest tag, 2 when it couldn’t be checked. Nothing an app ships changes.
+
 ## 1.0.0 (2026-10-31)
 The first stable release: semantic versioning from here (patch: fixes, minor: additions, major: breaking changes), and no deprecated API. Apps must have cleared every deprecation warning before moving to 1.0.0; all eight have, on 0.13.3.
 - Deprecated API removed (26 declarations), each with its replacement:

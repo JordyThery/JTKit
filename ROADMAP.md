@@ -677,8 +677,8 @@ Until step 11 exists, 1 means build, unit tests and the live checks Jordy asks f
 
 ### After 1.0
 - **Release gate per app:** every app goes through the "Release gate for every app" above before each release.
-- **Version check at the start of a conversation:** for each app, compare the JTKit version in its `Package.resolved` with JTKit’s latest tag, and say so when the app is behind.
-- **A WATCHLIST.md per app:** what to keep an eye on (vendor changes, known exceptions such as a beta’s quirk, things to recheck later).
+- **Version check at the start of a conversation**, done: `Scripts/check-versions.sh`, run from an app’s folder, compares the JTKit version in its `Package.resolved` with JTKit’s latest tag (with the CHANGELOG entries in between) and, for information, counts the unreleased commits since the app’s latest GitHub release. Each app’s CLAUDE.md runs it at the start of every conversation.
+- **A WATCHLIST.md per app**, done: what the app is waiting for from Apple, Jamf or Microsoft, or must recheck (vendor changes, known exceptions such as a beta’s quirk). CLAUDE.md points to it.
 - **Weekly vendor-update report:** a run outside Xcode that checks Jamf, Microsoft and Apple for API and product changes that affect the apps, and writes a short report.
 - A "new JTKit app" skill for Xcode’s Claude (in `ClaudeAgentConfig/skills/`): creates a new app in `~/Developer` set up to the standards (About, Settings, updater, connections, activity log, demo mode, release check, CLAUDE.md, LICENSE, .gitignore, build-number script) and adds it to `Apps.xcworkspace`.
 

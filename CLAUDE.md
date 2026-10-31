@@ -14,7 +14,7 @@ One library product, `JTKit` (macOS 14+ only, Swift 6 language mode). Organize `
 - `ABM/`: Apple Business or Apple School Manager API
 - `Demo/`: demo mode (switch, private network, fake servers, Contoso sample data)
 
-Test helpers (MockURLProtocol, fixtures) are in the separate library product `JTKitTestSupport`, never in `JTKit` itself. `JTKitMSAL` is Microsoft’s sign-in window (the only product that depends on MSAL). For the release checks: `JTKitUITestSupport` (UI test targets only, XCTest, doesn’t link JTKit; Swift 5 language mode), `JTKitLiveCheck` (apps’ unit test targets only, never shipped; the allow-list, rules, ledger and guarded network of the live checks) and `Scripts/release-check-lib.sh` with `release-check-setup.sh` (the release-check template each app’s `Scripts/release-check.sh` loads).
+Test helpers (MockURLProtocol, fixtures) are in the separate library product `JTKitTestSupport`, never in `JTKit` itself. `JTKitMSAL` is Microsoft’s sign-in window (the only product that depends on MSAL). For the release checks: `JTKitUITestSupport` (UI test targets only, XCTest, doesn’t link JTKit; Swift 5 language mode), `JTKitLiveCheck` (apps’ unit test targets only, never shipped; the allow-list, rules, ledger and guarded network of the live checks) and `Scripts/release-check-lib.sh` with `release-check-setup.sh` (the release-check template each app’s `Scripts/release-check.sh` loads). `Scripts/check-versions.sh` is the start-of-conversation check each app’s CLAUDE.md runs: its JTKit version against the latest tag, and its commits since its latest release.
 
 ## Rules for shared code
 
