@@ -142,12 +142,30 @@ rc_forget_credentials() {
     RC_SECRET_VARS=()
 }
 
+# MARK: JTKit version
+
+# The JTKit under test: its own `JTKit.version` and the commit, e.g.
+# "0.13.1 (5be67d9)" (with --dirty: "-dirty" for uncommitted changes). Read
+# from the source, not from git tags, which a package checkout may not have.
+rc_jtkit_version() {
+    local root="$RC_LIB_DIR/.." version commit
+    version="$(sed -n 's/.*public static let version = "\([^"]*\)".*/\1/p' "$root/Sources/JTKit/JTKit.swift" 2>/dev/null | head -1)"
+    commit="$(git -C "$root" rev-parse --short HEAD 2>/dev/null)"
+    if [[ "$1" == --dirty && -n "$commit" && -n "$(git -C "$root" status --porcelain 2>/dev/null)" ]]; then
+        commit="$commit-dirty"
+    fi
+    print -r -- "${version:-unknown}${commit:+ ($commit)}"
+}
+
 # MARK: Fingerprint (no secrets read)
 
 rc_fingerprint() {
     local out="$1" item hash
     : > "$out.names" || { rc_check_failed "fingerprint: can’t write $out.names"; return 1 }
+    # An app that leaves one of these lists unset gets one empty entry in
+    # zsh ("${unset[@]}"): empty entries are skipped, never fingerprinted.
     for item in "${FINGERPRINT_PATHS[@]}"; do
+        [[ -n "$item" ]] || continue
         if [[ -d "$item" ]]; then
             # Every file must be readable: an unreadable one fails the check.
             hash="$(cd "$item" && find . -type f -print0 | sort -z | xargs -0 shasum -a 256 | shasum -a 256 | cut -c1-16)" \
@@ -163,6 +181,7 @@ rc_fingerprint() {
     # Single settings: only a hash of each value is kept, never the value.
     local pair domain key value
     for pair in "${FINGERPRINT_DEFAULTS[@]}"; do
+        [[ "$pair" == ?*" "?* ]] || continue
         domain="${pair%% *}"; key="${pair#* }"
         # defaults read answers 1 for a missing key: that is "absent".
         if value="$(/usr/bin/defaults read "$domain" "$key" 2>/dev/null)"; then
@@ -176,6 +195,7 @@ rc_fingerprint() {
     # Keychain item names only: service and account attributes, never data.
     local prefix names
     for prefix in "${KEYCHAIN_PREFIXES[@]}"; do
+        [[ -n "$prefix" ]] || continue
         # A Keychain that can’t be listed (locked) fails the check, never "no items".
         names="$(security dump-keychain "$HOME/Library/Keychains/login.keychain-db" | "$RC_PY" -c '
 import sys, re
@@ -820,10 +840,10 @@ release_check_main() {
 
     if (( RC_LOCAL )); then
         RC_KIND="pre-release (local JTKit in Apps.xcworkspace, not the published version)"
-        RC_JTKIT="local $(git -C "$RC_LIB_DIR/.." describe --tags --always --dirty 2>/dev/null)"
+        RC_JTKIT="local $(rc_jtkit_version --dirty)"
     else
         RC_KIND="release (the app’s own project, published JTKit)"
-        RC_JTKIT="$(git -C "$RC_LIB_DIR/.." describe --tags --always 2>/dev/null)"
+        RC_JTKIT="$(rc_jtkit_version)"
     fi
     [[ -n "$RC_FAULT" ]] && RC_KIND="FAULT TEST (--fault $RC_FAULT), not a release check; $RC_KIND"
     rc_log "Release check for $APP_NAME, $RC_KIND"

@@ -250,12 +250,8 @@ extension LiveCheckNetwork {
         guard let url = request.url, let objectURL = Self.objectURL(url) else {
             return "\(resource) \(id) can’t be read back: \(method) refused"
         }
-        var read = request
+        var read = Self.readBack(of: request)
         read.url = objectURL
-        read.httpMethod = "GET"
-        read.httpBody = nil
-        read.httpBodyStream = nil
-        read.setValue(nil, forHTTPHeaderField: "Content-Type")
         // The read is decided like any other request.
         if case .refuse(let reason) = policy.decide(LiveRequest(read, body: nil)) {
             return "\(resource) \(id) can’t be read back (\(reason)): \(method) refused"
@@ -380,11 +376,7 @@ extension LiveCheckNetwork {
     /// true: gone; false: still there; nil: couldn’t tell (counts as there).
     private func isGone(_ deleted: URLRequest, id: String) -> Bool? {
         guard let url = deleted.url else { return nil }
-        var read = deleted
-        read.httpMethod = "GET"
-        read.httpBody = nil
-        read.httpBodyStream = nil
-        read.setValue(nil, forHTTPHeaderField: "Content-Type")
+        let read = Self.readBack(of: deleted)
         guard let (status, body) = fetch(read) else { return nil }
         let sameAddressGone = Self.answersGone(status: status, body: body)
         if (200..<300).contains(status) { return false }
@@ -395,6 +387,20 @@ extension LiveCheckNetwork {
             return platformGroup(id: id, like: deleted).map { $0 == nil }
         }
         return true
+    }
+
+    /// A GET of the same address with the same sign-in, and nothing of the
+    /// write’s body: no body, `Content-Type`, `Content-Length` or
+    /// `Transfer-Encoding` (Jamf Pro answers 400 to a GET that announces a body).
+    static func readBack(of request: URLRequest) -> URLRequest {
+        var read = request
+        read.httpMethod = "GET"
+        read.httpBody = nil
+        read.httpBodyStream = nil
+        for header in ["Content-Type", "Content-Length", "Transfer-Encoding"] {
+            read.setValue(nil, forHTTPHeaderField: header)
+        }
+        return read
     }
 
     /// 404 or 410, or Graph’s and Jamf’s "not found" in a 400 or 404 body.
@@ -462,8 +468,7 @@ extension LiveCheckNetwork {
         }
         guard let delete = request(kind) else { return false }
         let seen = LiveRequest(delete, body: nil)
-        var read = delete
-        read.httpMethod = "GET"
+        var read = Self.readBack(of: delete)
         read.setValue("application/xml", forHTTPHeaderField: "Accept")
         guard let (status, body) = fetch(read), (200..<300).contains(status), Self.serverName(in: body) == item.name else {
             _ = refuse(seen, reason: "\(kind) \(jamfProID) isn’t “\(item.name)” when read back: the Jamf Pro delete of the Platform group’s twin is refused")
