@@ -4,8 +4,9 @@ import Foundation
 /// Jamf Pro devices: sign-in, version, inventory looked up by serial (the
 /// batched RSQL filters JTKit sends), ADE instances whose `serverUuid` is
 /// Apple’s server ID, PreStages and their scope, sites, departments,
-/// buildings, Classic groups, DDM status, MDM commands, asset tag and site
-/// changes, unmanage and delete. Secrets read back obviously fake values.
+/// buildings, Classic groups, a mobile device’s Classic General subset, DDM
+/// status, MDM commands, asset tag and site changes, unmanage and delete.
+/// Secrets read back obviously fake values.
 ///
 /// Every request needs the token from its sign-in, as on a server; the
 /// `missingPermission` scenario refuses inventory, commands and record
@@ -266,6 +267,11 @@ public nonisolated final class DemoJamfProServer: DemoServer, @unchecked Sendabl
             guard let group = Self.mobileGroups.first(where: { "\($0.0)" == p[2] }) else { return Self.notFound() }
             return DemoJSON.response(200, ["mobile_device_group": ["id": group.0, "name": group.1, "is_smart": group.2,
                                                                    "mobile_devices": members(group.3)]])
+        case ("GET", let p) where p.count == 5 && p[0] == "mobiledevices" && p[1] == "id" && p[3] == "subset"
+            && p[4].caseInsensitiveCompare("General") == .orderedSame:
+            guard let record = mobile(p[2]).flatMap({ records[$0] }) else { return Self.notFound() }
+            if scenario == .missingPermission { return Self.forbidden() }
+            return DemoJSON.response(200, ["mobile_device": ["general": classicGeneralJSON(record)]])
         case ("DELETE", let p) where p.count == 3 && p[0] == "mobiledevices" && p[1] == "id":
             guard let number = mobile(p[2]) else { return Self.notFound() }
             if scenario == .missingPermission { return Self.forbidden() }
@@ -363,7 +369,8 @@ public nonisolated final class DemoJamfProServer: DemoServer, @unchecked Sendabl
     }
 
     /// `v2/mobile-devices/{id}`: the general values at the top level, no
-    /// unlock token (that one is `…/detail`).
+    /// unlock token (that one is `…/detail`) and, as on a real Jamf Pro, no
+    /// asset tag (that one is in the Classic General subset).
     private func singleMobileJSON(_ record: Record) -> [String: Any] {
         let device = record.device
         let contact = DemoWorld.iso(daysAgo: Double(device.lastContactDaysAgo) + 0.1, from: now)
@@ -372,7 +379,6 @@ public nonisolated final class DemoJamfProServer: DemoServer, @unchecked Sendabl
             "name": device.name,
             "serialNumber": device.serial,
             "udid": device.udid,
-            "assetTag": record.assetTag,
             "osVersion": device.osVersion,
             "osBuild": device.osVersion.hasPrefix("27") ? "24A5321" : "23G93",
             "managed": record.managed,
@@ -384,6 +390,32 @@ public nonisolated final class DemoJamfProServer: DemoServer, @unchecked Sendabl
             "site": ["id": record.siteID, "name": Self.sites.first { $0.0 == record.siteID }?.1 ?? ""],
             "ios": ["supervised": true, "model": device.model, "modelIdentifier": device.modelIdentifier] as [String: Any],
             "type": "ios",
+        ]
+    }
+
+    /// The Classic API’s General subset of a mobile device, in its own
+    /// snake_case names.
+    private func classicGeneralJSON(_ record: Record) -> [String: Any] {
+        let device = record.device
+        let contact = DemoWorld.iso(daysAgo: Double(device.lastContactDaysAgo) + 0.1, from: now)
+        return [
+            "id": device.number,
+            "display_name": device.name,
+            "device_name": device.name,
+            "name": device.name,
+            "asset_tag": record.assetTag,
+            "last_inventory_update_utc": contact,
+            "managed": record.managed,
+            "supervised": true,
+            "device_ownership_level": "Institutional",
+            "os_type": "iOS",
+            "os_version": device.osVersion,
+            "os_build": device.osVersion.hasPrefix("27") ? "24A5321" : "23G93",
+            "serial_number": device.serial,
+            "udid": device.udid,
+            "model": device.model,
+            "model_identifier": device.modelIdentifier,
+            "site": ["id": Int(record.siteID) ?? -1, "name": Self.sites.first { $0.0 == record.siteID }?.1 ?? "None"] as [String: Any],
         ]
     }
 

@@ -205,6 +205,9 @@ struct RequestRecorderTests {
     @Test("Ordinary Jamf calls aren’t sensitive")
     func notSensitive() {
         #expect(!SensitiveRequests.isSensitive(path: "/api/v2/mobile-devices/12"))
+        // a never-enrolled device’s asset tag: Classic’s General subset carries no secret
+        #expect(!SensitiveRequests.isSensitive(path: "/JSSResource/mobiledevices/id/12/subset/General"))
+        #expect(!SensitiveRequests.isSensitive(path: "/proclassic/mobiledevices/id/12/subset/General"))
         #expect(!SensitiveRequests.isSensitive(path: "/api/v1/computers-inventory/7"))
         #expect(!SensitiveRequests.isSensitive(path: "/blueprints/v1/blueprints/abc/deploy"))
     }

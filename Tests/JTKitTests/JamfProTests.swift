@@ -181,17 +181,34 @@ struct JamfProLookupTests {
 
     /// A record that never enrolled: Jamf’s list has no general section for
     /// it (device type "Unknown"), so the lookup reads the record by ID once
-    /// more for its name and asset tag (seen on Jamf Pro 11.33). It reads
-    /// `v2/mobile-devices/{id}`, never `…/detail`, which carries the unlock token.
-    @Test("A mobile device that never enrolled gets its name and asset tag from its own record")
-    func unenrolledMobileDevice() async throws {
-        let listed = #"{"totalCount":1,"results":[{"mobileDeviceId":"9","deviceType":"Unknown","hardware":{"serialNumber":"JTKTEST0001"}}]}"#
-        let single = #"{"id":"9","name":"Test iPad","assetTag":"TAG-1","udid":"00000000-0000000000000001","managed":false,"osVersion":"","site":{"id":"-1","name":"None"},"ios":{"supervised":false}}"#
-        let server = MockServer { request in
-            request.path.hasSuffix("/mobile-devices/9") ? .json(200, single) : .json(200, listed)
+    /// more for its name (seen on Jamf Pro 11.33). It reads
+    /// `v2/mobile-devices/{id}`, never `…/detail`, which carries the unlock
+    /// token. That answer has no asset tag on a real Jamf Pro, so the asset
+    /// tag comes from Classic’s General subset.
+    nonisolated private static let unenrolledListed = #"{"totalCount":1,"results":[{"mobileDeviceId":"9","deviceType":"Unknown","hardware":{"serialNumber":"JTKTEST0001"}}]}"#
+    nonisolated private static let unenrolledSingle = #"{"id":"9","name":"Test iPad","udid":"00000000-0000000000000001","managed":false,"osVersion":"","site":{"id":"-1","name":"None"},"ios":{"supervised":false}}"#
+    nonisolated private static func classicGeneral(assetTag: String) -> String {
+        #"{"mobile_device":{"general":{"id":9,"display_name":"Test iPad","name":"Test iPad","asset_tag":"\#(assetTag)","serial_number":"JTKTEST0001","udid":"00000000-0000000000000001"}}}"#
+    }
+
+    /// Answers the list, the single record and the General subset; a test
+    /// can replace one of them.
+    private static func unenrolledServer(listed: String = unenrolledListed, single: MockResponse? = nil,
+                                         general: MockResponse? = nil) -> MockServer {
+        MockServer { request in
+            if request.path.hasSuffix("/mobiledevices/id/9/subset/General") { return general ?? .json(200, classicGeneral(assetTag: "TAG-1")) }
+            if request.path.hasSuffix("/mobile-devices/9") { return single ?? .json(200, unenrolledSingle) }
+            return .json(200, listed)
         }
+    }
+
+    @Test("A mobile device that never enrolled gets its name from its own record and its asset tag from Classic’s General subset")
+    func unenrolledMobileDevice() async throws {
+        let server = Self.unenrolledServer()
         let record = try #require(try await proClient(server).mobileDevice(serial: "JTKTEST0001").record)
-        #expect(server.requests.map(\.path) == ["/api/v2/mobile-devices/detail", "/api/v2/mobile-devices/9"])
+        #expect(server.requests.map(\.path) == ["/api/v2/mobile-devices/detail", "/api/v2/mobile-devices/9",
+                                                "/JSSResource/mobiledevices/id/9/subset/General"])
+        #expect(server.requests[2].header("Accept") == "application/json")
         #expect(record.general?.displayName == "Test iPad")
         #expect(record.general?.assetTag == "TAG-1")
         #expect(record.general?.managed == false)
@@ -205,28 +222,75 @@ struct JamfProLookupTests {
         #expect(enrolled.requests.count == 1)
     }
 
+    @Test("A never-enrolled device whose own record has an asset tag isn’t read in Classic")
+    func unenrolledWithAssetTag() async throws {
+        let single = #"{"id":"9","name":"Test iPad","assetTag":"TAG-2"}"#
+        let server = Self.unenrolledServer(single: .json(200, single))
+        let record = try #require(try await proClient(server).mobileDevice(serial: "JTKTEST0001").record)
+        #expect(record.general?.assetTag == "TAG-2")
+        #expect(server.requests.map(\.path) == ["/api/v2/mobile-devices/detail", "/api/v2/mobile-devices/9"])
+    }
+
+    @Test("A Classic General subset that fails or has an empty asset tag leaves the record found, with its name, without an asset tag",
+          arguments: [MockResponse.json(403, "{}"), .json(500, "{}"), .json(200, "not json"),
+                      .json(200, #"{"mobile_device":{"general":{"asset_tag":""}}}"#)])
+    func unenrolledWithoutClassic(general: MockResponse) async throws {
+        let single = try #require(try await proClient(Self.unenrolledServer(general: general)).mobileDevice(serial: "JTKTEST0001").record)
+        #expect(single.general?.displayName == "Test iPad")
+        #expect(single.general?.assetTag == nil)
+
+        let batch = try await proClient(Self.unenrolledServer(general: general)).mobileDevices(serials: ["JTKTEST0001"])
+        #expect(batch.records["JTKTEST0001"]?.general?.displayName == "Test iPad")
+        #expect(batch.records["JTKTEST0001"]?.general?.assetTag == nil)
+        #expect(batch.failures.isEmpty)
+    }
+
+    /// Both lookups, directly and through the gateway: exactly the list, the
+    /// record without the unlock token and Classic’s General subset; never
+    /// `…/detail` for one device, the whole Classic record or its Security subset.
+    @Test("A never-enrolled lookup reads exactly these paths, and the asset tag comes back")
+    func unenrolledRequestPaths() async throws {
+        let direct = ["/api/v2/mobile-devices/detail", "/api/v2/mobile-devices/9", "/JSSResource/mobiledevices/id/9/subset/General"]
+        let gateway = ["/pro/v2/mobile-devices/detail", "/pro/v2/mobile-devices/9", "/proclassic/mobiledevices/id/9/subset/General"]
+        for (makeClient, paths) in [({ try proClient($0) } as (MockServer) throws -> JamfPlatform.Client, direct), ({ try gatewayClient($0) }, gateway)] {
+            let single = Self.unenrolledServer()
+            let match = try await makeClient(single).mobileDevice(serial: "JTKTEST0001")
+            #expect(match.record?.general?.assetTag == "TAG-1")
+            #expect(single.requests.map(\.path) == paths)
+
+            let many = Self.unenrolledServer()
+            let batch = try await makeClient(many).mobileDevices(serials: ["JTKTEST0001"])
+            #expect(batch.records["JTKTEST0001"]?.general?.assetTag == "TAG-1")
+            #expect(many.requests.map(\.path) == paths)
+
+            for path in single.requests.map(\.path) + many.requests.map(\.path) {
+                #expect(!path.hasSuffix("/9/detail"), "never the record with the unlock token")
+                #expect(!path.lowercased().contains("security"), "never the Security subset")
+                #expect(!path.hasSuffix("/mobiledevices/id/9"), "never the whole Classic record")
+            }
+        }
+    }
+
     /// The same for the lookup of many serials at once.
-    @Test("Many serials at once: a mobile device that never enrolled gets its name; an enrolled one isn’t read again")
+    @Test("Many serials at once: a mobile device that never enrolled gets its name and asset tag; an enrolled one isn’t read again")
     func unenrolledMobileDevicesInABatch() async throws {
         let listed = #"{"totalCount":2,"results":[{"mobileDeviceId":"9","deviceType":"Unknown","hardware":{"serialNumber":"JTKTEST0001"}},\#(mobileJSON())]}"#
-        let single = #"{"id":"9","name":"Test iPad","assetTag":"TAG-1","udid":"00000000-0000000000000001","managed":false,"site":{"id":"-1","name":"None"},"ios":{"supervised":false}}"#
-        let server = MockServer { request in
-            request.path.hasSuffix("/mobile-devices/9") ? .json(200, single) : .json(200, listed)
-        }
+        let server = Self.unenrolledServer(listed: listed)
         let batch = try await proClient(server).mobileDevices(serials: ["JTKTEST0001", "F9FXK2Q3HGMN"])
         #expect(batch.records["JTKTEST0001"]?.general?.displayName == "Test iPad")
         #expect(batch.records["JTKTEST0001"]?.general?.assetTag == "TAG-1")
-        #expect(batch.records["F9FXK2Q3HGMN"]?.general != nil)
-        #expect(server.requests.map(\.path) == ["/api/v2/mobile-devices/detail", "/api/v2/mobile-devices/9"])
+        #expect(batch.records["F9FXK2Q3HGMN"]?.general?.assetTag == "T-3")
+        #expect(server.requests.map(\.path) == ["/api/v2/mobile-devices/detail", "/api/v2/mobile-devices/9",
+                                                "/JSSResource/mobiledevices/id/9/subset/General"])
 
-        // A detail that can’t be read leaves the record found, without a name.
-        let failing = MockServer { request in
-            request.path.hasSuffix("/mobile-devices/9") ? .json(500, "{}") : .json(200, listed)
-        }
+        // A record that can’t be read leaves it found, without a name, and
+        // Classic isn’t asked.
+        let failing = Self.unenrolledServer(listed: listed, single: .json(500, "{}"))
         let partial = try await proClient(failing).mobileDevices(serials: ["JTKTEST0001"])
         #expect(partial.records["JTKTEST0001"] != nil)
         #expect(partial.records["JTKTEST0001"]?.general == nil)
         #expect(partial.failures.isEmpty)
+        #expect(!failing.requests.contains { $0.path.contains("JSSResource") })
 
         // Without the general section asked for, nothing more is read.
         let lean = MockServer { _ in .json(200, listed) }

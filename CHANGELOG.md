@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.13.3 (2026-10-31)
+A Jamf Pro lookup fix, found in Serial Number Reader’s release check. No app has to change.
+- A never-enrolled mobile device (Jamf’s device list leaves out its general
+  section) gets its asset tag back. Since 0.13.0 the lookup completes such a
+  record from `v2/mobile-devices/{id}` (never `…/detail`, which carries the
+  unlock token), and on a real Jamf Pro that answer has the name but no
+  asset tag. When it has none, the lookup now reads the asset tag from the
+  Classic API’s General section,
+  `proclassic/mobiledevices/id/{id}/subset/General` (only that subset, never
+  the whole record or its Security subset; same “Read Mobile Devices”
+  privilege). If that read fails, the record is kept with its name and
+  without an asset tag, as before. For one device and for many at once.
+- Demo mode matches a real Jamf Pro: `v2/mobile-devices/{id}` has no asset
+  tag, and a mobile device’s Classic General subset is answered (404 for a
+  computer or unknown ID, 403 in the `missingPermission` scenario).
+
 ## 0.13.2 (2026-10-31)
 A release-check fix, found while moving JamfMigrator to 0.13.1. Nothing an app ships changes, and no app has to change.
 - `Scripts/release-check-lib.sh`: since 0.13.0 the “one release check per
