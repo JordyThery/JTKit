@@ -300,6 +300,24 @@ struct ReleaseCheckScriptTests {
         #expect(third.output.contains("TOOK-THE-LOCK"), "\(third.output)")
     }
 
+    @Test("While the lock is held, the exit trap (cleanup and report) still sees a command that failed")
+    func exitTrapSeesFailuresUnderTheLock() throws {
+        let home = try Self.makeHome()
+        defer { try? FileManager.default.removeItem(at: home) }
+        let script = home.appending(path: "trap.zsh")
+        try Self.write("""
+            APP_NAME="Trap App"; source "\(Self.template.path)"; rc_log() { print -r -- "$*" }
+            rc_lock || exit 9
+            check() { local v; if v="$(/usr/bin/false)"; then print "TRAP-SAW-SUCCESS"; else print "TRAP-SAW-FAILURE"; fi; v="$(sh -c 'exit 3')"; print "status=$?"; rc_unlock; }
+            trap check EXIT
+            """, to: script)
+        let result = try ReleaseCheckTemplateTests.run("/bin/zsh", [script.path],
+                                                       environment: ["PATH": "/usr/bin:/bin:/usr/sbin:/sbin", "HOME": home.path])
+        #expect(result.output.contains("TRAP-SAW-FAILURE") && result.output.contains("status=3"), "\(result.output)")
+        let again = try Self.zsh("rc_lock && print TOOK-THE-LOCK; rc_unlock", home: home)
+        #expect(again.output.contains("TOOK-THE-LOCK"), "rc_unlock frees the lock: \(again.output)")
+    }
+
     // MARK: L6: earlier runs’ ledgers, for every app
 
     private static func item(_ target: String, _ id: String, _ name: String, removed: Bool = false) -> String {
