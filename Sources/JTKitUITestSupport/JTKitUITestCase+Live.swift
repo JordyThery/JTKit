@@ -35,7 +35,12 @@ extension JTKitUITestCase {
             throw XCTSkip("Live UI tests run only from the release check (JTKIT_LIVE=1)")
         }
         if let gateway = liveClient { return gateway }
-        let gateway = try LiveGatewayClient(runFolder: URL(filePath: folder, directoryHint: .isDirectory))
+        // A sandboxed app’s run folder is in its container, which this runner
+        // can’t read: the gateway’s launch file and token are then also in
+        // the runner folder (the client’s `runFolder`, with a copy of the
+        // ledger). The app still gets the run folder (`appRunFolder`).
+        let runner = environment["JTKIT_LIVE_RUNNER_DIR"].flatMap { $0.isEmpty ? nil : URL(filePath: $0, directoryHint: .isDirectory) }
+        let gateway = try LiveGatewayClient(runFolder: URL(filePath: folder, directoryHint: .isDirectory), gatewayFolder: runner)
         liveClient = gateway
         return gateway
     }
@@ -49,7 +54,7 @@ extension JTKitUITestCase {
     /// token and the roles’ secrets in its environment only.
     public func launchLive(roles: [String], arguments: [String] = []) throws {
         let gateway = try liveGateway()
-        app.launchArguments = Self.liveArguments(runFolder: gateway.runFolder.path) + arguments
+        app.launchArguments = Self.liveArguments(runFolder: gateway.appRunFolder.path) + arguments
         var environment = app.launchEnvironment
         for (key, value) in gateway.appEnvironment(roles: roles) { environment[key] = value }
         app.launchEnvironment = environment

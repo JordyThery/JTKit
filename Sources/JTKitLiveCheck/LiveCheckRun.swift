@@ -13,7 +13,9 @@ import Security
 ///   `JTKIT_LIVE_WRITES=1` (stage 4 only; otherwise every tenant is read only),
 ///   `JTKIT_LIVE_FAULT` (only with the script’s `--fault`, to test the check itself),
 ///   `JTKIT_LIVE_READ_ONLY_ROLES` (comma-separated roles kept read only for this app),
-///   `JTKIT_LIVE_HOST_KEYCHAIN` (`before`/`after`, for `HOST_KEYCHAIN_TEST`).
+///   `JTKIT_LIVE_HOST_KEYCHAIN` (`before`/`after`, for `HOST_KEYCHAIN_TEST`),
+///   `JTKIT_LIVE_RUNNER_DIR` (a sandboxed app: where the gateway also writes
+///   its launch file and token for the UI test runner; 1.2.0).
 /// - Credentials as `JTKIT_LIVE_<ROLE>_<ITEM>`, e.g. `JTKIT_LIVE_JAMF_TEST_A_CLIENT_SECRET`,
 ///   read from the login Keychain; never written to a file or log. From 1.1.0
 ///   the release check passes them only to its gateway (`jtkit-live-gateway`),

@@ -14,7 +14,9 @@
 #     with window frames and other state macOS changes during a UI test
 #   TEST_HOST_CONTAINER="<bundle ID>"   optional, for a sandboxed app:
 #     its test host can only reach its own container, so the live folder (the
-#     allow-list copy, ledger and results) lives there, readable by you only
+#     allow-list copy, ledger and results) lives there, readable by you only;
+#     the UI test runner, which can’t read that container, finds the live
+#     gateway’s launch file and token in the run folder’s live/ (JTKit 1.2.0)
 #   SMOKE_FILE="<path of the smoke-test class’s file>"   its test1…testN run in order
 #   APP_FAULTS=(…)   optional: the app’s own --fault cases, handled by
 #     its tests through JTKIT_LIVE_FAULT; the report says FAULT TEST as for the others
@@ -398,7 +400,7 @@ rc_gateway_build() {
 rc_gateway_start() {
     rc_gateway_build || return 1
     rc_gateway_stop
-    rm -f "$RC_LIVE_DIR/live-launch.json" "$RC_LIVE_DIR/live-gateway.token"
+    rc_gateway_files_remove
     # the secrets are exported in this subshell only, which becomes the gateway
     (
         local name
@@ -408,7 +410,7 @@ rc_gateway_start() {
     RC_GATEWAY_PID=$!
     local waited=0
     while (( waited < 60 )); do
-        [[ -s "$RC_LIVE_DIR/live-launch.json" && -s "$RC_LIVE_DIR/live-gateway.token" ]] && return 0
+        rc_gateway_files_written && return 0
         kill -0 "$RC_GATEWAY_PID" 2>/dev/null || break
         sleep 0.5; (( waited++ ))
     done
@@ -424,7 +426,24 @@ rc_gateway_stop() {
     while kill -0 "$RC_GATEWAY_PID" 2>/dev/null && (( waited < 20 )); do sleep 0.5; (( waited++ )); done
     kill -9 "$RC_GATEWAY_PID" 2>/dev/null
     RC_GATEWAY_PID=""
-    rm -f "$RC_LIVE_DIR/live-launch.json" "$RC_LIVE_DIR/live-gateway.token"
+    rc_gateway_files_remove
+}
+
+# The gateway’s launch file and token: in the live folder, and for a
+# sandboxed app also in the runner folder (RC_LIVE_RUNNER_DIR), where the UI
+# test runner reads them (it can’t read the app’s container). No secret.
+rc_gateway_files_written() {
+    local dir
+    for dir in "$RC_LIVE_DIR" ${RC_LIVE_RUNNER_DIR:+"$RC_LIVE_RUNNER_DIR"}; do
+        [[ -s "$dir/live-launch.json" && -s "$dir/live-gateway.token" ]] || return 1
+    done
+}
+
+rc_gateway_files_remove() {
+    local dir
+    for dir in "$RC_LIVE_DIR" ${RC_LIVE_RUNNER_DIR:+"$RC_LIVE_RUNNER_DIR"}; do
+        rm -f "$dir/live-launch.json" "$dir/live-gateway.token"
+    done
 }
 
 rc_tests_in() {
@@ -435,6 +454,7 @@ rc_tests_in() {
 rc_live_environment() {
     export TEST_RUNNER_JTKIT_LIVE=1
     export TEST_RUNNER_JTKIT_LIVE_RUN_DIR="$RC_LIVE_DIR"
+    if [[ -n "${RC_LIVE_RUNNER_DIR:-}" ]]; then export TEST_RUNNER_JTKIT_LIVE_RUNNER_DIR="$RC_LIVE_RUNNER_DIR"; else unset TEST_RUNNER_JTKIT_LIVE_RUNNER_DIR; fi
     export TEST_RUNNER_JTKIT_LIVE_PREFIX="$RC_PREFIX"
     export TEST_RUNNER_JTKIT_LIVE_ROLES="${(j:,:)RC_ROLES}"
     (( RC_PRODUCTION )) && export TEST_RUNNER_JTKIT_LIVE_INCLUDE_PRODUCTION=1
@@ -448,7 +468,7 @@ rc_live_environment() {
 }
 
 rc_live_off() {
-    unset TEST_RUNNER_JTKIT_LIVE TEST_RUNNER_JTKIT_LIVE_RUN_DIR TEST_RUNNER_JTKIT_LIVE_PREFIX TEST_RUNNER_JTKIT_LIVE_ROLES \
+    unset TEST_RUNNER_JTKIT_LIVE TEST_RUNNER_JTKIT_LIVE_RUN_DIR TEST_RUNNER_JTKIT_LIVE_RUNNER_DIR TEST_RUNNER_JTKIT_LIVE_PREFIX TEST_RUNNER_JTKIT_LIVE_ROLES \
           TEST_RUNNER_JTKIT_LIVE_INCLUDE_PRODUCTION TEST_RUNNER_JTKIT_LIVE_WRITES \
           TEST_RUNNER_JTKIT_LIVE_FAULT TEST_RUNNER_JTKIT_LIVE_READ_ONLY_ROLES
 }
@@ -538,8 +558,10 @@ rc_unlock() {
 # allow-list. What the tests write there is copied back to $RC_RUN/live for
 # the report. A folder an earlier run left (it crashed, or its cleanup didn’t
 # finish) is kept until this run has read its ledger and removed its objects.
+# The UI test runner can’t read the app’s container: the gateway also writes
+# its launch file and token (no secret) to $RC_RUN/live, the runner folder.
 rc_live_setup() {
-    RC_LIVE_DIR="$RC_RUN/live" RC_LIVE_ALLOWLIST="$RC_ALLOWLIST" RC_LIVE_PARENT=""
+    RC_LIVE_DIR="$RC_RUN/live" RC_LIVE_ALLOWLIST="$RC_ALLOWLIST" RC_LIVE_PARENT="" RC_LIVE_RUNNER_DIR=""
     if [[ -n "${TEST_HOST_CONTAINER:-}" ]]; then
         local data="$HOME/Library/Containers/$TEST_HOST_CONTAINER/Data"
         [[ -d "$data/tmp" ]] || rc_fail "No container for $TEST_HOST_CONTAINER at $data (open the app once)"
@@ -547,6 +569,8 @@ rc_live_setup() {
         mkdir -p "$RC_LIVE_PARENT" && chmod 700 "$RC_LIVE_PARENT" || rc_fail "Can’t make $RC_LIVE_PARENT"
         RC_LIVE_DIR="$RC_LIVE_PARENT/${RC_RUN:t}"
         mkdir -m 700 "$RC_LIVE_DIR" || rc_fail "Can’t make the live folder $RC_LIVE_DIR"
+        RC_LIVE_RUNNER_DIR="$RC_RUN/live"
+        chmod 700 "$RC_LIVE_RUNNER_DIR" || rc_fail "Can’t make the runner folder $RC_LIVE_RUNNER_DIR readable by you only"
         local mode dir
         for dir in "$RC_LIVE_PARENT" "$RC_LIVE_DIR"; do
             mode=$(stat -f %Lp "$dir")
@@ -950,7 +974,7 @@ release_check_main() {
     RC_STAGE_NAMES=() RC_STAGE_STATUS=() RC_SECRET_VARS=() RC_CLEANED=0 RC_LIVE_STARTED=0 RC_FAILED="" RC_BUILT=0 RC_CHECK_ERRORS=()
     # Set here too, not only in rc_live_setup: a run that stops before it
     # must never clean up a folder named by an inherited RC_LIVE_PARENT.
-    RC_LIVE_DIR="$RC_RUN/live" RC_LIVE_ALLOWLIST="$RC_ALLOWLIST" RC_LIVE_PARENT="" RC_ALLOWLIST_COPY=""
+    RC_LIVE_DIR="$RC_RUN/live" RC_LIVE_ALLOWLIST="$RC_ALLOWLIST" RC_LIVE_PARENT="" RC_LIVE_RUNNER_DIR="" RC_ALLOWLIST_COPY=""
     # The tests’ JTKitUITestCase and LiveCheckRun see the release check.
     export TEST_RUNNER_JTKIT_RELEASE_CHECK=1
     mkdir -p "$RC_RUN/logs" "$RC_RUN/results" "$RC_RUN/live" && chmod 700 "$RC_BASE" "$RC_RUN"

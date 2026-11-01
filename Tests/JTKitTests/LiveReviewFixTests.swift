@@ -175,6 +175,72 @@ struct LiveGatewayReviewTests {
         #expect(LiveGateway.failureText(URLError(.timedOut)) == URLError(.timedOut).localizedDescription)
     }
 
+    @Test("1.2.0: a UI test runner that can’t read a sandboxed app’s container finds the gateway in the runner folder")
+    func theRunnerFolderHoldsTheLaunchFileAndToken() async throws {
+        let (run, owner, listURL) = try makeRun(upstream: MockServer { request in
+            request.method == "POST" ? .json(201, #"{"id":"bp-new"}"#) : .json(200, #"{"results":[]}"#)
+        })
+        let runner = folder().appending(path: "live", directoryHint: .isDirectory)
+        let gateway = try LiveGateway(run: run, lockOwnerURL: owner, runnerFolder: runner)
+        let manager = FileManager.default
+        for place in [run.runFolder, runner] {
+            for name in [LiveGateway.launchFileName, LiveGateway.tokenFileName] {
+                let attributes = try manager.attributesOfItem(atPath: place.appending(path: name).path)
+                #expect((attributes[.posixPermissions] as? NSNumber)?.intValue == 0o600, "\(name) readable by the user only")
+            }
+        }
+        let folderMode = try manager.attributesOfItem(atPath: runner.path)[.posixPermissions] as? NSNumber
+        #expect(folderMode?.intValue == 0o700)
+        // the same launch file and token in both places, and no secret in either
+        for name in [LiveGateway.launchFileName, LiveGateway.tokenFileName] {
+            let inRun = try Data(contentsOf: run.runFolder.appending(path: name))
+            #expect(try Data(contentsOf: runner.appending(path: name)) == inRun)
+            #expect(!String(decoding: inRun, as: UTF8.self).contains("s3cret"))
+        }
+
+        // the runner reads the runner folder; the app is still launched with the run folder
+        let client = try LiveGatewayClient(runFolder: run.runFolder, gatewayFolder: runner)
+        #expect(client.appRunFolder == run.runFolder, "the app is launched with the folder in its container")
+        #expect(client.runFolder == runner, "the runner reads the runner folder")
+        #expect(try await client.status().refusals.isEmpty)
+        #expect(try await client.secret(role: "jamf-test-a", item: "client-secret") == "s3cret")
+        let state = LiveLaunch.evaluate(arguments: ["/Applications/Example.app", LiveLaunch.argument, run.runFolder.path],
+                                        environment: client.appEnvironment(roles: ["jamf-test-a"]), isDebugBuild: true,
+                                        lockOwnerURL: owner, allowListURL: listURL)
+        guard case .active = state else { Issue.record("not on: \(state)"); gateway.stop(); return }
+
+        // what the app made is in the runner folder's copy of the ledger once the answer arrives
+        var create = URLRequest(url: URL(string: "https://eu.api.jamfcloud.com/blueprints/v1/blueprints")!)
+        create.httpMethod = "POST"
+        create.setValue(environmentA, forHTTPHeaderField: "X-Environment-Id")
+        create.httpBody = try JSONSerialization.data(withJSONObject: ["name": "\(prefix) – made by the app"])
+        _ = try await client.session.data(for: create)
+        let mirrored = Ledger(fileURL: client.runFolder.appending(path: "ledger.json")).items
+        #expect(mirrored.map(\.id) == ["bp-new"], "\(mirrored)")
+        let ledgerMode = try manager.attributesOfItem(atPath: runner.appending(path: "ledger.json").path)[.posixPermissions] as? NSNumber
+        #expect(ledgerMode?.intValue == 0o600)
+
+        // once stopped, neither folder starts anything
+        gateway.stop()
+        for place in [run.runFolder, runner] {
+            #expect(!manager.fileExists(atPath: place.appending(path: LiveGateway.launchFileName).path))
+            #expect(!manager.fileExists(atPath: place.appending(path: LiveGateway.tokenFileName).path))
+        }
+        #expect(throws: LiveGatewayClient.ClientError.self) { _ = try LiveGatewayClient(runFolder: run.runFolder, gatewayFolder: runner) }
+    }
+
+    @Test("1.2.0: without a runner folder (or the run folder named twice) the gateway writes the run folder only")
+    func noRunnerFolderWritesTheRunFolderOnly() throws {
+        let (run, owner, _) = try makeRun(upstream: MockServer { _ in .json(200, "{}") })
+        let same = try LiveGateway(run: run, lockOwnerURL: owner, runnerFolder: run.runFolder)
+        #expect(same.runnerFolder == nil)
+        same.stop()
+        let plain = try LiveGateway(run: run, lockOwnerURL: owner)
+        defer { plain.stop() }
+        #expect(plain.runnerFolder == nil)
+        #expect(FileManager.default.fileExists(atPath: run.runFolder.appending(path: LiveGateway.launchFileName).path))
+    }
+
     @Test func theAppsRetryWaitKeepsTheNetworkBusy() async throws {
         // review B #11
         let (run, owner, listURL) = try makeRun(upstream: MockServer { _ in .json(200, "{}") })

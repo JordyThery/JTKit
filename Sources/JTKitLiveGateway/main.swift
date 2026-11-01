@@ -13,6 +13,9 @@ import JTKitLiveCheck
 // `--secrets-only`: only hands the run’s secrets to the test processes (unit
 // test live checks), sends nothing. The secrets come only in this process’s
 // environment, never a test runner’s (Xcode keeps those in its result bundle).
+//
+// `JTKIT_LIVE_RUNNER_DIR` (a sandboxed app, 1.2.0): the UI test runner can’t
+// read the app’s container, so the launch file and token also go there.
 
 var environment: [String: String] = [:]
 for (key, value) in ProcessInfo.processInfo.environment where !key.hasPrefix("TEST_RUNNER_") {
@@ -30,7 +33,8 @@ let gateway: LiveGateway
 do {
     let run = try LiveCheckRun(environment: environment)
     let secretsOnly = CommandLine.arguments.contains("--secrets-only")
-    gateway = try LiveGateway(run: run, secretsOnly: secretsOnly)
+    let runnerFolder = environment["JTKIT_LIVE_RUNNER_DIR"].flatMap { $0.isEmpty ? nil : URL(filePath: $0, directoryHint: .isDirectory) }
+    gateway = try LiveGateway(run: run, secretsOnly: secretsOnly, runnerFolder: runnerFolder)
     print("jtkit-live-gateway: listening on 127.0.0.1:\(gateway.port) for \(run.roles.sorted().joined(separator: ", "))"
           + (secretsOnly ? " (secrets only)" : ""))
 } catch {

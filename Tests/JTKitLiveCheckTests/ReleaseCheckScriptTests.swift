@@ -352,6 +352,60 @@ struct ReleaseCheckScriptTests {
         #expect(seen.contains("gateway-args=--secrets-only") && seen.contains("gateway-secret=not-a-real-secret"), "\(seen)")
     }
 
+    @Test("1.2.0: for a sandboxed app the UI test runner gets the gateway’s files in the run folder, never the app’s container")
+    func runnerFolderForASandboxedApp() throws {
+        let home = try Self.makeHome()
+        defer { try? FileManager.default.removeItem(at: home) }
+        _ = try Self.prepare(home, earlier: [:])
+        try FileManager.default.createDirectory(at: home.appending(path: "Library/Containers/be.example.app/Data/tmp"),
+                                                withIntermediateDirectories: true)
+        let fake = home.appending(path: "fake-gateway")
+        // writes the files where the real gateway does: the live folder and JTKIT_LIVE_RUNNER_DIR
+        try Self.write("""
+            #!/bin/zsh
+            for dir in "$TEST_RUNNER_JTKIT_LIVE_RUN_DIR" ${TEST_RUNNER_JTKIT_LIVE_RUNNER_DIR:+"$TEST_RUNNER_JTKIT_LIVE_RUNNER_DIR"}; do
+                [[ "$dir" == "$RC_TEST_SKIP" ]] && continue
+                print -n "{}" > "$dir/live-launch.json"; print -n tok > "$dir/live-gateway.token"
+            done
+            sleep 30
+            """, to: fake)
+        try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: fake.path)
+        let result = try Self.zsh("""
+            RC_RUN="$RC_BASE/runs/XX-3" RC_ROLES=(jamf-test-a) RC_CHECK_ERRORS=() TEST_HOST_CONTAINER=be.example.app
+            mkdir -p "$RC_RUN/logs"; chmod 755 "$RC_RUN/live"
+            rc_live_setup || exit 1
+            print "live=$RC_LIVE_DIR"; print "runner=$RC_LIVE_RUNNER_DIR"; print "runner-mode=$(stat -f %Lp "$RC_LIVE_RUNNER_DIR")"
+            rc_live_environment 1
+            print "exported=$TEST_RUNNER_JTKIT_LIVE_RUNNER_DIR"
+            RC_GATEWAY_BIN="\(fake.path)"
+            rc_gateway_start && print STARTED
+            [[ -s "$RC_LIVE_RUNNER_DIR/live-gateway.token" && -s "$RC_LIVE_DIR/live-gateway.token" ]] && print BOTH-WRITTEN
+            rc_gateway_stop
+            [[ -e "$RC_LIVE_RUNNER_DIR/live-gateway.token" || -e "$RC_LIVE_DIR/live-gateway.token" ]] || print BOTH-REMOVED
+            # a gateway that left the runner folder out hasn't started
+            export RC_TEST_SKIP="$RC_LIVE_RUNNER_DIR"
+            rc_gateway_start && print STARTED-WITHOUT-RUNNER-FILES
+            rc_live_off
+            print "after-off=${TEST_RUNNER_JTKIT_LIVE_RUNNER_DIR:-unset}"
+            """, home: home)
+        let output = result.output
+        let runs = Self.base(home).appending(path: "runs/XX-3").path
+        #expect(output.contains("live=\(home.path)/Library/Containers/be.example.app/Data/tmp/JTKitReleaseCheck/XX-3"), "\(output)")
+        #expect(output.contains("runner=\(runs)/live\n") && output.contains("runner-mode=700"), "\(output)")
+        #expect(output.contains("exported=\(runs)/live\n"), "\(output)")
+        #expect(output.contains("STARTED\n") && output.contains("BOTH-WRITTEN") && output.contains("BOTH-REMOVED"), "\(output)")
+        #expect(!output.contains("STARTED-WITHOUT-RUNNER-FILES") && output.contains("after-off=unset"), "\(output)")
+
+        // not sandboxed: no runner folder, nothing extra exported
+        let plain = try Self.zsh("""
+            RC_RUN="$RC_BASE/runs/XX-3" RC_ROLES=(jamf-test-a) RC_CHECK_ERRORS=()
+            rc_live_setup || exit 1
+            rc_live_environment 1
+            print "runner=${RC_LIVE_RUNNER_DIR:-none} exported=${TEST_RUNNER_JTKIT_LIVE_RUNNER_DIR:-unset}"
+            """, home: home)
+        #expect(plain.output.contains("runner=none exported=unset"), "\(plain.output)")
+    }
+
     @Test("Review B #3: the report says which tenant each write went to, and device commands without serials")
     func reportListsWritesPerTenant() throws {
         let home = try Self.makeHome()
