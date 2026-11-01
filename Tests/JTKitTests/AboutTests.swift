@@ -116,22 +116,60 @@ struct SettingsWindowTests {
     /// The same for the window, as Serial Number Reader’s app uses it, and with
     /// no tabs at all.
     @MainActor @Test func windowAcceptsOnlyTabsOrNothing() {
-        let original = NSApplication.shared.appearance
-        defer { NSApplication.shared.appearance = original }
         let updates = UpdateChecker(configuration: UpdateConfiguration(owner: "o", repository: "r", appName: "A"))
 
-        let withTabs = SettingsWindow(updates: updates) {
+        let withTabs = SettingsWindow(updates: updates, opensTabsByName: true) {
             SettingsTab("Connections", systemImage: "network") {
                 Section { Text("Server") }
             }
         }
-        #expect(withTabs.appearanceKey == AppAppearance.defaultKey)
+        #expect(withTabs.opensTabsByName)
         let updatesOnly = SettingsWindow(updates: updates)
-        #expect(updatesOnly.appearanceKey == AppAppearance.defaultKey)
+        #expect(!updatesOnly.opensTabsByName)
     }
 
     private func generalIsEmpty<General, AppTabs>(_ tabs: SettingsTabs<General, AppTabs>) -> Bool {
         General.self == EmptyView.self
+    }
+
+    /// 1.2.0: General is there only with the app’s own general settings
+    /// (no Appearance choice any more); then it’s first, and Updates last.
+    @MainActor @Test func generalOnlyWithTheAppsOwnSettings() {
+        let withGeneral = SettingsTabs {
+            Section { Toggle("Show hints", isOn: .constant(true)) }
+        } tabs: {
+            SettingsTab("Connections", systemImage: "network") { Section { Text("Server") } }
+        }
+        #expect(type(of: withGeneral).hasGeneralTab)
+        #expect(SettingsTabSelection.shared.hasGeneralTab)
+
+        let tabsOnly = SettingsTabs {
+            SettingsTab("Connections", systemImage: "network") { Section { Text("Server") } }
+        }
+        #expect(!type(of: tabsOnly).hasGeneralTab)
+        #expect(!SettingsTabSelection.shared.hasGeneralTab)
+        SettingsTabSelection.shared.hasGeneralTab = true
+    }
+
+    /// Without General the window opens on the first tab: that tab becomes
+    /// the selection, so clicking it doesn’t ask to leave it.
+    @MainActor @Test func withoutGeneralTheFirstTabShownIsSelected() {
+        let tabs = SettingsTabSelection()
+        tabs.hasGeneralTab = false
+        #expect(tabs.selected == SettingsTabName.general)
+        tabs.appeared(SettingsTabName.connections)
+        #expect(tabs.selected == SettingsTabName.connections)
+        var asked = 0
+        tabs.leaveGuard = { _ in asked += 1 }
+        tabs.request(SettingsTabName.connections)
+        #expect(asked == 0, "staying on the tab shown doesn’t ask")
+        tabs.appeared("Secrets")
+        #expect(tabs.selected == SettingsTabName.connections, "only the stale General is replaced")
+
+        // with a General tab nothing is replaced
+        let general = SettingsTabSelection()
+        general.appeared(SettingsTabName.connections)
+        #expect(general.selected == SettingsTabName.general)
     }
 
     @Test func updatesTabIsNamedUpdates() {

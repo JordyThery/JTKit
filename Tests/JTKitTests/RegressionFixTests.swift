@@ -264,6 +264,50 @@ struct WindowCloseGuardTests {
         third.detach()
         #expect(window.delegate === original)
     }
+
+    @Test("1.2.0: after Save in the question, the window closes once the question’s sheet is gone")
+    func closesAfterTheQuestionsSheet() async throws {
+        let window = window()
+        let original = Delegate()
+        window.delegate = original
+        let closeGuard = CloseGuard()
+        closeGuard.attach(to: window)
+        closeGuard.isActive = true
+        var asked = 0
+        closeGuard.ask = { _ in asked += 1 }
+        window.orderFront(nil)
+        defer { window.orderOut(nil) }
+
+        // the question is a sheet; its Save button runs while it’s still on the window
+        let sheet = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 100, height: 50), styleMask: [.titled],
+                             backing: .buffered, defer: true)
+        window.beginSheet(sheet, completionHandler: nil)
+        try await Task.sleep(for: .milliseconds(200))
+        #expect(window.attachedSheet != nil)
+        closeGuard.close(window)
+        try await Task.sleep(for: .milliseconds(200))
+        #expect(window.isVisible, "a window with a sheet can’t close yet")
+
+        window.endSheet(sheet)
+        let deadline = ContinuousClock.now + .seconds(3)
+        while window.isVisible, ContinuousClock.now < deadline { try await Task.sleep(for: .milliseconds(20)) }
+        #expect(!window.isVisible, "closed once the sheet was gone")
+        #expect(asked == 0, "not asked again")
+    }
+
+    @Test("1.2.0: without a sheet the window closes at once")
+    func closesAtOnceWithoutASheet() {
+        let window = window()
+        let closeGuard = CloseGuard()
+        closeGuard.attach(to: window)
+        closeGuard.isActive = true
+        var asked = 0
+        closeGuard.ask = { _ in asked += 1 }
+        window.orderFront(nil)
+        closeGuard.close(window)
+        #expect(!window.isVisible)
+        #expect(asked == 0)
+    }
 }
 
 @MainActor

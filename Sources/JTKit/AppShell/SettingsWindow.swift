@@ -34,6 +34,9 @@ final class SettingsTabSelection {
     static let shared = SettingsTabSelection()
 
     var selected = SettingsTabName.general
+    /// Whether the window has a General tab (1.2.0: an app without general
+    /// settings has none). Set by `SettingsTabs`.
+    @ObservationIgnored var hasGeneralTab = true
     /// Set while a tab has unsaved changes (the Connections editor): called
     /// instead of switching tabs, with `proceed`, which switches once the
     /// person chose Save or Discard. Cancel just doesn’t call it.
@@ -49,6 +52,15 @@ final class SettingsTabSelection {
         }
         leaveGuard { [weak self] in self?.selected = tab }
     }
+
+    /// A named tab’s content appeared. Without a General tab, the window
+    /// opens on the first tab while `selected` still says General: the tab
+    /// shown takes its place, so clicking it isn’t taken for leaving it.
+    func appeared(_ tab: String) {
+        if !hasGeneralTab && selected == SettingsTabName.general && tab != selected {
+            selected = tab
+        }
+    }
 }
 
 extension EnvironmentValues {
@@ -61,7 +73,19 @@ extension View {
     /// Names a tab of the Settings window that isn’t a `SettingsTab`, so
     /// `SettingsTabLink` can open it, e.g. `.settingsTabName("Apple")`.
     public func settingsTabName(_ name: String) -> some View {
-        tag(name)
+        background(SettingsTabAppearance(name: name)).tag(name)
+    }
+}
+
+/// Tells the tab selection which named tab is shown (`SettingsTabSelection.appeared`).
+private struct SettingsTabAppearance: View {
+    let name: String
+    @Environment(\.settingsTabSelection) private var selection
+
+    var body: some View {
+        Color.clear
+            .accessibilityHidden(true)
+            .onAppear { selection?.appeared(name) }
     }
 }
 
@@ -97,12 +121,13 @@ public struct SettingsTabLink<Label: View>: View {
     }
 }
 
-/// The app’s Settings window (⌘,), with tabs in the toolbar: General first,
-/// starting with the Appearance picker (`AppAppearance`) and then the app’s own
-/// general settings, the app’s own tabs next, and Updates
-/// (`UpdateSettingsSection`) always last.
+/// The app’s Settings window (⌘,), with tabs in the toolbar: General first
+/// with the app’s own general settings, the app’s own tabs next, and Updates
+/// (`UpdateSettingsSection`) always last. An app without general settings
+/// (only `tabs`) has no General tab.
 ///
-/// It also applies the saved appearance to the whole app when the app starts.
+/// The app follows the Mac’s own Light or Dark setting: from 1.2.0 there is
+/// no Appearance choice, and a choice saved by an earlier version is ignored.
 ///
 /// ```swift
 /// SettingsWindow(updates: updates) {
@@ -113,69 +138,88 @@ public struct SettingsTabLink<Label: View>: View {
 /// ```
 public struct SettingsWindow<General: View, AppTabs: View>: Scene {
     let updates: UpdateChecker
-    let appearanceKey: String
     let opensTabsByName: Bool
     let general: General
     let appTabs: AppTabs
 
     /// - Parameters:
     ///   - updates: the app’s update checker; the Updates tab uses its setting.
-    ///   - appearanceKey: the `UserDefaults` key for the appearance. Keep the default.
     ///   - opensTabsByName: lets `SettingsTabLink` open a tab. Only when every
     ///     app tab has a name (see `SettingsTabLink`): a tab without one can’t
     ///     be selected then.
-    ///   - general: the app’s own `Section`s for the General tab, below Appearance.
+    ///   - general: the app’s own `Section`s for the General tab.
     ///   - tabs: the app’s own tabs, each a `SettingsTab` or a view with a `tabItem`.
     public init(
         updates: UpdateChecker,
-        appearanceKey: String = AppAppearance.defaultKey,
         opensTabsByName: Bool = false,
         @ViewBuilder general: () -> General,
         @ViewBuilder tabs: () -> AppTabs
     ) {
         self.updates = updates
-        self.appearanceKey = appearanceKey
         self.opensTabsByName = opensTabsByName
         self.general = general()
         self.appTabs = tabs()
-        // The app builds its scenes before any window appears, so the saved
-        // choice is in place from the first window on. Applying it again when
-        // SwiftUI rebuilds the scenes changes nothing.
-        AppAppearance.saved(key: appearanceKey).apply()
+    }
+
+    /// The same; `appearanceKey` is ignored (1.2.0: no Appearance choice).
+    @available(*, deprecated, message: "There is no Appearance choice any more: leave out appearanceKey.")
+    public init(
+        updates: UpdateChecker,
+        appearanceKey: String,
+        opensTabsByName: Bool = false,
+        @ViewBuilder general: () -> General,
+        @ViewBuilder tabs: () -> AppTabs
+    ) {
+        self.init(updates: updates, opensTabsByName: opensTabsByName, general: general, tabs: tabs)
     }
 
     public var body: some Scene {
         Settings {
-            SettingsTabs(appearanceKey: appearanceKey, opensTabsByName: opensTabsByName) { general } tabs: { appTabs }
+            SettingsTabs(opensTabsByName: opensTabsByName) { general } tabs: { appTabs }
                 .environment(updates)
         }
     }
 }
 
 extension SettingsWindow where General == EmptyView {
-    /// A Settings window whose General tab has only Appearance.
+    /// A Settings window without a General tab: the app’s tabs, then Updates.
     public init(
         updates: UpdateChecker,
-        appearanceKey: String = AppAppearance.defaultKey,
         opensTabsByName: Bool = false,
         @ViewBuilder tabs: () -> AppTabs
     ) {
-        self.init(updates: updates, appearanceKey: appearanceKey, opensTabsByName: opensTabsByName,
-                  general: { EmptyView() }, tabs: tabs)
+        self.init(updates: updates, opensTabsByName: opensTabsByName, general: { EmptyView() }, tabs: tabs)
+    }
+
+    /// The same; `appearanceKey` is ignored (1.2.0: no Appearance choice).
+    @available(*, deprecated, message: "There is no Appearance choice any more: leave out appearanceKey.")
+    public init(
+        updates: UpdateChecker,
+        appearanceKey: String,
+        opensTabsByName: Bool = false,
+        @ViewBuilder tabs: () -> AppTabs
+    ) {
+        self.init(updates: updates, opensTabsByName: opensTabsByName, tabs: tabs)
     }
 }
 
 extension SettingsWindow where General == EmptyView, AppTabs == EmptyView {
-    /// A Settings window with only General (Appearance) and Updates.
-    public init(updates: UpdateChecker, appearanceKey: String = AppAppearance.defaultKey) {
-        self.init(updates: updates, appearanceKey: appearanceKey) { EmptyView() }
+    /// A Settings window with only Updates.
+    public init(updates: UpdateChecker) {
+        self.init(updates: updates) { EmptyView() }
+    }
+
+    /// The same; `appearanceKey` is ignored (1.2.0: no Appearance choice).
+    @available(*, deprecated, message: "There is no Appearance choice any more: leave out appearanceKey.")
+    public init(updates: UpdateChecker, appearanceKey: String) {
+        self.init(updates: updates)
     }
 }
 
-/// The Settings window’s content: General, the app’s tabs, then Updates. Needs
-/// the app’s `UpdateChecker` in the environment; `SettingsWindow` puts it there.
+/// The Settings window’s content: General (when the app has general
+/// settings), the app’s tabs, then Updates. Needs the app’s `UpdateChecker`
+/// in the environment; `SettingsWindow` puts it there.
 public struct SettingsTabs<General: View, AppTabs: View>: View {
-    let appearanceKey: String
     let opensTabsByName: Bool
     let general: General
     let appTabs: AppTabs
@@ -183,16 +227,29 @@ public struct SettingsTabs<General: View, AppTabs: View>: View {
     @State private var selection = SettingsTabSelection.shared
 
     public init(
-        appearanceKey: String = AppAppearance.defaultKey,
         opensTabsByName: Bool = false,
         @ViewBuilder general: () -> General,
         @ViewBuilder tabs: () -> AppTabs
     ) {
-        self.appearanceKey = appearanceKey
         self.opensTabsByName = opensTabsByName
         self.general = general()
         self.appTabs = tabs()
+        SettingsTabSelection.shared.hasGeneralTab = Self.hasGeneralTab
     }
+
+    /// The same; `appearanceKey` is ignored (1.2.0: no Appearance choice).
+    @available(*, deprecated, message: "There is no Appearance choice any more: leave out appearanceKey.")
+    public init(
+        appearanceKey: String,
+        opensTabsByName: Bool = false,
+        @ViewBuilder general: () -> General,
+        @ViewBuilder tabs: () -> AppTabs
+    ) {
+        self.init(opensTabsByName: opensTabsByName, general: general, tabs: tabs)
+    }
+
+    /// Whether there is a General tab: only when the app passed general settings.
+    static var hasGeneralTab: Bool { General.self != EmptyView.self }
 
     public var body: some View {
         // Without a name on every tab a bound selection would make unnamed
@@ -208,9 +265,10 @@ public struct SettingsTabs<General: View, AppTabs: View>: View {
 
     @ViewBuilder
     private var tabs: some View {
-        SettingsTab(SettingsLayout.generalTitle, systemImage: SettingsLayout.generalSymbol) {
-            AppearanceSection(key: appearanceKey, store: .standard)
-            general
+        if Self.hasGeneralTab {
+            SettingsTab(SettingsLayout.generalTitle, systemImage: SettingsLayout.generalSymbol) {
+                general
+            }
         }
         appTabs
         SettingsTab(SettingsLayout.updatesTitle, systemImage: SettingsLayout.updatesSymbol) {
@@ -220,11 +278,16 @@ public struct SettingsTabs<General: View, AppTabs: View>: View {
 }
 
 extension SettingsTabs where General == EmptyView {
-    /// Settings content whose General tab has only Appearance, e.g. for a preview:
+    /// Settings content without a General tab, e.g. for a preview:
     /// `SettingsTabs { SettingsTab("Connections", systemImage: "network") { … } }`.
-    public init(appearanceKey: String = AppAppearance.defaultKey, opensTabsByName: Bool = false,
-                @ViewBuilder tabs: () -> AppTabs) {
-        self.init(appearanceKey: appearanceKey, opensTabsByName: opensTabsByName, general: { EmptyView() }, tabs: tabs)
+    public init(opensTabsByName: Bool = false, @ViewBuilder tabs: () -> AppTabs) {
+        self.init(opensTabsByName: opensTabsByName, general: { EmptyView() }, tabs: tabs)
+    }
+
+    /// The same; `appearanceKey` is ignored (1.2.0: no Appearance choice).
+    @available(*, deprecated, message: "There is no Appearance choice any more: leave out appearanceKey.")
+    public init(appearanceKey: String, opensTabsByName: Bool = false, @ViewBuilder tabs: () -> AppTabs) {
+        self.init(opensTabsByName: opensTabsByName, tabs: tabs)
     }
 }
 

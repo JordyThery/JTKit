@@ -83,7 +83,28 @@ final class CloseGuard: NSObject, NSWindowDelegate {
     }
 
     /// Closes the window, e.g. after Save or Discard, without asking again.
-    func close(_ window: NSWindow) {
+    ///
+    /// The question’s buttons run while its sheet is still on the window,
+    /// and a window with a sheet ignores a close: then it closes once the
+    /// sheet is gone (up to `sheetWait`).
+    func close(_ window: NSWindow, sheetWait: Duration = .seconds(5)) {
+        guard window.attachedSheet == nil else {
+            Task { @MainActor [weak self, weak window] in
+                let clock = ContinuousClock()
+                let deadline = clock.now + sheetWait
+                while let window, window.attachedSheet != nil, clock.now < deadline {
+                    try? await Task.sleep(for: .milliseconds(20))
+                }
+                guard let window, window.attachedSheet == nil else { return }
+                // a guard dismantled meanwhile no longer stands in front
+                if let self { closeNow(window) } else { window.performClose(nil) }
+            }
+            return
+        }
+        closeNow(window)
+    }
+
+    private func closeNow(_ window: NSWindow) {
         closingWithoutAsking = true
         defer { closingWithoutAsking = false }
         window.performClose(nil)

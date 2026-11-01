@@ -1,21 +1,24 @@
 import AppKit
-import SwiftUI
 
-/// Light, Dark or following the system, for the whole app. Chosen in the
-/// General tab of the shared Settings window (`AppearanceSection`) and saved in
-/// `UserDefaults` under `defaultKey`.
+/// Light, Dark or following the system, as chosen in the Settings window
+/// before 1.2.0.
+///
+/// From 1.2.0 the apps follow the Mac’s own Light or Dark setting, as Apple’s
+/// guidelines advise: the Settings window has no Appearance choice, and a
+/// choice saved under `defaultKey` is ignored. Kept so code written for
+/// earlier versions compiles; it has no effect.
+@available(*, deprecated, message: "Apps follow the Mac’s own Light or Dark setting; there is no Appearance choice any more.")
 public nonisolated enum AppAppearance: String, CaseIterable, Identifiable, Sendable {
     case system
     case light
     case dark
 
-    /// The `UserDefaults` key the choice is saved under, the name the apps
-    /// already used (Checkpoint), so a saved choice carries over.
+    /// The `UserDefaults` key the choice was saved under.
     public static let defaultKey = "appearance"
 
     public var id: String { rawValue }
 
-    /// The name in the picker.
+    /// The name the picker showed.
     public var label: String {
         switch self {
         case .system: "System"
@@ -24,54 +27,12 @@ public nonisolated enum AppAppearance: String, CaseIterable, Identifiable, Senda
         }
     }
 
-    /// The AppKit appearance to set on the app; nil follows the system.
-    var appearanceName: NSAppearance.Name? {
-        switch self {
-        case .system: nil
-        case .light: .aqua
-        case .dark: .darkAqua
-        }
-    }
-
-    /// The saved choice. Absent or unknown values mean `.system`.
+    /// The choice an earlier version saved, only read: nothing applies it.
+    /// Absent or unknown values mean `.system`.
     public static func saved(in store: UserDefaults = .standard, key: String = defaultKey) -> AppAppearance {
         store.string(forKey: key).flatMap(AppAppearance.init(rawValue:)) ?? .system
     }
 
-    /// Sets this appearance on every window of the app, including JTKit’s
-    /// About and Settings windows.
-    @MainActor public func apply() {
-        NSApplication.shared.appearance = appearanceName.flatMap(NSAppearance.init(named:))
-    }
-}
-
-/// The Appearance picker, always first in the Settings window’s General tab.
-/// Saves the choice and applies it to the whole app as it changes.
-struct AppearanceSection: View {
-    @AppStorage private var rawValue: String
-
-    init(key: String, store: UserDefaults) {
-        _rawValue = AppStorage(wrappedValue: AppAppearance.system.rawValue, key, store: store)
-    }
-
-    private var appearance: Binding<AppAppearance> {
-        Binding(
-            get: { AppAppearance(rawValue: rawValue) ?? .system },
-            set: { rawValue = $0.rawValue }
-        )
-    }
-
-    var body: some View {
-        Section {
-            Picker("Appearance", selection: appearance) {
-                ForEach(AppAppearance.allCases) { option in
-                    Text(option.label).tag(option)
-                }
-            }
-            .pickerStyle(.segmented)
-        }
-        .onChange(of: rawValue) {
-            appearance.wrappedValue.apply()
-        }
-    }
+    /// Does nothing: the app follows the Mac’s own setting.
+    @MainActor public func apply() {}
 }

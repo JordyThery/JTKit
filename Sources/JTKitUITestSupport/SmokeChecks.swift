@@ -31,11 +31,14 @@ extension JTKitUITestCase {
         close(about)
     }
 
-    /// ⌘, opens Settings with exactly these tabs in this order; General is
-    /// always first and Updates last. Each tab opens when clicked.
+    /// ⌘, opens Settings with exactly these tabs in this order; General,
+    /// when the app has general settings, is first, and Updates always last
+    /// (JTKit 1.2.0: no General tab without them). Each tab opens when clicked.
     public func checkSettingsTabs(_ expected: [String], file: StaticString = #filePath, line: UInt = #line) {
         guard requireDemoLaunch(file: file, line: line) else { return }
-        XCTAssertEqual(expected.first, "General", "General must be the first tab", file: file, line: line)
+        if expected.contains("General") {
+            XCTAssertEqual(expected.first, "General", "General must be the first tab", file: file, line: line)
+        }
         XCTAssertEqual(expected.last, "Updates", "Updates must be the last tab", file: file, line: line)
         let settings = openSettings(file: file, line: line)
         let tabs = settings.toolbars.buttons.allElementsBoundByIndex.map { $0.label.isEmpty ? $0.title : $0.label }

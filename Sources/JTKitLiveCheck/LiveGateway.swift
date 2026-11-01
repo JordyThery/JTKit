@@ -16,6 +16,10 @@ import Network
 /// check’s lock to be held. It writes into the run folder `live-launch.json`
 /// (its port, the lock’s owner and the release check’s connections, no
 /// secret) and `live-gateway.token` (mode 600), and removes both when it stops.
+/// For a sandboxed app the run folder is in the app’s container, which the
+/// UI test runner can’t read: the same two files then also go into the
+/// runner folder (`JTKIT_LIVE_RUNNER_DIR`, the release check’s own run
+/// folder), and are removed from there too.
 public final class LiveGateway: @unchecked Sendable {
     public let run: LiveCheckRun
     /// The port on 127.0.0.1.
@@ -31,6 +35,9 @@ public final class LiveGateway: @unchecked Sendable {
     /// Only the run’s secrets: requests aren’t sent (for unit-test live
     /// checks, whose own guarded network keeps the ledger).
     public let secretsOnly: Bool
+    /// Where the UI test runner reads the launch file and token, when it
+    /// can’t read the run folder (a sandboxed app’s container); nil otherwise.
+    public let runnerFolder: URL?
     /// The ledger’s objects when the gateway started: `status` reports only
     /// objects made since, so an earlier run’s leftovers (adopted for the
     /// sweep) and earlier steps’ objects (left for cleanup) don’t count.
@@ -72,10 +79,13 @@ public final class LiveGateway: @unchecked Sendable {
     ///     order; every role of the run by default.
     ///   - lockOwnerURL: tests only.
     ///   - secretsOnly: serve only the run’s secrets, send nothing.
+    ///   - runnerFolder: a second folder for the launch file and token,
+    ///     for a UI test runner that can’t read the run folder.
     public init(run: LiveCheckRun, roles: [String]? = nil, lockOwnerURL: URL = LiveGateway.defaultLockOwnerURL,
-                secretsOnly: Bool = false) throws {
+                secretsOnly: Bool = false, runnerFolder: URL? = nil) throws {
         self.run = run
         self.secretsOnly = secretsOnly
+        self.runnerFolder = runnerFolder.flatMap { $0.standardizedFileURL == run.runFolder.standardizedFileURL ? nil : $0 }
         let owner = (try? String(contentsOf: lockOwnerURL, encoding: .utf8))?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         guard !owner.isEmpty else { throw GatewayError.notLocked }
         // a lock file a killed release check left behind
@@ -122,22 +132,43 @@ public final class LiveGateway: @unchecked Sendable {
 
         let launch = LiveLaunchFile(port: port, lockOwner: owner,
                                     connections: described.map { .init(role: $0.role, connection: $0, secretItem: $0.secretItem) })
-        try FileManager.default.createDirectory(at: run.runFolder, withIntermediateDirectories: true)
-        let file = run.runFolder.appending(path: Self.launchFileName)
-        try JSONEncoder().encode(launch).write(to: file, options: .atomic)
-        try? FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: file.path)
-        let tokenFile = run.runFolder.appending(path: Self.tokenFileName)
-        FileManager.default.createFile(atPath: tokenFile.path, contents: Data(token.utf8), attributes: [.posixPermissions: 0o600])
+        let data = try JSONEncoder().encode(launch)
+        do {
+            for folder in [run.runFolder] + (self.runnerFolder.map { [$0] } ?? []) {
+                try Self.writeLaunchFiles(launch: data, token: token, to: folder)
+            }
+        } catch {
+            stop()
+            throw error
+        }
     }
 
     deinit { listener.cancel() }
 
-    /// Stops listening and removes `live-launch.json` and the token, so the
-    /// run folder can’t start another app.
+    /// The launch file and the token (mode 600 both), in a folder only this
+    /// user can read (700). The token is written first, so a reader that finds
+    /// the launch file also finds the token.
+    private static func writeLaunchFiles(launch: Data, token: String, to folder: URL) throws {
+        let manager = FileManager.default
+        try manager.createDirectory(at: folder, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
+        let tokenFile = folder.appending(path: tokenFileName)
+        try? manager.removeItem(at: tokenFile)
+        guard manager.createFile(atPath: tokenFile.path, contents: Data(token.utf8), attributes: [.posixPermissions: 0o600]) else {
+            throw CocoaError(.fileWriteUnknown, userInfo: [NSFilePathErrorKey: tokenFile.path])
+        }
+        let file = folder.appending(path: launchFileName)
+        try launch.write(to: file, options: .atomic)
+        try manager.setAttributes([.posixPermissions: 0o600], ofItemAtPath: file.path)
+    }
+
+    /// Stops listening and removes `live-launch.json` and the token (also
+    /// from the runner folder), so the run folder can’t start another app.
     public func stop() {
         listener.cancel()
-        try? FileManager.default.removeItem(at: run.runFolder.appending(path: Self.launchFileName))
-        try? FileManager.default.removeItem(at: run.runFolder.appending(path: Self.tokenFileName))
+        for folder in [run.runFolder] + (runnerFolder.map { [$0] } ?? []) {
+            try? FileManager.default.removeItem(at: folder.appending(path: Self.launchFileName))
+            try? FileManager.default.removeItem(at: folder.appending(path: Self.tokenFileName))
+        }
     }
 
     public static let launchFileName = "live-launch.json"

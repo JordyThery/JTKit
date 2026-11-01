@@ -35,7 +35,11 @@ extension JTKitUITestCase {
             throw XCTSkip("Live UI tests run only from the release check (JTKIT_LIVE=1)")
         }
         if let gateway = liveClient { return gateway }
-        let gateway = try LiveGatewayClient(runFolder: URL(filePath: folder, directoryHint: .isDirectory))
+        // A sandboxed app’s run folder is in its container, which this runner
+        // can’t read: the gateway’s launch file and token are then also in
+        // the runner folder. The app still gets the run folder.
+        let runner = environment["JTKIT_LIVE_RUNNER_DIR"].flatMap { $0.isEmpty ? nil : URL(filePath: $0, directoryHint: .isDirectory) }
+        let gateway = try LiveGatewayClient(runFolder: URL(filePath: folder, directoryHint: .isDirectory), gatewayFolder: runner)
         liveClient = gateway
         return gateway
     }

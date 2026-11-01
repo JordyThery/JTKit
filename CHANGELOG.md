@@ -1,5 +1,45 @@
 # Changelog
 
+## 1.2.0 (2026-11-01)
+A minor release: the in-app Appearance choice is removed, plus two fixes. Code written for 1.1 still compiles; what
+is replaced is deprecated.
+
+### Changed
+- Settings › General no longer has the Appearance choice (Light / Dark / System): apps follow the Mac’s own setting,
+  as Apple’s guidelines advise. A choice saved under "appearance" is ignored, so an app that was set to Light or
+  Dark follows the Mac from its first launch on 1.2.0.
+- The General tab is shown only when the app passes general settings of its own (`general:`). An app that passes
+  only `tabs:` has no General tab: its own tabs come first, Updates stays last. Such an app’s Settings window opens
+  on its first tab, and `SettingsTabLink` and the unsaved-changes question work as before.
+- `JTKitUITestSupport`’s `checkSettingsTabs(_:)` accepts a list without "General"; when "General" is in it, it must
+  still be first, and "Updates" last.
+
+### Fixed
+- Settings › Connections: choosing Save in the “Save the changes?” question when closing Settings now closes the
+  window after saving. It stayed open before (the window can’t close while the question’s sheet is still on it; it
+  now closes as soon as the sheet is gone). Discard Changes closes it the same way.
+- Live UI tests of a sandboxed app (`TEST_HOST_CONTAINER`): the live gateway now also writes its launch file and
+  token to the run folder’s `live/` (`JTKIT_LIVE_RUNNER_DIR`, mode 700, files 600, removed when the gateway
+  stops), where the UI test runner can read them; it can’t read the app’s container. The app is still launched
+  with the folder in its container. Neither file holds a secret: secrets still reach test processes and the app
+  only through the gateway, on a request with its token. `LiveGatewayClient(runFolder:gatewayFolder:)` reads them
+  from the runner folder; `JTKitUITestCase.liveGateway()` does so by itself.
+
+### Deprecated
+- `AppAppearance` (its `apply()` does nothing; `saved(in:key:)` only reads what an earlier version saved).
+- The `appearanceKey:` parameter of `SettingsWindow` and `SettingsTabs` (ignored) → leave it out.
+
+### Moving an app to 1.2.0
+- Remove any mention of Appearance from the app’s own Settings comments, help and docs; if it passed
+  `appearanceKey:` or uses `AppAppearance`, remove that (it has no effect now).
+- An app without general settings of its own (of the eight: Blueprint Managed Preferences Editor, JamfMigrator,
+  Profile2Blueprint, Serial Number Reader) loses its General tab: take "General" out of its smoke test’s
+  `checkSettingsTabs([...])` list, and out of anything else that opens Settings › General.
+- A UI test that worked around the Settings window staying open after Save in the unsaved-changes question
+  (JamfMigrator’s `test10UnsavedProtectedAsks`) can now expect it to close.
+- A sandboxed app with live UI tests (JamfMigrator) can list them in `LIVE_TESTS` again; nothing else changes in
+  its `Scripts/release-check.sh`.
+
 ## 1.1.0 (2026-11-01)
 A minor release: additions and fixes. Code written for 1.0 still compiles; what is replaced is deprecated, with its replacement named.
 
