@@ -411,7 +411,8 @@ public typealias RecordedJSONFilter = @Sendable (Any) -> Any
 public nonisolated enum SensitiveRequests {
     nonisolated(unsafe) private static let patterns: [Regex<Substring>] = [
         /(?i)\/(?:api|pro)\/v\d+\/mobile-devices\/[^\/]+\/detail\/?$/,
-        /(?i)\/(?:api|pro)\/v\d+\/computers-inventory\/[^\/]+\/(?:erase|filevault|view-device-lock-pin|view-recovery-lock-password)\/?$/,
+        // (older Jamf Pro’s v1 erase is under `computer-inventory`, singular)
+        /(?i)\/(?:api|pro)\/v\d+\/computers?-inventory\/[^\/]+\/(?:erase|filevault|view-device-lock-pin|view-recovery-lock-password)\/?$/,
         // every computer’s FileVault key at once
         /(?i)\/(?:api|pro)\/v\d+\/computers-inventory\/filevault\/?$/,
         // a LAPS password, and its history (earlier passwords and who viewed them)

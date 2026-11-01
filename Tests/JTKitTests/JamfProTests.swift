@@ -9,7 +9,9 @@ private let environmentID = "e77c1408-10c8-4007-b177-abc9157fbcaa"
 /// A client for a Jamf Pro server reached directly, with a fixed token.
 private func proClient(_ server: MockServer, log: ActivityLog? = nil,
                        signIn: SignInMethod = .apiClient) throws -> JamfPlatform.Client {
-    try JamfPlatform.Client(baseURL: proServer, scope: .organization, server: .jamfPro, signIn: signIn,
+    // a current Jamf Pro: these tests count requests, the version check has its own
+    ComputersAPIVersion.shared.set(.v4, for: proServer.absoluteString)
+    return try JamfPlatform.Client(baseURL: proServer, scope: .organization, server: .jamfPro, signIn: signIn,
                             tokens: FixedToken("tok"),
                             recorder: RequestRecorder(session: server.session, log: log, service: "Jamf Pro"),
                             sleep: { _ in }, random: { 0 })

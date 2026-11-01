@@ -447,26 +447,52 @@ struct JamfSchoolNotFoundTests {
     }
 }
 
-// MARK: - A11 Older Jamf Pro: v4 → v1
+// MARK: - A11 Older Jamf Pro: v4 → v1, by the server’s version
 
 @MainActor
-@Suite("Older Jamf Pro: computer requests fall back from v4 to v1")
-struct ComputersAPIFallbackTests {
+@Suite("Older Jamf Pro: computer requests use the v1 paths below 11.30.0")
+struct ComputersAPIVersionTests {
     let page = #"{"totalCount":1,"results":[{"id":"7","udid":"U-1","hardware":{"serialNumber":"C02OLD"}}]}"#
 
-    private func client(_ server: MockServer, log: ActivityLog? = nil) throws -> JamfPlatform.Client {
-        // a server of its own: what is learned is kept per server address
+    /// A server of its own: what is learned is kept per server address.
+    private func client(_ server: MockServer, log: ActivityLog? = nil, gateway: Bool = false) throws -> JamfPlatform.Client {
         try JamfPlatform.Client(baseURL: URL(string: "https://jss-\(UUID().uuidString.lowercased()).example")!,
-                                scope: .organization, server: .jamfPro, tokens: FixedToken("tok"),
+                                scope: gateway ? .environment(UUID().uuidString) : .organization,
+                                server: gateway ? .platformAPI : .jamfPro, tokens: FixedToken("tok"),
                                 recorder: RequestRecorder(session: server.session, log: log, service: "Jamf Pro"),
                                 sleep: { _ in }, random: { 0 })
     }
 
-    @Test func aServerWithoutV4UsesV1FromThenOnSaidOnce() async throws {
-        let page = page
-        let server = MockServer { request in
-            request.path.contains("/v4/") ? .json(404, #"{"httpStatus":404}"#) : .json(200, page)
+    private func server(version: String, page: String) -> MockServer {
+        MockServer { request in
+            if request.path.hasSuffix("jamf-pro-version") { return .json(200, #"{"version":"\#(version)"}"#) }
+            if request.method == "GET" { return .json(200, page) }
+            return MockResponse(status: 204, body: Data())
         }
+    }
+
+    @Test func versions() {
+        #expect(ComputersAPIVersion.isOlderThanV4("11.29.2-t1792501724838"))
+        #expect(ComputersAPIVersion.isOlderThanV4("10.49.0"))
+        #expect(!ComputersAPIVersion.isOlderThanV4("11.30.0-t1"))
+        #expect(!ComputersAPIVersion.isOlderThanV4("11.33.1"))
+        #expect(!ComputersAPIVersion.isOlderThanV4("12.0"))
+        #expect(!ComputersAPIVersion.isOlderThanV4("unknown"), "can’t be read: v4")
+    }
+
+    @Test func theV1Paths() {
+        func v1(_ path: String) -> String? { ComputersAPIVersion.v1(of: HTTPRequest(path: path))?.path }
+        #expect(v1("pro/v4/computers-inventory") == "pro/v1/computers-inventory")
+        #expect(v1("/pro/v4/computers-inventory/7/filevault") == "pro/v1/computers-inventory/7/filevault")
+        #expect(v1("pro/v4/computers-inventory-detail/7") == "pro/v1/computers-inventory-detail/7")
+        #expect(v1("pro/v4/computers-inventory/7/erase") == "pro/v1/computer-inventory/7/erase")
+        #expect(v1("pro/v4/computers-inventory/7/remove-mdm-profile") == "pro/v1/computer-inventory/7/remove-mdm-profile")
+        #expect(v1("pro/v2/mobile-devices/detail") == nil)
+        #expect(SensitiveRequests.isSensitive(path: "/api/v1/computer-inventory/7/erase"), "the older erase carries a PIN too")
+    }
+
+    @Test func anOlderServerUsesV1FromTheStartAskedOnceSaidOnce() async throws {
+        let server = server(version: "11.29.2-t1", page: page)
         let log = ActivityLog()
         let jamf = try client(server, log: log)
         guard case .one(let computer) = try await jamf.computer(serial: "C02OLD") else {
@@ -474,37 +500,54 @@ struct ComputersAPIFallbackTests {
             return
         }
         #expect(computer.id == "7")
-        #expect(server.requests.map(\.path) == ["/api/v4/computers-inventory", "/api/v1/computers-inventory"])
-
-        _ = try await jamf.computer(serial: "C02OLD")
         try await jamf.setAssetTag("A1", computerID: "7")
-        #expect(server.requests.dropFirst(2).map(\.path) == ["/api/v1/computers-inventory", "/api/v1/computers-inventory-detail/7"])
-        #expect(log.entries.filter { $0.note?.contains("use v1 from now on") == true }.count == 1)
-    }
-
-    @Test func aCurrentServerIsNeverAskedTwice() async throws {
-        let page = page
-        let server = MockServer { request in
-            request.method == "PATCH" ? .json(404, #"{"httpStatus":404}"#) : .json(200, page)
-        }
-        let jamf = try client(server)
         _ = try await jamf.computer(serial: "C02OLD")
-        await #expect(throws: JamfPlatform.APIError.self) { try await jamf.setAssetTag("A1", computerID: "999") }
-        #expect(server.requests.map(\.path) == ["/api/v4/computers-inventory", "/api/v4/computers-inventory-detail/999"])
+        #expect(server.requests.map(\.path) == ["/api/v1/jamf-pro-version", "/api/v1/computers-inventory",
+                                                "/api/v1/computers-inventory-detail/7", "/api/v1/computers-inventory"])
+        #expect(log.entries.filter { $0.note?.contains("older than 11.30.0") == true }.count == 1)
     }
 
-    @Test func aMissingRecordOnBothIsTheOriginalNotFound() async throws {
-        let server = MockServer { _ in .json(404, #"{"httpStatus":404}"#) }
+    @Test func aCurrentServerUsesV4AndA404IsJustNotFound() async throws {
+        let server = MockServer { request in
+            if request.path.hasSuffix("jamf-pro-version") { return .json(200, #"{"version":"11.33.1"}"#) }
+            return .json(404, #"{"httpStatus":404}"#)
+        }
         let jamf = try client(server)
         let error = await #expect(throws: JamfPlatform.APIError.self) { try await jamf.setAssetTag("A1", computerID: "999") }
         #expect(error?.status == 404)
-        #expect(server.requests.map(\.path) == ["/api/v4/computers-inventory-detail/999", "/api/v1/computers-inventory-detail/999"])
+        await #expect(throws: JamfPlatform.APIError.self) { try await jamf.setAssetTag("A1", computerID: "998") }
+        #expect(server.requests.map(\.path) == ["/api/v1/jamf-pro-version", "/api/v4/computers-inventory-detail/999",
+                                                "/api/v4/computers-inventory-detail/998"], "no v1 retry, version asked once")
     }
 
-    @Test func otherRequestsAreUntouched() {
-        #expect(ComputersAPIVersion.v1(of: HTTPRequest(path: "pro/v2/mobile-devices/detail")) == nil)
-        #expect(ComputersAPIVersion.v1(of: HTTPRequest(path: "/pro/v4/computers-inventory/7/filevault"))?.path
-                == "pro/v1/computers-inventory/7/filevault")
+    @Test func theGatewayIsNeverAsked() async throws {
+        let server = server(version: "11.0.0", page: page)
+        _ = try await client(server, gateway: true).computer(serial: "C02OLD")
+        #expect(server.requests.map(\.path) == ["/pro/v4/computers-inventory"])
+    }
+
+    @Test func aVersionThatCantBeReadUsesV4AndIsAskedAgain() async throws {
+        let page = page
+        let server = MockServer { request in
+            request.path.hasSuffix("jamf-pro-version") ? .json(500, "{}") : .json(200, page)
+        }
+        let jamf = try client(server)
+        _ = try await jamf.computer(serial: "C02OLD")
+        _ = try await jamf.computer(serial: "C02OLD")
+        #expect(server.requests.filter { $0.path.hasSuffix("jamf-pro-version") }.count == 8, "4 attempts, twice: not remembered")
+        #expect(server.requests.filter { $0.path == "/api/v4/computers-inventory" }.count == 2)
+    }
+
+    @Test func aRefusedVersionReadIsRememberedAsV4() async throws {
+        let page = page
+        let server = MockServer { _ in .json(200, page) }
+        let jamf = try JamfPlatform.Client(
+            baseURL: URL(string: "https://jss-\(UUID().uuidString.lowercased()).example")!, scope: .organization, server: .jamfPro,
+            tokens: FixedToken("tok"), recorder: RequestRecorder(session: server.session, log: nil),
+            permits: { !$0.path.contains("jamf-pro-version") }, sleep: { _ in }, random: { 0 })
+        _ = try await jamf.computer(serial: "C02OLD")
+        _ = try await jamf.computer(serial: "C02OLD")
+        #expect(server.requests.map(\.path) == ["/api/v4/computers-inventory", "/api/v4/computers-inventory"])
     }
 }
 
@@ -517,5 +560,40 @@ struct EnvironmentIDIssueTests {
         #expect(connection.issues == [JamfPlatform.APIError.environmentIDNotUUID])
         #expect(JamfPlatform.APIError.environmentIDNotUUID.contains("isn’t a UUID"))
         #expect(Connection(name: "P", service: .jamfPlatform, environmentID: UUID().uuidString).issues.isEmpty)
+    }
+
+    @Test func uppercaseIsAcceptedAndSentLowercased() async throws {
+        let upper = "E77C1408-10C8-4007-B177-ABC9157FBCAA"
+        #expect(Connection(name: "P", service: .jamfPlatform, environmentID: upper).issues.isEmpty)
+        let server = MockServer { _ in .json(200, #"{"results":[],"totalCount":0}"#) }
+        let client = try JamfPlatform.Client(baseURL: URL(string: "https://us.api.jamfcloud.com")!, scope: .environment(" \(upper) "),
+                                             tokens: FixedToken("tok"), recorder: RequestRecorder(session: server.session, log: nil))
+        _ = try await client.send(HTTPRequest(path: "device-groups/v1/device-groups"))
+        #expect(server.requests.first?.header("X-Environment-Id") == upper.lowercased())
+    }
+}
+
+// MARK: - A15 Platform device actions’ permission
+
+@MainActor
+@Suite("A refused Platform device action names device-actions:execute")
+struct DeviceActionPermissionTests {
+    @Test func theGatewayNamesItsOwnPermission() async throws {
+        let server = MockServer { _ in .json(403, #"{"httpStatus":403,"errors":[{"code":"FORBIDDEN"}]}"#) }
+        let client = try JamfPlatform.Client(baseURL: URL(string: "https://us.api.jamfcloud.com")!,
+                                             scope: .environment(UUID().uuidString), tokens: FixedToken("tok"),
+                                             recorder: RequestRecorder(session: server.session, log: nil))
+        for action in [{ try await client.restart(deviceID: "d1") }, { try await client.shutDown(deviceID: "d1") }] {
+            let error = await #expect(throws: JamfPlatform.APIError.self) { try await action() }
+            let message = error?.message() ?? ""
+            #expect(message.contains("“device-actions:execute” permission"))
+            #expect(message.contains("Jamf Account"))
+            #expect(!message.contains("Send Mobile Device"), "no Jamf Pro privilege for a Platform connection")
+        }
+    }
+
+    @Test func otherRefusalsKeepTheGeneralHint() {
+        let error = JamfPlatform.APIError(.status(403, body: nil, text: nil, method: "GET", path: "x"))
+        #expect(error.message().contains("Check its permissions in Jamf Account."))
     }
 }

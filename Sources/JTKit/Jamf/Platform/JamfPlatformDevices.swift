@@ -144,8 +144,13 @@ extension JamfPlatform.Client {
         }
     }
 
+    /// The Jamf Account permission the device actions (restart, shut down,
+    /// check-in) need.
+    public static let deviceActionsPermission = "device-actions:execute"
+
     /// Restarts a device through the Platform API’s device actions, by its
-    /// Platform API ID (`device(serial:)`). Never repeated after a server error.
+    /// Platform API ID (`device(serial:)`). Never repeated after a server
+    /// error. Needs `device-actions:execute`, named when it is refused.
     ///
     /// - Throws: `JamfPlatform.DeviceActionRefused` for a 422; `JamfPlatform.APIError`.
     public func restart(deviceID: String) async throws {
@@ -164,6 +169,10 @@ extension JamfPlatform.Client {
                                privilege: privilege)
         } catch let error as JamfPlatform.APIError where error.status == 422 {
             throw JamfPlatform.DeviceActionRefused(verb: verb)
+        } catch var error as JamfPlatform.APIError where error.server == .platformAPI {
+            // the gateway asks for its own permission, not a Jamf Pro privilege
+            error.permission = Self.deviceActionsPermission
+            throw error
         }
     }
 }

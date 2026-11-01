@@ -15,7 +15,7 @@ extension JamfPlatform {
     public struct Client: Sendable {
         /// Which header says what the requests are about.
         public enum Scope: Sendable, Hashable {
-            /// `X-Environment-Id`; must be a UUID.
+            /// `X-Environment-Id`; must be a UUID, in either case (sent lowercased).
             case environment(String)
             /// `X-Tenant-Id`, for Jamf Deployer’s older integrations.
             case legacyTenant(String)
@@ -113,7 +113,8 @@ extension JamfPlatform {
             case .environment(let id):
                 let trimmed = id.trimmingCharacters(in: .whitespacesAndNewlines)
                 guard UUID(uuidString: trimmed) != nil else { throw JamfPlatform.APIError(.invalidEnvironmentID(trimmed)) }
-                headers["X-Environment-Id"] = trimmed
+                // the Platform API’s pattern is lowercase hex; the editor accepts either
+                headers["X-Environment-Id"] = trimmed.lowercased()
             case .legacyTenant(let id):
                 headers["X-Tenant-Id"] = id.trimmingCharacters(in: .whitespacesAndNewlines)
             case .organization:
@@ -155,41 +156,47 @@ extension JamfPlatform {
             }
         }
 
-        /// Sends the request; a computer request to `v4` goes to `v1` on a
-        /// Jamf Pro server too old for `v4` (see `ComputersAPIVersion`).
+        /// Sends the request; a computer request to `v4` goes to the `v1`
+        /// paths on a Jamf Pro older than 11.30.0 (see `ComputersAPIVersion`).
         private func sendFallingBack(_ request: HTTPRequest) async throws -> HTTPResponse {
             guard let older = ComputersAPIVersion.v1(of: request) else { return try await http.send(request) }
-            let server = baseURL.absoluteString
-            switch ComputersAPIVersion.shared.known(for: server) {
-            case .v1: return try await http.send(older)
-            case .v4: return try await http.send(request)
-            case nil: break
-            }
-            do {
-                let response = try await http.send(request)
-                ComputersAPIVersion.shared.set(.v4, for: server)
-                return response
-            } catch let error as HTTPError where error.status == 404 {
-                // a missing record answers 404 too: v1 decides
-                do {
-                    let response = try await http.send(older)
-                    await usesV1(from: request, server: server)
-                    return response
-                } catch let olderError as HTTPError where olderError.status != 404 {
-                    // v1 is there and answered: this server has no v4
-                    await usesV1(from: request, server: server)
-                    throw olderError
-                } catch let olderError as HTTPError where olderError.status == 404 {
-                    throw error
-                }
-            }
+            return try await http.send(await usesV1Paths() ? older : request)
         }
 
-        private func usesV1(from request: HTTPRequest, server: String) async {
-            ComputersAPIVersion.shared.set(.v1, for: server)
-            await http.recorder.note(request.method, request.path,
-                                     note: "HTTP 404: this Jamf Pro has no v4 computer API, so computer requests to it use v1 from now on.",
-                                     category: "API", isWarning: true)
+        /// Whether this server is a Jamf Pro older than 11.30.0, asked once
+        /// per server (`v1/jamf-pro-version`, no privilege needed) and
+        /// remembered. Only for a Jamf Pro server reached directly: the
+        /// Platform API gateway fronts Jamf Cloud, which is current. When the
+        /// version can’t be asked (no answer, an error status), the `v4` paths
+        /// are used and it is asked again next time; a refused request or an
+        /// answer without a readable version is remembered as `v4`.
+        private func usesV1Paths() async -> Bool {
+            guard server == .jamfPro else { return false }
+            let key = baseURL.absoluteString
+            if let known = ComputersAPIVersion.shared.known(for: key) { return known == .v1 }
+            let version: String
+            do {
+                let response = try await http.send(HTTPRequest(path: "pro/v1/jamf-pro-version"))
+                guard let read = try? JSONDecoder().decode(JamfPro.Version.self, from: response.data).version else {
+                    // it answered, without a version it can read: the current paths
+                    ComputersAPIVersion.shared.set(.v4, for: key)
+                    return false
+                }
+                version = read
+            } catch HTTPError.refused {
+                ComputersAPIVersion.shared.set(.v4, for: key)
+                return false
+            } catch {
+                return false
+            }
+            let older = ComputersAPIVersion.isOlderThanV4(version)
+            ComputersAPIVersion.shared.set(older ? .v1 : .v4, for: key)
+            if older {
+                await http.recorder.note("GET", "pro/v1/jamf-pro-version",
+                                         note: "Jamf Pro \(version) is older than 11.30.0, so computer requests to it use the v1 paths.",
+                                         category: "API", isWarning: true)
+            }
+            return older
         }
 
         /// A GET, read as lossless JSON.
@@ -245,12 +252,11 @@ extension JamfPlatform {
     }
 }
 
-/// Which computer API a Jamf Pro server has, learned once per server (its
-/// address) for as long as the app runs: `v4/computers-inventory…`, or
-/// only `v1` on an older Jamf Pro. A `v4` computer request that gets 404 is
-/// sent once more to `v1`; when `v1` is there, every later computer request
-/// to that server goes to `v1`, written once to the activity log. A `v4`
-/// answer settles it the other way, so a current server is never asked twice.
+/// Which computer paths a Jamf Pro server takes, learned once per server
+/// (its address) for as long as the app runs: `v4/computers-inventory…`
+/// exists from Jamf Pro 11.30.0; an older server gets the `v1` paths. Decided
+/// by the server’s version, never by a 404 (which also means "no such
+/// computer"). Remove once Jamf removes the `v1` computer paths.
 nonisolated final class ComputersAPIVersion: @unchecked Sendable {
     enum Version { case v1, v4 }
 
@@ -267,22 +273,35 @@ nonisolated final class ComputersAPIVersion: @unchecked Sendable {
         lock.withLock { known[server] = version }
     }
 
-    /// Tests only: forgets what was learned.
-    func reset() {
-        lock.withLock { known.removeAll() }
+    /// The first Jamf Pro with the `v4` computer paths.
+    static let firstV4 = [11, 30, 0]
+
+    /// "11.29.2-t1792501724838" is older than 11.30.0; a version that can’t
+    /// be read isn’t (the `v4` paths are used).
+    static func isOlderThanV4(_ version: String) -> Bool {
+        let numbers = version.prefix { $0.isNumber || $0 == "." }.split(separator: ".").compactMap { Int($0) }
+        guard numbers.count >= 2 else { return false }
+        let padded = (numbers + [0, 0, 0]).prefix(3)
+        return padded.lexicographicallyPrecedes(firstV4)
     }
 
-    private static let v4 = "pro/v4/computers-inventory"
-    private static let v1 = "pro/v1/computers-inventory"
+    private static let v4Records = "pro/v4/computers-inventory"
 
-    /// The same request to `v1`; nil when it isn’t a `v4` computer request
-    /// (`computers-inventory`, `…-detail` and what is under them).
+    /// The same request on the `v1` paths; nil when it isn’t a `v4` computer
+    /// request. Records `v1/computers-inventory…`, edits
+    /// `v1/computers-inventory-detail/{id}`, and the actions
+    /// `v1/computer-inventory/{id}/erase` and `…/remove-mdm-profile`
+    /// (singular "computer").
     static func v1(of request: HTTPRequest) -> HTTPRequest? {
         var path = Substring(request.path)
         while path.hasPrefix("/") { path.removeFirst() }
-        guard path.hasPrefix(v4) else { return nil }
+        guard path.hasPrefix(v4Records) else { return nil }
+        let rest = path.dropFirst(v4Records.count)
+        let parts = rest.split(separator: "/", omittingEmptySubsequences: false)
+        // "/{id}/erase" → ["", id, "erase"]
+        let isAction = !rest.hasPrefix("-") && parts.count == 3 && ["erase", "remove-mdm-profile"].contains(String(parts[2]))
         var older = request
-        older.path = v1 + path.dropFirst(v4.count)
+        older.path = (isAction ? "pro/v1/computer-inventory" : "pro/v1/computers-inventory") + rest
         return older
     }
 }
