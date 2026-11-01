@@ -1,5 +1,6 @@
 import XCTest
 import AppKit
+import JTKitLiveCheck
 
 /// The base class for an app’s UI tests: launches the
 /// app’s own Debug build, finds and drives elements, and on a failure prints
@@ -29,6 +30,13 @@ open class JTKitUITestCase: XCTestCase {
     /// A folder of the test’s own, removed afterwards: Save panels in demo
     /// mode start here, so nothing lands in the user’s folders.
     public private(set) var testFolder: URL!
+
+    /// A live test’s gateway client (`liveGateway()`), checked in `tearDown`.
+    var liveClient: LiveGatewayClient?
+
+    /// A live test launches the app itself, with `launchLive(roles:)`, in
+    /// the test: `setUp` then doesn’t launch it.
+    open var launchesLive: Bool { false }
 
     /// Set by `paste`: only then does `tearDown` clear the pasteboard.
     private var didPaste = false
@@ -67,6 +75,8 @@ open class JTKitUITestCase: XCTestCase {
             .appending(path: "JTKitUITest-\(UUID().uuidString)", directoryHint: .isDirectory)
         try FileManager.default.createDirectory(at: testFolder, withIntermediateDirectories: true)
         app = makeApp()
+        // a live test launches in the test itself (`launchLive(roles:)`)
+        guard !launchesLive else { return }
         launchApp()
         if Self.isReleaseCheck {
             XCTAssertTrue(Self.isDemoLaunch(app.launchArguments),
@@ -90,6 +100,7 @@ open class JTKitUITestCase: XCTestCase {
         }
         if didPaste { NSPasteboard.general.clearContents() }
         app?.terminate()
+        finishLive()
         if let testFolder { try? FileManager.default.removeItem(at: testFolder) }
         super.tearDown()
     }

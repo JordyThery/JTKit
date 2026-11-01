@@ -358,6 +358,57 @@ rc_test() {
     return 1
 }
 
+# MARK: The gateway of live UI tests (JTKit 1.1.0)
+
+# A live UI test (a LIVE_TESTS entry in $UI_TESTS) launches the real app
+# under -JTKitLiveCheck. Its requests, and the UI test’s own, go to
+# jtkit-live-gateway, which decides each by the release check’s rules and
+# keeps the run’s ledger and files (the UI test runner and the app may be
+# sandboxed; only the gateway writes the live folder). Built once a run from
+# the JTKit under test; started right before each live UI test and stopped
+# right after, so it never writes the ledger while a unit test does; stopped
+# on every exit. It stops by itself once this check’s lock is released.
+RC_GATEWAY_PID="" RC_GATEWAY_BIN=""
+
+rc_gateway_build() {
+    [[ -n "$RC_GATEWAY_BIN" ]] && return 0
+    local scratch="$RC_BASE/state/gateway-build"
+    rc_log "  building the live gateway (jtkit-live-gateway)"
+    if ! xcrun swift build --package-path "$RC_LIB_DIR/.." --product jtkit-live-gateway --scratch-path "$scratch" \
+            > "$RC_RUN/logs/gateway-build.log" 2>&1; then
+        rc_log "  the live gateway didn’t build (logs/gateway-build.log)"
+        return 1
+    fi
+    RC_GATEWAY_BIN="$scratch/debug/jtkit-live-gateway"
+    [[ -x "$RC_GATEWAY_BIN" ]]
+}
+
+rc_gateway_start() {
+    rc_gateway_build || return 1
+    rm -f "$RC_LIVE_DIR/live-launch.json" "$RC_LIVE_DIR/live-gateway.token"
+    "$RC_GATEWAY_BIN" >> "$RC_RUN/logs/gateway.log" 2>&1 &!
+    RC_GATEWAY_PID=$!
+    local waited=0
+    while (( waited < 60 )); do
+        [[ -s "$RC_LIVE_DIR/live-launch.json" && -s "$RC_LIVE_DIR/live-gateway.token" ]] && return 0
+        kill -0 "$RC_GATEWAY_PID" 2>/dev/null || break
+        sleep 0.5; (( waited++ ))
+    done
+    rc_log "  the live gateway didn’t start (logs/gateway.log)"
+    rc_gateway_stop
+    return 1
+}
+
+rc_gateway_stop() {
+    [[ -n "$RC_GATEWAY_PID" ]] || return 0
+    kill "$RC_GATEWAY_PID" 2>/dev/null
+    local waited=0
+    while kill -0 "$RC_GATEWAY_PID" 2>/dev/null && (( waited < 20 )); do sleep 0.5; (( waited++ )); done
+    kill -9 "$RC_GATEWAY_PID" 2>/dev/null
+    RC_GATEWAY_PID=""
+    rm -f "$RC_LIVE_DIR/live-launch.json" "$RC_LIVE_DIR/live-gateway.token"
+}
+
 rc_tests_in() {
     # The test methods of a class file, in file order.
     grep -hoE 'func (test[A-Za-z0-9_]+)\(\)' "$1" | sed -E 's/func (test[A-Za-z0-9_]+)\(\)/\1/'
@@ -611,6 +662,7 @@ rc_cleanup() {
     (( RC_CLEANED )) && return 0
     RC_CLEANED=1
     setopt local_options no_err_exit
+    rc_gateway_stop
     if (( RC_LIVE_STARTED )); then
         rc_log "Cleanup: removing this run’s test objects"
         rc_live_environment 1
@@ -868,12 +920,20 @@ release_check_main() {
 
     # Stage 1: build and sign in
     rc_check_allowlist
+    # Allow-list version 2 (JTKit 1.1.0) may say "productionReads": production
+    # roles then take part without --include-production, read only (JTKit’s
+    # policy refuses their writes). A version 1 list has no such key.
+    local production_reads
+    production_reads="$("$RC_PY" -c 'import json,sys; print(1 if json.load(open(sys.argv[1])).get("productionReads") is True else 0)' "$RC_ALLOWLIST")" \
+        || rc_fail "Check failed: reading productionReads from the allow-list"
+    (( production_reads )) && rc_log "Production roles are read without --include-production (the allow-list’s productionReads)"
+    local include_production=$(( RC_PRODUCTION || production_reads ))
     if (( RC_ALL_TENANTS )); then
         local all_roles
-        all_roles="$("$RC_PY" -c 'import json,sys; print(" ".join(sorted({t["role"] for t in json.load(open(sys.argv[1]))["tenants"] if sys.argv[2]=="1" or not t.get("production")})))' "$RC_ALLOWLIST" "$RC_PRODUCTION")" \
+        all_roles="$("$RC_PY" -c 'import json,sys; print(" ".join(sorted({t["role"] for t in json.load(open(sys.argv[1]))["tenants"] if sys.argv[2]=="1" or not t.get("production")})))' "$RC_ALLOWLIST" "$include_production")" \
             || rc_fail "Check failed: reading the roles from the allow-list"
         RC_ROLES=(${=all_roles})
-    elif (( ! RC_PRODUCTION )); then
+    elif (( ! include_production )); then
         # The app’s production roles take part only with --include-production.
         local kept_roles
         kept_roles="$("$RC_PY" -c 'import json,sys; prod={t["role"] for t in json.load(open(sys.argv[1]))["tenants"] if t.get("production")}; print(" ".join(r for r in sys.argv[2:] if r not in prod))' "$RC_ALLOWLIST" "${ROLES[@]}")" \
@@ -951,10 +1011,20 @@ release_check_main() {
     fi
     for test in "${LIVE_TESTS[@]}"; do
         rc_log "  live: $test"
+        local ui_live=0
+        if [[ -n "$UI_TESTS" && "$test" == "$UI_TESTS/"* ]]; then
+            ui_live=1
+            if ! rc_gateway_start; then
+                rc_stage "4 live checks" "FAILED: $test (no live gateway)"
+                rc_fail "Live check failed: $test (the live gateway didn’t start)"
+            fi
+        fi
         if ! rc_test "$test" --once --results-line; then
+            (( ui_live )) && rc_gateway_stop
             rc_stage "4 live checks" "FAILED: $test"
             rc_fail "Live check failed: $test"
         fi
+        (( ui_live )) && rc_gateway_stop
     done
     rc_stage "4 live checks" "passed"
     return 0

@@ -117,7 +117,8 @@ public nonisolated struct RequestRecorder: Sendable {
         let data: Data
         let response: URLResponse
         do {
-            (data, response) = try await session.data(for: request, delegate: delegate)
+            // under the live-check switch: the gateway, never the app’s own session
+            (data, response) = try await LiveLaunch.route(session).data(for: request, delegate: delegate)
         } catch {
             if Self.isCancellation(error) {
                 await record(context, duration: started.elapsedSeconds, cancelled: true)
@@ -161,7 +162,7 @@ public nonisolated struct RequestRecorder: Sendable {
         let file: URL
         let response: URLResponse
         do {
-            (file, response) = try await session.download(for: request, delegate: delegate)
+            (file, response) = try await LiveLaunch.route(session).download(for: request, delegate: delegate)
         } catch {
             if Self.isCancellation(error) {
                 await record(context, duration: started.elapsedSeconds, cancelled: true)

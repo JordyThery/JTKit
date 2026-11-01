@@ -123,6 +123,7 @@ public nonisolated struct KeychainSecretStore: SecretStore {
     }
 
     public func readSecret(for account: String) throws -> String? {
+        try refuseUnderLiveCheck("read", account)
         if let value = try read(baseQuery(account: account), account: account) {
             return value
         }
@@ -138,6 +139,7 @@ public nonisolated struct KeychainSecretStore: SecretStore {
     /// Asks for the item’s attributes only, so the secret itself is never
     /// read (nor its access asked for) just to see whether there is one.
     public func hasSecret(for account: String) throws -> Bool {
+        try refuseUnderLiveCheck("looked up", account)
         if try exists(baseQuery(account: account), account: account) { return true }
         guard movesItemsFromDataProtectionKeychain else { return false }
         return (try? exists(baseQuery(account: account, dataProtection: true), account: account)) ?? false
@@ -149,6 +151,11 @@ public nonisolated struct KeychainSecretStore: SecretStore {
     }
 
     public func writeSecret(_ secret: String?, for account: String) throws {
+        do {
+            try refuseUnderLiveCheck(secret == nil ? "deleted" : "written", account)
+        } catch {
+            throw SecretWriteError(status: errSecInteractionNotAllowed)
+        }
         guard let secret else {
             let status = SecItemDelete(baseQuery(account: account) as CFDictionary)
             if status != errSecSuccess && status != errSecItemNotFound {
@@ -184,6 +191,7 @@ public nonisolated struct KeychainSecretStore: SecretStore {
     @discardableResult
     public func deleteSecrets(withAccountPrefix prefix: String) -> Bool {
         guard !prefix.isEmpty else { return false }
+        guard (try? refuseUnderLiveCheck("deleted", prefix + "…")) != nil else { return false }
         let query: [String: Any] = [kSecClass as String: kSecClassGenericPassword,
                                     kSecAttrService as String: service,
                                     kSecMatchLimit as String: kSecMatchLimitAll,
@@ -201,6 +209,14 @@ public nonisolated struct KeychainSecretStore: SecretStore {
             succeeded = setSecret(nil, for: account) && succeeded
         }
         return succeeded
+    }
+
+    /// Under the live-check switch the app’s real Keychain items are never
+    /// reached: the attempt is written down (it fails the run) and refused.
+    private func refuseUnderLiveCheck(_ action: String, _ account: String) throws {
+        guard LiveLaunch.isSwitched else { return }
+        LiveLaunch.recordViolation("Keychain item of \(service) \(action)")
+        throw SecretStoreError(status: errSecInteractionNotAllowed)
     }
 
     private func baseQuery(account: String, dataProtection: Bool = false) -> [String: Any] {

@@ -59,6 +59,21 @@ public nonisolated struct DeleteOutcome: Sendable, Equatable, Codable {
     public var throughJamfPro: Bool
 }
 
+/// One write a run sent, with the tenant it went to: a JSON line in the run’s
+/// `writes.jsonl`. A cross-tenant run (read one tenant, write another) shows
+/// each write’s tenant in the report. Method, kind and ID only: no body.
+public nonisolated struct SentWrite: Sendable, Equatable, Codable {
+    public var role: String
+    /// See `Ledger.Item.target`.
+    public var target: String
+    public var method: String
+    /// "create", "change", "delete" or "command".
+    public var kind: String
+    public var resource: String?
+    public var id: String?
+    public var status: Int
+}
+
 /// A create the server accepted that isn’t in the ledger (its answer held no
 /// readable ID, or the ledger couldn’t be saved): one JSON line each in the
 /// run’s `unrecorded-creates.jsonl`. Any fails the run, as the object may
@@ -118,10 +133,13 @@ public nonisolated final class LiveCheckNetwork: @unchecked Sendable {
     ///   - readBack: how long a delete’s read-back keeps looking.
     ///   - deletesFile: the run’s `deletes.jsonl` (`LiveCheckRun` passes it).
     ///   - unrecordedFile: the run’s `unrecorded-creates.jsonl` (`LiveCheckRun` passes it).
+    ///   - writesFile: the run’s `writes.jsonl` (`LiveCheckRun` passes it).
     public init(policy: LiveCheckPolicy, upstream: URLSession = LiveCheckNetwork.makeUpstream(), refusalsFile: URL? = nil,
                 appleRequestsFile: URL? = nil, appleBudget: AppleRequestBudget? = nil,
-                readBack: ReadBack = .standard, deletesFile: URL? = nil, unrecordedFile: URL? = nil) {
+                readBack: ReadBack = .standard, deletesFile: URL? = nil, unrecordedFile: URL? = nil,
+                writesFile: URL? = nil) {
         self.policy = policy
+        self.writesFile = writesFile
         self.upstream = upstream
         self.refusalsFile = refusalsFile
         self.readBack = readBack
@@ -150,6 +168,34 @@ public nonisolated final class LiveCheckNetwork: @unchecked Sendable {
     final class NoRedirects: NSObject, URLSessionTaskDelegate, Sendable {
         func urlSession(_ session: URLSession, task: URLSessionTask, willPerformHTTPRedirection response: HTTPURLResponse,
                         newRequest request: URLRequest) async -> URLRequest? { nil }
+    }
+
+    /// The run’s `writes.jsonl`, or nil.
+    public let writesFile: URL?
+    private var writeStorage: [SentWrite] = []
+
+    /// Every write of this process so far, with its tenant.
+    public var writes: [SentWrite] { lock.withLock { writeStorage } }
+
+    /// Every write of the run’s file, from every test process so far.
+    public static func writes(in file: URL) -> [SentWrite] {
+        guard let text = try? String(contentsOf: file, encoding: .utf8) else { return [] }
+        return text.split(separator: "\n").compactMap { try? JSONDecoder().decode(SentWrite.self, from: Data($0.utf8)) }
+    }
+
+    private func recordWrite(_ allowed: LiveDecision.Allowed, request: LiveRequest, status: Int) {
+        let kind: String
+        switch allowed.kind {
+        case .signIn, .read: return
+        case .create: kind = "create"
+        case .change: kind = "change"
+        case .delete: kind = "delete"
+        case .command: kind = "command"
+        }
+        let write = SentWrite(role: allowed.role, target: allowed.target, method: request.method, kind: kind,
+                              resource: allowed.resource, id: allowed.id, status: status)
+        lock.withLock { writeStorage.append(write) }
+        if let writesFile, let line = try? JSONEncoder().encode(write) { Self.appendLine(line, to: writesFile) }
     }
 
     /// Every refused request so far; a run with any fails its check.
@@ -198,8 +244,10 @@ public nonisolated final class LiveCheckNetwork: @unchecked Sendable {
         return text.split(separator: "\n").compactMap { try? JSONDecoder().decode(LiveRefusal.self, from: Data($0.utf8)) }
     }
 
-    /// After an allowed request answered: records creates, removals and Apple tokens.
+    /// After an allowed request answered: records creates, removals and Apple
+    /// tokens, and every write with the tenant it went to (`writes.jsonl`).
     func didAnswer(_ allowed: LiveDecision.Allowed, request: LiveRequest, status: Int, body: Data) {
+        recordWrite(allowed, request: request, status: status)
         switch allowed.kind {
         case .create(let name) where (200..<300).contains(status):
             let resource = allowed.resource ?? ""
@@ -208,11 +256,14 @@ public nonisolated final class LiveCheckNetwork: @unchecked Sendable {
                 return
             }
             do {
-                try policy.ledger.add(.init(target: allowed.target, resource: resource, id: id, name: name, confirmed: true),
+                try policy.ledger.add(.init(target: allowed.target, resource: resource, id: id, name: name, confirmed: true,
+                                            role: allowed.role),
                                       testPrefixes: [policy.prefix])
             } catch {
                 recordUnrecorded(.init(resource: resource, name: name, status: status, reason: "\(error)"))
             }
+        case .read where (200..<300).contains(status):
+            policy.learnDevices(from: body, target: allowed.target, role: allowed.role)
         case .signIn where request.url.host() == "account.apple.com" && (200..<300).contains(status):
             if let token = (try? JSONSerialization.jsonObject(with: body) as? [String: Any])?["access_token"] as? String,
                let clientID = LiveCheckPolicy.formValue("client_id", in: request.body) {
@@ -221,6 +272,42 @@ public nonisolated final class LiveCheckNetwork: @unchecked Sendable {
         default:
             break
         }
+    }
+}
+
+// MARK: - Interruptive commands
+
+extension LiveDecision.Allowed {
+    var isCommand: Bool {
+        if case .command = kind { return true }
+        return false
+    }
+
+    var isInterruptive: Bool {
+        if case .command(_, .interruptive, _) = kind { return true }
+        return false
+    }
+}
+
+extension LiveCheckNetwork {
+    /// Asks the serial prompt for every device of an interruptive command:
+    /// nil when each was answered with its serial, else why not. Blocks the
+    /// calling (background) queue.
+    func confirmInterruptive(_ allowed: LiveDecision.Allowed, request: LiveRequest) -> String? {
+        let references = DeviceCommands.classify(request).references
+        let prompts = policy.prompts(for: allowed, references: references)
+        guard let confirmer = policy.confirmer else {
+            return "An interruptive command (\(prompts.first?.command ?? "command")) is sent only after the serial prompt’s confirmation, and this run has no prompt"
+        }
+        for prompt in prompts {
+            let typed = confirmer(prompt)
+            guard prompt.confirms(typed) else {
+                return typed == nil
+                    ? "\(prompt.command) to “\(prompt.deviceName)” was skipped at the serial prompt"
+                    : "\(prompt.command) to “\(prompt.deviceName)”: the serial typed isn’t the device’s; not sent"
+            }
+        }
+        return nil
     }
 }
 
@@ -549,6 +636,8 @@ nonisolated final class LiveCheckURLProtocol: URLProtocol, @unchecked Sendable {
     private var stopped = false
     private static let appleQueue = DispatchQueue(label: "JTKitLiveCheck.apple-budget", attributes: .concurrent)
     private static let readBackQueue = DispatchQueue(label: "JTKitLiveCheck.read-back", attributes: .concurrent)
+    /// One prompt at a time.
+    private static let confirmQueue = DispatchQueue(label: "JTKitLiveCheck.serial-prompt")
 
     override class func canInit(with request: URLRequest) -> Bool { true }
 
@@ -606,6 +695,20 @@ nonisolated final class LiveCheckURLProtocol: URLProtocol, @unchecked Sendable {
                     }
                 }
             }
+        case .allow(let allowed) where allowed.isInterruptive:
+            // the serial prompt first, off the loading thread
+            Self.confirmQueue.async { [self] in
+                if stateLock.withLock({ stopped }) { return }
+                if let reason = network.confirmInterruptive(allowed, request: seen) {
+                    client?.urlProtocol(self, didFailWithError: network.refuse(seen, reason: reason))
+                } else {
+                    network.policy.recordSent(allowed)
+                    send(outgoing, allowed: allowed, seen: seen, network: network)
+                }
+            }
+        case .allow(let allowed) where allowed.isCommand:
+            network.policy.recordSent(allowed)
+            send(outgoing, allowed: allowed, seen: seen, network: network)
         case .allow(let allowed) where network.needsCheckBeforeWrite(allowed):
             // An object test code recorded: read back first, off the loading thread.
             Self.readBackQueue.async { [self] in

@@ -23,6 +23,10 @@ public nonisolated final class Ledger: @unchecked Sendable {
         /// The same object under another API’s type and ID, e.g. a Platform
         /// device group’s Classic twin (`computergroups/57`), as `resource/id`.
         public internal(set) var aliases: [String]
+        /// The allow-list role of the tenant it was made on (1.1.0): a
+        /// cross-tenant run reads one tenant and writes another, and the
+        /// report says which. Nil in a ledger from before 1.1.0.
+        public internal(set) var role: String?
 
         public init(target: String, resource: String, id: String, name: String, removed: Bool = false, fromSweep: Bool = false) {
             self.init(target: target, resource: resource, id: id, name: name, removed: removed, fromSweep: fromSweep,
@@ -30,7 +34,7 @@ public nonisolated final class Ledger: @unchecked Sendable {
         }
 
         init(target: String, resource: String, id: String, name: String, removed: Bool = false, fromSweep: Bool = false,
-             confirmed: Bool, aliases: [String] = []) {
+             confirmed: Bool, aliases: [String] = [], role: String? = nil) {
             self.target = target.lowercased()
             self.resource = Ledger.normalized(resource)
             self.id = id
@@ -39,6 +43,7 @@ public nonisolated final class Ledger: @unchecked Sendable {
             self.fromSweep = fromSweep
             self.confirmed = confirmed
             self.aliases = aliases
+            self.role = role
         }
 
         public init(from decoder: Decoder) throws {
@@ -50,7 +55,8 @@ public nonisolated final class Ledger: @unchecked Sendable {
                       removed: try container.decodeIfPresent(Bool.self, forKey: .removed) ?? false,
                       fromSweep: try container.decodeIfPresent(Bool.self, forKey: .fromSweep) ?? false,
                       confirmed: try container.decodeIfPresent(Bool.self, forKey: .confirmed) ?? false,
-                      aliases: try container.decodeIfPresent([String].self, forKey: .aliases) ?? [])
+                      aliases: try container.decodeIfPresent([String].self, forKey: .aliases) ?? [],
+                      role: try container.decodeIfPresent(String.self, forKey: .role))
         }
 
         /// Whether `resource`/`id` names this object, under its own key or an alias.

@@ -81,8 +81,10 @@ public nonisolated final class LiveCheckRun: @unchecked Sendable {
     ///   - readBack: tests only; the standard read-back by default.
     ///   - allowListURL: tests only; otherwise the allow-list’s own place
     ///     (or a sandboxed test host’s copy, see above).
+    ///   - confirmer: the serial prompt for interruptive commands; nil: none
+    ///     is sent (the live UI tests pass the release check’s prompt).
     public init(environment: [String: String], upstream: URLSession? = nil, readBack: ReadBack? = nil,
-                allowListURL: URL? = nil) throws {
+                allowListURL: URL? = nil, confirmer: InterruptiveConfirmer? = nil) throws {
         guard environment["JTKIT_LIVE"] == "1" else { throw RunError.notEnabled }
         func setting(_ name: String) throws -> String {
             guard let value = environment[name], !value.isEmpty else { throw RunError.missingSetting(name) }
@@ -120,7 +122,9 @@ public nonisolated final class LiveCheckRun: @unchecked Sendable {
         self.ledger = ledger
         let policy = LiveCheckPolicy(allowList: allowList, roles: roles,
                                      includeProduction: environment["JTKIT_LIVE_INCLUDE_PRODUCTION"] == "1",
-                                     prefix: prefix, ledger: ledger, writesAllowed: writesAllowed)
+                                     prefix: prefix, ledger: ledger, writesAllowed: writesAllowed,
+                                     commandsFile: runFolder.appending(path: Self.deviceCommandsFileName),
+                                     confirmer: confirmer)
         self.policy = policy
         let refusalsFile = runFolder.appending(path: "refusals.jsonl")
         let appleFile = runFolder.appending(path: Self.appleRequestsFileName)
@@ -128,7 +132,7 @@ public nonisolated final class LiveCheckRun: @unchecked Sendable {
         let unrecordedFile = runFolder.appending(path: Self.unrecordedCreatesFileName)
         network = LiveCheckNetwork(policy: policy, upstream: upstream ?? LiveCheckNetwork.makeUpstream(), refusalsFile: refusalsFile,
                                    appleRequestsFile: appleFile, readBack: readBack ?? .standard, deletesFile: deletesFile,
-                                   unrecordedFile: unrecordedFile)
+                                   unrecordedFile: unrecordedFile, writesFile: runFolder.appending(path: Self.writesFileName))
     }
 
     /// `AllowList.defaultURL`, or for a sandboxed test host (which can’t read
@@ -147,6 +151,12 @@ public nonisolated final class LiveCheckRun: @unchecked Sendable {
     /// Creates the server accepted that the ledger doesn’t hold, from every
     /// test process of the run; any fails the run.
     public static let unrecordedCreatesFileName = "unrecorded-creates.jsonl"
+
+    /// Every write of the run with the tenant it went to, from all its test processes.
+    public static let writesFileName = "writes.jsonl"
+
+    /// Every device command of the run, from all its test processes.
+    public static let deviceCommandsFileName = "device-commands.jsonl"
 
     /// Every delete’s read-back of the run, from all its test processes.
     public static let deletesFileName = "deletes.jsonl"
@@ -388,10 +398,16 @@ public nonisolated final class LiveCheckRun: @unchecked Sendable {
 
     // MARK: Report
 
-    public nonisolated struct StepResult: Codable, Sendable {
+    public nonisolated struct StepResult: Codable, Sendable, Equatable {
         public var step: String
         public var passed: Bool
         public var note: String?
+
+        public init(step: String, passed: Bool, note: String? = nil) {
+            self.step = step
+            self.passed = passed
+            self.note = note
+        }
     }
 
     /// Appends a step’s result to `results.jsonl` for the stage 5 report

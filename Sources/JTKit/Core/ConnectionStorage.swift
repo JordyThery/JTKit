@@ -76,12 +76,14 @@ public final class JSONFileConnectionStorage<Record: Codable>: ConnectionStorage
     public var backupURL: URL { fileURL.appendingPathExtension(ConnectionCopies.backupSuffix) }
 
     public func load() throws -> [Record] {
+        try LiveLaunch.refuseSavedConnections("read", fileURL.lastPathComponent)
         guard FileManager.default.fileExists(atPath: fileURL.path) else { return [] }
         let data = try Data(contentsOf: fileURL)
         return try format.decoder().decode([Record].self, from: data)
     }
 
     public func save(_ records: [Record]) throws {
+        try LiveLaunch.refuseSavedConnections("written", fileURL.lastPathComponent)
         let data = try format.encoder().encode(records)
         try FileManager.default.createDirectory(at: fileURL.deletingLastPathComponent(),
                                                 withIntermediateDirectories: true)
@@ -89,12 +91,14 @@ public final class JSONFileConnectionStorage<Record: Codable>: ConnectionStorage
     }
 
     public func backUpOnce() throws {
+        try LiveLaunch.refuseSavedConnections("backed up", fileURL.lastPathComponent)
         let files = FileManager.default
         guard files.fileExists(atPath: fileURL.path), !files.fileExists(atPath: backupURL.path) else { return }
         try files.copyItem(at: fileURL, to: backupURL)
     }
 
     public func keepUnreadableCopy() -> String? {
+        guard (try? LiveLaunch.refuseSavedConnections("copied", fileURL.lastPathComponent)) != nil else { return nil }
         if let unreadableCopy { return unreadableCopy }
         let copy = fileURL.appendingPathExtension(ConnectionCopies.unreadableStamp())
         do {
@@ -129,7 +133,15 @@ public final class UserDefaultsConnectionStorage<Record: Codable>: ConnectionSto
 
     var backupKey: String { "\(key).\(ConnectionCopies.backupSuffix)" }
 
+    /// The app’s own preferences hold its saved connections: never reached
+    /// under the live-check switch. A sandbox run’s in-memory defaults are.
+    private func refuseUnderLiveCheck(_ action: String) throws {
+        guard defaults === UserDefaults.standard else { return }
+        try LiveLaunch.refuseSavedConnections(action, "the setting \(key)")
+    }
+
     public func load() throws -> [Record] {
+        try refuseUnderLiveCheck("read")
         guard let value = defaults.object(forKey: key) else { return [] }
         guard let data = value as? Data else { throw UnreadableValue(type: String(describing: type(of: value))) }
         return try format.decoder().decode([Record].self, from: data)
@@ -142,15 +154,18 @@ public final class UserDefaultsConnectionStorage<Record: Codable>: ConnectionSto
     }
 
     public func save(_ records: [Record]) throws {
+        try refuseUnderLiveCheck("written")
         defaults.set(try format.encoder().encode(records), forKey: key)
     }
 
     public func backUpOnce() throws {
+        try refuseUnderLiveCheck("backed up")
         guard let existing = defaults.object(forKey: key), defaults.object(forKey: backupKey) == nil else { return }
         defaults.set(existing, forKey: backupKey)
     }
 
     public func keepUnreadableCopy() -> String? {
+        guard (try? refuseUnderLiveCheck("copied")) != nil else { return nil }
         guard let existing = defaults.object(forKey: key) else { return nil }
         if let unreadableCopy { return unreadableCopy }
         let copyKey = "\(key).\(ConnectionCopies.unreadableStamp())"

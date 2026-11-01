@@ -80,11 +80,25 @@ public final class ConnectionStore<Record: ConnectionRecord> {
     ///   - storage: where the app’s records are, e.g. `JSONFileConnectionStorage`.
     ///   - secrets: where each kind of secret is; kinds the app doesn’t use are left out.
     ///   - log: receives problems, never secrets.
+    ///   - liveRecord: the app’s record for one of the release check’s
+    ///     connections. Under the live-check switch (`LiveLaunch`) the store
+    ///     holds only those, in memory, with their secrets from the run:
+    ///     `storage` and the Keychain are never touched. Without it the store
+    ///     is empty under the switch.
     public init(storage: any ConnectionStorage<Record>,
                 secrets: [ConnectionSecretKind: SecretLocation],
-                log: ((String) -> Void)? = nil) {
-        self.storage = storage
-        self.secretLocations = secrets
+                log: ((String) -> Void)? = nil,
+                liveRecord: ((Connection) -> Record)? = nil) {
+        if LiveLaunch.isSwitched {
+            let records = LiveLaunch.connections.compactMap { liveRecord?($0) }
+            self.storage = InMemoryConnectionStorage(records)
+            self.secretLocations = Dictionary(uniqueKeysWithValues: secrets.keys.map {
+                ($0, SecretLocation(store: LiveLaunch.secrets))
+            })
+        } else {
+            self.storage = storage
+            self.secretLocations = secrets
+        }
         self.log = log
         reload()
     }

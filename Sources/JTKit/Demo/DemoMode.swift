@@ -41,6 +41,8 @@ public final class DemoMode {
     /// `-JTKitDemo` or `-JTKitSandbox`.
     public var isOn: Bool {
         didSet {
+            // never on under the live-check switch: the release check’s tenants only
+            if isOn && LiveLaunch.isSwitched { isOn = false }
             guard isOn != oldValue else { return }
             if savesChoice { defaults.set(isOn, forKey: key) }
             DemoWindowTitles.shared.update(isOn: isOn)
@@ -124,7 +126,7 @@ public final class DemoMode {
         isSandbox = Self.isSandbox(arguments: arguments)
         scenario = Self.value(after: Self.scenarioArgument, in: arguments).flatMap(DemoScenario.init(rawValue:))
         savesChoice = launchChoice == nil && !isSandbox
-        isOn = launchChoice ?? (isSandbox ? false : defaults.bool(forKey: key))
+        isOn = LiveLaunch.isSwitched ? false : (launchChoice ?? (isSandbox ? false : defaults.bool(forKey: key)))
         DemoWindowTitles.shared.update(isOn: isOn)
     }
 
@@ -236,8 +238,9 @@ public final class DemoMode {
     // MARK: Launch arguments
 
     /// Whether the arguments start a sandbox run (`-JTKitSandbox YES`).
+    /// A live-check launch (`LiveLaunch.argument`) is one too.
     nonisolated static func isSandbox(arguments: [String]) -> Bool {
-        bool(after: sandboxArgument, in: arguments) ?? false
+        (bool(after: sandboxArgument, in: arguments) ?? false) || arguments.contains(LiveLaunch.argument)
     }
 
     nonisolated private static func value(after name: String, in arguments: [String]) -> String? {

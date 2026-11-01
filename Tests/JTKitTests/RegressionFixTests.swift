@@ -240,6 +240,36 @@ struct WindowCloseGuardTests {
     }
 }
 
+@MainActor
+@Suite("Switching Settings tabs with unsaved changes")
+struct SettingsTabLeaveTests {
+    @Test func asksFirstAndSwitchesOnlyAfterSaveOrDiscard() {
+        let tabs = SettingsTabSelection()
+        tabs.selected = SettingsTabName.connections
+        var proceed: (@MainActor () -> Void)?
+        tabs.leaveGuard = { proceed = $0 }
+
+        tabs.request(SettingsTabName.updates)
+        #expect(tabs.selected == SettingsTabName.connections, "asked, not switched")
+        #expect(proceed != nil)
+        // Cancel: proceed is never called, the tab stays
+        // Save or Discard Changes:
+        proceed?()
+        #expect(tabs.selected == SettingsTabName.updates)
+    }
+
+    @Test func withoutChangesItSwitchesAtOnce() {
+        let tabs = SettingsTabSelection()
+        tabs.selected = SettingsTabName.connections
+        tabs.request(SettingsTabName.general)
+        #expect(tabs.selected == SettingsTabName.general)
+        var asked = false
+        tabs.leaveGuard = { _ in asked = true }
+        tabs.request(SettingsTabName.general)
+        #expect(!asked, "the tab already shown isn’t a switch")
+    }
+}
+
 // MARK: - A6 A new connection in use
 
 @MainActor
@@ -583,13 +613,29 @@ struct DeviceActionPermissionTests {
         let client = try JamfPlatform.Client(baseURL: URL(string: "https://us.api.jamfcloud.com")!,
                                              scope: .environment(UUID().uuidString), tokens: FixedToken("tok"),
                                              recorder: RequestRecorder(session: server.session, log: nil))
-        for action in [{ try await client.restart(deviceID: "d1") }, { try await client.shutDown(deviceID: "d1") }] {
+        for action in [{ try await client.restart(deviceID: "d1") }, { try await client.shutDown(deviceID: "d1") },
+                       { try await client.checkIn(deviceID: "d1") }] {
             let error = await #expect(throws: JamfPlatform.APIError.self) { try await action() }
             let message = error?.message() ?? ""
             #expect(message.contains("“device-actions:execute” permission"))
             #expect(message.contains("Jamf Account"))
             #expect(!message.contains("Send Mobile Device"), "no Jamf Pro privilege for a Platform connection")
         }
+    }
+
+    @Test func checkInPostsToTheDeviceAction() async throws {
+        let server = MockServer { _ in MockResponse(status: 204, body: Data()) }
+        let client = try JamfPlatform.Client(baseURL: URL(string: "https://us.api.jamfcloud.com")!,
+                                             scope: .environment(UUID().uuidString), tokens: FixedToken("tok"),
+                                             recorder: RequestRecorder(session: server.session, log: nil))
+        try await client.checkIn(deviceID: "0a1b2c3d-4444-4444-8444-0123456789ab")
+        #expect(server.requests.map { "\($0.method) \($0.path)" }
+                == ["POST /device-actions/v1/devices/0a1b2c3d-4444-4444-8444-0123456789ab/check-in"])
+        let refused = MockServer { _ in .json(422, "{}") }
+        let other = try JamfPlatform.Client(baseURL: URL(string: "https://us.api.jamfcloud.com")!,
+                                            scope: .environment(UUID().uuidString), tokens: FixedToken("tok"),
+                                            recorder: RequestRecorder(session: refused.session, log: nil))
+        await #expect(throws: JamfPlatform.DeviceActionRefused(verb: "check in")) { try await other.checkIn(deviceID: "d1") }
     }
 
     @Test func otherRefusalsKeepTheGeneralHint() {

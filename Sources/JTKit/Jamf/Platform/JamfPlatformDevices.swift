@@ -1,7 +1,7 @@
 import Foundation
 
 // The Platform API’s own device calls: a device by serial, its DDM declarations, and the
-// restart and shut down device actions. They exist only on the gateway; on
+// restart, shut down and check-in device actions. They exist only on the gateway; on
 // a Jamf Pro server reached directly they are refused before sending.
 
 extension JamfPlatform {
@@ -32,7 +32,7 @@ extension JamfPlatform {
 
     /// Jamf refused a device action (HTTP 422): the device can’t take it.
     public struct DeviceActionRefused: Error, LocalizedError, Sendable, Hashable {
-        /// "restart", "shut down".
+        /// "restart", "shut down", "check in".
         public var verb: String
 
         public var errorDescription: String? {
@@ -145,7 +145,8 @@ extension JamfPlatform.Client {
     }
 
     /// The Jamf Account permission the device actions (restart, shut down,
-    /// check-in) need.
+    /// check-in) need. Erase and unmanage would need
+    /// `destructive-device-actions:execute`; JTKit has neither.
     public static let deviceActionsPermission = "device-actions:execute"
 
     /// Restarts a device through the Platform API’s device actions, by its
@@ -160,6 +161,17 @@ extension JamfPlatform.Client {
     /// Shuts a device down, as `restart(deviceID:)`.
     public func shutDown(deviceID: String) async throws {
         try await deviceAction(deviceID, "shutdown", verb: "shut down", privilege: .sendMobileDeviceShutDownCommand)
+    }
+
+    /// Asks a device to check in for pending commands
+    /// (`device-actions/v1/devices/{id}/check-in`), by its Platform API ID
+    /// (`device(serial:)`). Nothing changes on the device; the Platform
+    /// API’s counterpart of a Blank Push. Needs `device-actions:execute`,
+    /// named when it is refused. Never repeated after a server error.
+    ///
+    /// - Throws: `JamfPlatform.DeviceActionRefused` for a 422; `JamfPlatform.APIError`.
+    public func checkIn(deviceID: String) async throws {
+        try await deviceAction(deviceID, "check-in", verb: "check in", privilege: .viewMDMCommandInformation)
     }
 
     private func deviceAction(_ deviceID: String, _ action: String, verb: String, privilege: JamfPro.Privilege) async throws {

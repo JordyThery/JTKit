@@ -839,6 +839,47 @@ private struct ConnectionRow: View {
 
 // MARK: - Editor
 
+/// The question before unsaved changes are left: Save, Discard Changes or
+/// Cancel. `pending` holds what leaving does (close the window, switch tab)
+/// while the question is asked.
+private struct UnsavedChangesGuard: ViewModifier {
+    let isChanged: Bool
+    let canSave: Bool
+    let name: String
+    @Binding var pending: (@MainActor () -> Void)?
+    let save: @MainActor () -> Bool
+    let revert: @MainActor () -> Void
+    let disappeared: @MainActor () -> Void
+
+    func body(content: Content) -> some View {
+        content
+            .background(WindowCloseGuard(isActive: isChanged) { close in pending = close })
+            .confirmationDialog(
+                "Save the changes to “\(name)”?",
+                isPresented: Binding(get: { pending != nil }, set: { if !$0 { pending = nil } }),
+                titleVisibility: .visible
+            ) {
+                Button("Save") {
+                    let leave = pending
+                    pending = nil
+                    if save() { leave?() }
+                }
+                .disabled(!canSave)
+                Button("Discard Changes", role: .destructive) {
+                    let leave = pending
+                    pending = nil
+                    revert()
+                    leave?()
+                }
+                Button("Cancel", role: .cancel) { pending = nil }
+            } message: {
+                Text(canSave ? "The changes to this connection haven’t been saved."
+                             : "The changes to this connection haven’t been saved, and can’t be until the problems shown are fixed.")
+            }
+            .onDisappear(perform: disappeared)
+    }
+}
+
 private struct ConnectionEditor<Record: ConnectionRecord, AppSection: View>: View {
 
     private enum TestState: Equatable {
@@ -872,8 +913,10 @@ private struct ConnectionEditor<Record: ConnectionRecord, AppSection: View>: Vie
     @State private var importedKeyName: String?
     @State private var keyImportError: String?
     @State private var environmentState = EnvironmentListState.idle
-    /// Closes the Settings window, once the person chose Save or Discard.
+    /// Closes the Settings window, or switches to another Settings tab, once
+    /// the person chose Save or Discard.
     @State private var pendingClose: PendingClose?
+    @Environment(\.settingsTabSelection) private var settingsTabs
 
     private struct PendingClose {
         let close: @MainActor () -> Void
@@ -973,34 +1016,15 @@ private struct ConnectionEditor<Record: ConnectionRecord, AppSection: View>: Vie
             }
         }
         .formStyle(.grouped)
-        // closing Settings with unsaved changes asks first
-        .background(WindowCloseGuard(isActive: isChanged) { close in pendingClose = PendingClose(close: close) })
-        .confirmationDialog(
-            "Save the changes to “\(ConnectionMenuText.name(of: current))”?",
-            isPresented: Binding(get: { pendingClose != nil }, set: { if !$0 { pendingClose = nil } }),
-            titleVisibility: .visible
-        ) {
-            Button("Save") {
-                let close = pendingClose?.close
-                pendingClose = nil
-                if save() { close?() }
-            }
-            .disabled(!canSave)
-            Button("Discard Changes", role: .destructive) {
-                let close = pendingClose?.close
-                pendingClose = nil
-                revert()
-                close?()
-            }
-            Button("Cancel", role: .cancel) { pendingClose = nil }
-        } message: {
-            Text(canSave ? "The changes to this connection haven’t been saved."
-                         : "The changes to this connection haven’t been saved, and can’t be until the problems shown are fixed.")
-        }
+        .modifier(unsavedChangesGuard)
         .fileImporter(isPresented: $showingKeyImporter, allowedContentTypes: ApplePrivateKey.contentTypes,
                       onCompletion: importPrivateKey)
         .onAppear(perform: loadSecrets)
-        .onChange(of: isChanged, initial: true) { hasChanges = isChanged }
+        .onChange(of: isChanged, initial: true) {
+            hasChanges = isChanged
+            // switching to another Settings tab with unsaved changes asks too
+            updateLeaveGuard()
+        }
         .onChange(of: draft) { testState = .idle }
         .onChange(of: secrets) {
             testState = .idle
@@ -1008,6 +1032,25 @@ private struct ConnectionEditor<Record: ConnectionRecord, AppSection: View>: Vie
         }
         // a list loaded with other sign-in values may not be this integration’s
         .onChange(of: [current.region.rawValue, current.hostOverride, current.clientID]) { environmentState = .idle }
+    }
+
+    private func updateLeaveGuard() {
+        guard let settingsTabs else { return }
+        if isChanged {
+            settingsTabs.leaveGuard = { proceed in pendingClose = PendingClose(close: proceed) }
+        } else {
+            settingsTabs.leaveGuard = nil
+        }
+    }
+
+    /// Closing Settings, or switching to another Settings tab, with unsaved
+    /// changes asks Save / Discard Changes / Cancel first.
+    private var unsavedChangesGuard: UnsavedChangesGuard {
+        UnsavedChangesGuard(
+            isChanged: isChanged, canSave: canSave, name: ConnectionMenuText.name(of: current),
+            pending: Binding(get: { pendingClose?.close }, set: { pendingClose = $0.map(PendingClose.init) }),
+            save: { save() }, revert: { revert() },
+            disappeared: { settingsTabs?.leaveGuard = nil })
     }
 
     // MARK: Fields
