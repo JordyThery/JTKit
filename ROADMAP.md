@@ -673,6 +673,7 @@ Before any app is released or updated, in this order:
 2. A **full apple-design review** of the whole app. Accessibility findings are fixed; Jordy decides on the rest.
 3. An **independent code review** of the whole app (Claude Fable, run separately), after which Jordy decides what gets fixed.
 4. **Jordy’s check by hand**, then tag and release.
+5. **Website**: in the same release, the app's card on apps.html and its own page, if it has one, are checked and changed through a pull request on the jordythery.be repo (rules in its CLAUDE.md). Jordy merges, which publishes the site.
 Until step 11 exists, 1 means build, unit tests and the live checks Jordy asks for.
 
 ### After 1.0
