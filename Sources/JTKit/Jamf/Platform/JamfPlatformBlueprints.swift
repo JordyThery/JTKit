@@ -187,14 +187,51 @@ extension JamfPlatform {
         public var blueprintState: BlueprintState?
         public var report: BlueprintReport?
         public var checkedAt: Date
+        /// The Blueprint’s answer had no `lastDeployment`, so `jobState`
+        /// was read from its own state (`DEPLOYED` is `SUCCEEDED`).
+        public var readFromBlueprintState: Bool
 
         public init(jobState: String? = nil, jobStarted: String? = nil, blueprintState: BlueprintState? = nil,
-                    report: BlueprintReport? = nil, checkedAt: Date = Date()) {
+                    report: BlueprintReport? = nil, checkedAt: Date = Date(), readFromBlueprintState: Bool = false) {
             self.jobState = jobState
             self.jobStarted = jobStarted
             self.blueprintState = blueprintState
             self.report = report
             self.checkedAt = checkedAt
+            self.readFromBlueprintState = readFromBlueprintState
+        }
+
+        /// Where a deployment stands from one read of the Blueprint.
+        ///
+        /// The deployment that counts is the one whose `lastDeployment.started`
+        /// differs from `previousStart`. When the answer has no
+        /// `lastDeployment` at all, the Blueprint’s own state stands in:
+        /// `DEPLOYED` is `SUCCEEDED`, a state naming a failure is `FAILED`,
+        /// anything else (not deployed, out of date) is still going.
+        ///
+        /// A Blueprint that was already `DEPLOYED` before this deploy
+        /// (`stateBefore`) counts as done only once a check has seen it in
+        /// another state since (`sawOtherState`): its `DEPLOYED` could still
+        /// be the previous deployment’s.
+        static func from(_ deployment: DeploymentState?, previousStart: String?, report: BlueprintReport?,
+                         checkedAt: Date = Date(), stateBefore: BlueprintState? = nil,
+                         sawOtherState: Bool = false) -> DeploymentStatus {
+            let started = deployment?.lastDeploymentStarted
+            if let deployment, started == nil, deployment.lastDeploymentState == nil {
+                let jobState: String?
+                switch deployment.state {
+                case .deployed where stateBefore == .deployed && !sawOtherState: jobState = nil
+                case .deployed: jobState = "SUCCEEDED"
+                case .other(let raw) where raw.uppercased().contains("FAIL"): jobState = "FAILED"
+                default: jobState = nil
+                }
+                return DeploymentStatus(jobState: jobState, jobStarted: nil, blueprintState: deployment.state,
+                                        report: report, checkedAt: checkedAt, readFromBlueprintState: true)
+            }
+            let isNew = started != nil && started != previousStart
+            return DeploymentStatus(jobState: isNew ? deployment?.lastDeploymentState : nil,
+                                    jobStarted: isNew ? started : nil,
+                                    blueprintState: deployment?.state, report: report, checkedAt: checkedAt)
         }
 
         public var isFinished: Bool { jobState == "SUCCEEDED" || jobState == "FAILED" }
@@ -299,32 +336,32 @@ extension JamfPlatform {
         /// from the previous one (also one started since the caller’s copy
         /// was read).
         public func startDeployment(id: String) async throws -> String? {
-            let previous = try await detail(id: id).overview.deploymentState?.lastDeploymentStarted
+            let before = try await detail(id: id).overview.deploymentState
+            DeploymentBaselines.shared.set(before?.state, for: baselineKey(id))
             try await deploy(id: id)
-            return previous
+            return before?.lastDeploymentStarted
         }
 
         /// Follows the deployment that replaced `previousStart` until it
         /// succeeds or fails, or the poller’s time limit is reached (5 minutes
-        /// by default). Each check reads the Blueprint and its report.
+        /// by default). Each check reads the Blueprint and its report. When
+        /// Jamf’s answer has no `lastDeployment`, the Blueprint’s own state
+        /// decides (see `DeploymentStatus.readFromBlueprintState`).
         public func watchDeployment(
             id: String,
             previousStart: String?,
             poller: Poller = Poller(),
             progress: @Sendable (DeploymentStatus) async -> Void = { _ in }
         ) async throws -> PollOutcome<DeploymentStatus> {
-            try await poller.poll(
+            // the state before this deploy, from `startDeployment` on this server
+            let stateBefore = DeploymentBaselines.shared.state(for: baselineKey(id))
+            let sawOtherState = DeploymentBaselines.Flag()
+            return try await poller.poll(
                 check: {
                     let deployment = try await detail(id: id).overview.deploymentState
-                    let started = deployment?.lastDeploymentStarted
-                    let isNew = started != nil && started != previousStart
-                    return DeploymentStatus(
-                        jobState: isNew ? deployment?.lastDeploymentState : nil,
-                        jobStarted: isNew ? started : nil,
-                        blueprintState: deployment?.state,
-                        report: try? await report(id: id),
-                        checkedAt: Date()
-                    )
+                    if let state = deployment?.state, state != .deployed { sawOtherState.set() }
+                    return DeploymentStatus.from(deployment, previousStart: previousStart, report: try? await report(id: id),
+                                                 stateBefore: stateBefore, sawOtherState: sawOtherState.isSet)
                 },
                 isDone: \.isFinished,
                 progress: progress
@@ -332,6 +369,10 @@ extension JamfPlatform {
         }
 
         // MARK: Private
+
+        private func baselineKey(_ id: String) -> String {
+            "\(client.baseURL.absoluteString)|\(client.scope)|\(id)"
+        }
 
         static func itemPath(_ id: String) -> String {
             "\(path)/\(JamfPlatform.pathSegment(id))"
@@ -352,5 +393,28 @@ extension JamfPlatform {
                 method: "PATCH", path: Self.itemPath(id), body: LosslessJSON.object(body).serialized(),
                 contentType: "application/merge-patch+json", repeating: .safe))
         }
+    }
+}
+
+/// The Blueprint state `startDeployment` read before its deploy, for the
+/// watch that follows (also when the app keeps only `previousStart`).
+nonisolated final class DeploymentBaselines: @unchecked Sendable {
+    static let shared = DeploymentBaselines()
+    private let lock = NSLock()
+    private var states: [String: JamfPlatform.BlueprintState] = [:]
+
+    func set(_ state: JamfPlatform.BlueprintState?, for key: String) {
+        lock.withLock { states[key] = state }
+    }
+
+    func state(for key: String) -> JamfPlatform.BlueprintState? {
+        lock.withLock { states[key] }
+    }
+
+    final class Flag: @unchecked Sendable {
+        private let lock = NSLock()
+        private var value = false
+        func set() { lock.withLock { value = true } }
+        var isSet: Bool { lock.withLock { value } }
     }
 }

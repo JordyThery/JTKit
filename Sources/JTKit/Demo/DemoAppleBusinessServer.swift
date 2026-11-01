@@ -139,7 +139,11 @@ public nonisolated final class DemoAppleBusinessServer: DemoServer, @unchecked S
             }
             switch (request.method, Array(path.dropFirst())) {
             case ("GET", ["orgDevices"]):
-                return list(order.compactMap { records[$0] }.map { ["type": "orgDevices", "id": $0.device.serial,
+                // Apple’s filter on several serials: `filter[serialNumber]=A,B`
+                let wanted = request.query["filter[serialNumber]"].map {
+                    Set($0.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces).uppercased() })
+                }
+                return list(order.filter { wanted?.contains($0.uppercased()) ?? true }.compactMap { records[$0] }.map { ["type": "orgDevices", "id": $0.device.serial,
                                                                     "attributes": attributes($0)] }, request)
             case ("GET", let p) where p.count == 2 && p[0] == "orgDevices":
                 guard let record = records[p[1].uppercased()] else { return Self.notFound() }

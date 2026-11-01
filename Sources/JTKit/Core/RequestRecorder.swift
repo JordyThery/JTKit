@@ -35,24 +35,41 @@ public nonisolated struct RequestRecorder: Sendable {
     public var service: String?
     /// The connection’s name.
     public var connection: String?
+    /// Where waits before a retry are shown while they last, for the app’s
+    /// status; nil: only in the activity log.
+    public var waits: RequestWaits?
+    /// Requests whose bodies (both, also of a success) may be recorded, as
+    /// if each were marked `recordsBodies`: for an app whose requests go
+    /// through JTKit’s own calls, e.g. AppSettings2Blueprint’s Blueprint
+    /// reads and writes. Gets the method and the path as the client builds
+    /// it (`blueprints/v1/blueprints/…`). Only for requests the app knows
+    /// carry nothing secret. Never applies to sign-ins or to the sensitive
+    /// calls (`SensitiveRequests`), whose contents are never recorded.
+    public var recordsBodies: (@Sendable (_ method: String, _ path: String) -> Bool)?
 
     /// - Parameters:
     ///   - session: what sends the requests: the app’s own session, or a
     ///     demo source’s (`DemoSource.session`). No default, so demo mode’s
     ///     clients can’t end up on the real network by accident.
     ///   - log: where entries go; nil records nothing (previews).
+    ///   - waits: shows waits before a retry while they last (see `RequestWaits`).
+    ///   - recordsBodies: requests whose bodies may be recorded (see the property).
     public init(
         session: URLSession,
         log: ActivityLog?,
         category: String = "API",
         service: String? = nil,
-        connection: String? = nil
+        connection: String? = nil,
+        waits: RequestWaits? = nil,
+        recordsBodies: (@Sendable (_ method: String, _ path: String) -> Bool)? = nil
     ) {
         self.session = session
         self.log = log
         self.category = category
         self.service = service
         self.connection = connection
+        self.waits = waits
+        self.recordsBodies = recordsBodies
     }
 
     /// Sends the request and records it.
@@ -100,7 +117,8 @@ public nonisolated struct RequestRecorder: Sendable {
         let data: Data
         let response: URLResponse
         do {
-            (data, response) = try await session.data(for: request, delegate: delegate)
+            // under the live-check switch: the gateway, never the app’s own session
+            (data, response) = try await LiveLaunch.route(session).data(for: request, delegate: delegate)
         } catch {
             if Self.isCancellation(error) {
                 await record(context, duration: started.elapsedSeconds, cancelled: true)
@@ -144,7 +162,7 @@ public nonisolated struct RequestRecorder: Sendable {
         let file: URL
         let response: URLResponse
         do {
-            (file, response) = try await session.download(for: request, delegate: delegate)
+            (file, response) = try await LiveLaunch.route(session).download(for: request, delegate: delegate)
         } catch {
             if Self.isCancellation(error) {
                 await record(context, duration: started.elapsedSeconds, cancelled: true)
@@ -394,7 +412,8 @@ public typealias RecordedJSONFilter = @Sendable (Any) -> Any
 public nonisolated enum SensitiveRequests {
     nonisolated(unsafe) private static let patterns: [Regex<Substring>] = [
         /(?i)\/(?:api|pro)\/v\d+\/mobile-devices\/[^\/]+\/detail\/?$/,
-        /(?i)\/(?:api|pro)\/v\d+\/computers-inventory\/[^\/]+\/(?:erase|filevault|view-device-lock-pin|view-recovery-lock-password)\/?$/,
+        // (older Jamf Pro’s v1 erase is under `computer-inventory`, singular)
+        /(?i)\/(?:api|pro)\/v\d+\/computers?-inventory\/[^\/]+\/(?:erase|filevault|view-device-lock-pin|view-recovery-lock-password)\/?$/,
         // every computer’s FileVault key at once
         /(?i)\/(?:api|pro)\/v\d+\/computers-inventory\/filevault\/?$/,
         // a LAPS password, and its history (earlier passwords and who viewed them)

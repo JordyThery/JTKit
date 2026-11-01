@@ -1,6 +1,78 @@
 # Changelog
 
-## Unreleased
+## 1.1.0 (2026-11-01)
+A minor release: additions and fixes. Code written for 1.0 still compiles; what is replaced is deprecated, with its replacement named.
+
+### New
+- Connections: `JamfPlatform.Client.testConnection(checks:summary:)` (sign-in, permission checks, “Connected · …”);
+  `ConnectionsSettingsTab` takes `deleteRefusal` (− disabled, the reason shown), `deleteTypedName` (Delete only
+  once the connection’s name is typed) and `deleteMessages` (the confirmation per connection);
+  `Connection.serverOrigin(_:)` and a public `Connection.isWebAddress(_:)`.
+- Jamf: `JamfWebLink` (read-only pages of computers, mobile devices, configuration profiles, Blueprints and Jamf
+  School devices); `JamfPlatform.Client.platformGroups()` over `pro/v2/groups` (platform IDs, on Jamf Pro direct
+  too); `JamfSchool.Device.lastCheckInText`; a public `JamfSchool.moveBatchSize`; the Platform API’s check-in
+  device action.
+- Apple: `ABM.Client.devices(serials:)` reads several devices with `filter[serialNumber]` in batches of 50,
+  following `links.next` as given; where the filter is refused (400), not applied, or leaves out a device Apple
+  has, it reads one serial at a time and doesn’t use the filter again for that organization.
+- Microsoft: `MicrosoftToken.tenantID`, `EntraToken.tenantID(ofAccessToken:)`, `EntraTenant.isSame` and
+  `Graph.TokenProvider.tenantID()`: compare tenants by the sign-in’s tenant ID, not as typed.
+- Shared: a public `HTTPClient` for an app’s own services (https only, no token needed);
+  `TimestampedBackupStore` with `BackupRetention`; `FileCopies.keepUnreadableCopy(of:)`; `ReleaseVersion` and
+  `GitHubReleases.latest(owner:repo:)`, which skip drafts, prereleases and tags that aren’t a version.
+- Views: `StatusBadge` styles `colored(_:)`, `success`, `attention`, `failure` and `info` (primary text on a wash
+  of the color, stronger under Increase Contrast); `JamfPlatform.BlueprintState.badgeStyle`; `WarningLabel`.
+- Retry waits: `RequestWaits` shows every wait before a retry (“Jamf asked to wait 40 s”) and ends them at once;
+  the longest wait is 60 s.
+- Activity log: Copy Log (masked or not), a larger `ActivityLog(capacity:)`, and `RequestRecorder.recordsBodies`
+  for requests whose bodies carry nothing secret.
+- Apple private keys can be pasted, or imported from any text file.
+- Demo mode: `DemoScenario.rateLimited` and a per-app tooltip (`DemoMode(help:)`, `DemoMode.help`).
+- Live checks: allow-list version 2 (`disposable`/`read`, `customer` refused, `testDevices`, `productionReads`;
+  version 1 still reads); the launch switch `-JTKitLiveCheck` (`LiveLaunch`) with the `jtkit-live-gateway`
+  process, so a live UI test drives the real app against the release check’s tenants; `JTKitUITestSupport`’s
+  `launchLive(roles:)`, `waitForNetwork()`, `requireRunObjectsGone()` and `LiveJamfPlatformAPI`;
+  `LiveLaunch.appFilesFolder(_:)`; `LiveBlueprintDeployCheck`; the report lists the writes per tenant. Device
+  commands go only to listed test devices (at most 3 a run, never on production); interruptive ones are refused
+  until a serial prompt exists. The roles’ secrets reach only the gateway, which hands them to test processes on
+  a request with its token: none is in a test runner’s or app’s environment.
+
+### Fixed
+- A Keychain that can’t be read is reported as such, not as “no secret”; a connection conversion tries again at
+  the next launch instead of finishing without the secret.
+- Changing a Platform API connection’s region keeps its stored secret usable; the editor says before Save when a
+  change of service or sign-in method removes the stored secret.
+- Server addresses: one saved without a scheme gets `https://`; `http://` is refused (“Use an https:// address”).
+- Settings asks Save / Discard / Cancel before closing, or switching tabs, with unsaved connection edits; a
+  connection made with + becomes the one in use on its first Save, and + asks about unsaved edits first.
+- An identifier with other characters is “not found”, not an error.
+- Jamf Pro older than 11.30.0 gets the `v1` computer paths, decided by the server’s version (asked once, shared
+  by requests at the same time); the app’s allow-list decides on its own `v4` request.
+- An Environment ID that isn’t a UUID is shown under its field; uppercase is sent lowercased.
+- Blueprint deploy: without `lastDeployment` the Blueprint’s own state decides, and a redeploy of a deployed
+  Blueprint isn’t reported done before the watch has seen it change.
+- A refused Platform device action names `device-actions:execute`; `platformGroups()` names its Jamf Pro privileges.
+- The update check falls back to the highest version when GitHub’s latest release tag isn’t a version.
+- `TimestampedBackupStore` leaves the permissions of a root folder it didn’t make alone.
+
+### Deprecated
+- `ConnectionStore.secret(_:for:)` → `readSecret(_:for:)` (or `requiredSecret(_:for:)`; `copySecret` for conversions).
+- `KeychainSecretStore.secret(for:)` → `readSecret(for:)`.
+
+### Moving an app to 1.1.0
+- Replace `secret(_:for:)` / `secret(for:)` with `readSecret` (or `requiredSecret`) and show its error: a
+  Keychain that can’t be read is no longer an empty secret.
+- Give the clients’ recorders a `RequestWaits` (`RequestRecorder(waits:)`) and show `statusText` with a way to
+  stop, so retry waits are visible.
+- Under the live-check switch (`LiveLaunch.isSwitched`), write the app’s own files (backups, exports, journals,
+  reports) to `LiveLaunch.appFilesFolder(_:)`, never their usual place.
+- Two app unit tests check 1.0 behavior and change with the move: Profile2Blueprint’s longest retry wait (now
+  60 s, was 120 s) and Checkpoint’s message for an `http://` address.
+- Release checks need allow-list version 2 and 1.1.0’s `Scripts/release-check-lib.sh`: JTKit 1.0 can’t read a
+  version 2 list. An app’s allow-list no longer needs JTKit’s Jamf Pro version probe or the `v1` computer paths.
+- If the app switches over `DemoScenario` or `StatusBadge.Style`, add the new cases (none of the eight apps does).
+
+### Other
 - `Scripts/check-versions.sh`: run from an app’s folder at the start of a
   conversation. Prints the app’s resolved JTKit version against JTKit’s
   latest tag on GitHub (with the CHANGELOG entries in between) and, for

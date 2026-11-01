@@ -39,6 +39,23 @@ public nonisolated enum ConnectionStoreError: LocalizedError, Equatable, Sendabl
     }
 }
 
+/// No secret is stored for a connection that needs one.
+public nonisolated struct MissingSecretError: LocalizedError, Equatable, Sendable {
+    /// The connection’s name.
+    public let connection: String
+    /// e.g. "Client secret".
+    public let secretName: String
+
+    public init(connection: String, secretName: String) {
+        self.connection = connection
+        self.secretName = secretName
+    }
+
+    public var errorDescription: String? {
+        "No \(secretName.lowercased()) is stored for “\(connection)”. Enter it in Settings › Connections."
+    }
+}
+
 /// The app’s saved connections: its own records, in its own storage, with
 /// their secrets in its own Keychain items.
 ///
@@ -63,11 +80,25 @@ public final class ConnectionStore<Record: ConnectionRecord> {
     ///   - storage: where the app’s records are, e.g. `JSONFileConnectionStorage`.
     ///   - secrets: where each kind of secret is; kinds the app doesn’t use are left out.
     ///   - log: receives problems, never secrets.
+    ///   - liveRecord: the app’s record for one of the release check’s
+    ///     connections. Under the live-check switch (`LiveLaunch`) the store
+    ///     holds only those, in memory, with their secrets from the run:
+    ///     `storage` and the Keychain are never touched. Without it the store
+    ///     is empty under the switch.
     public init(storage: any ConnectionStorage<Record>,
                 secrets: [ConnectionSecretKind: SecretLocation],
-                log: ((String) -> Void)? = nil) {
-        self.storage = storage
-        self.secretLocations = secrets
+                log: ((String) -> Void)? = nil,
+                liveRecord: ((Connection) -> Record)? = nil) {
+        if LiveLaunch.isSwitched {
+            let records = LiveLaunch.connections.compactMap { liveRecord?($0) }
+            self.storage = InMemoryConnectionStorage(records)
+            self.secretLocations = Dictionary(uniqueKeysWithValues: secrets.keys.map {
+                ($0, SecretLocation(store: LiveLaunch.secrets(for: $0)))
+            })
+        } else {
+            self.storage = storage
+            self.secretLocations = secrets
+        }
         self.log = log
         reload()
     }
@@ -75,7 +106,7 @@ public final class ConnectionStore<Record: ConnectionRecord> {
     /// Reads the saved list again, e.g. after another Mac changed it.
     public func reload() {
         do {
-            records = try storage.load()
+            records = try storage.load().map(Self.normalized)
             problem = nil
         } catch {
             let copy = storage.keepUnreadableCopy()
@@ -95,6 +126,7 @@ public final class ConnectionStore<Record: ConnectionRecord> {
         guard !record.connection.isDemo else {
             throw ConnectionStoreError.couldNotSave("“\(record.connection.name)” is a demo connection, which is never saved.")
         }
+        let record = Self.normalized(record)
         var updated = records
         if let index = updated.firstIndex(where: { $0.id == record.id }) {
             updated[index] = record
@@ -159,10 +191,11 @@ public final class ConnectionStore<Record: ConnectionRecord> {
 
     // MARK: Secrets
 
+    /// Nil also when the Keychain refused or is locked.
+    @available(*, deprecated, renamed: "readSecret(_:for:)",
+               message: "Use readSecret(_:for:), which reports a Keychain that can’t be read instead of returning nil.")
     public func secret(_ kind: ConnectionSecretKind = .main, for connection: Connection) -> String? {
-        guard !connection.isDemo else { return nil }
-        guard let location = secretLocations[kind] else { return nil }
-        return location.store.secret(for: location.account(connection))
+        try? readSecret(kind, for: connection)
     }
 
     /// Whether a secret is stored, asking the Keychain for the item’s
@@ -173,10 +206,46 @@ public final class ConnectionStore<Record: ConnectionRecord> {
         return try location.store.hasSecret(for: location.account(connection))
     }
 
-    /// The secret, nil when none is stored; throws when it can’t be read.
-    func readSecret(_ kind: ConnectionSecretKind, for connection: Connection) throws -> String? {
+    /// The secret, nil when none is stored. Demo connections have none.
+    /// - Throws: `SecretStoreError` when one may be stored but the Keychain
+    ///   can’t read it (refused, locked): show that, not "no secret".
+    public func readSecret(_ kind: ConnectionSecretKind = .main, for connection: Connection) throws -> String? {
         guard !connection.isDemo, let location = secretLocations[kind] else { return nil }
         return try location.store.readSecret(for: location.account(connection))
+    }
+
+    /// The secret a sign-in needs, e.g. in a token provider’s `secret` closure.
+    /// - Throws: `MissingSecretError` when none is stored (or it is empty),
+    ///   `SecretStoreError` when the Keychain can’t read it.
+    public func requiredSecret(_ kind: ConnectionSecretKind = .main, for connection: Connection) throws -> String {
+        guard let secret = try readSecret(kind, for: connection), !secret.isEmpty else {
+            throw MissingSecretError(connection: ConnectionMenuText.name(of: connection),
+                                     secretName: kind == .protect ? "Jamf Protect client secret" : connection.signIn.secretName ?? "secret")
+        }
+        return secret
+    }
+
+    /// Copies a secret the app kept somewhere else (e.g. under an account
+    /// name from before its connections were converted) to this
+    /// connection’s own item. The original is left as it is.
+    ///
+    /// For a one-time conversion: only mark it done when this didn’t throw,
+    /// so a Keychain that refused or was locked is tried again at the next
+    /// launch instead of leaving the connection without its secret.
+    ///
+    /// - Returns: false when there is nothing to copy (no secret, or an empty one).
+    /// - Throws: `SecretStoreError` when the old secret can’t be read,
+    ///   `ConnectionStoreError.keychainRefused` when it can’t be saved.
+    @discardableResult
+    public func copySecret(from source: any SecretStore, account: String,
+                           to kind: ConnectionSecretKind = .main, for connection: Connection) throws -> Bool {
+        guard let secret = try source.readSecret(for: account), !secret.isEmpty else { return false }
+        do {
+            try writeSecret(secret, kind, for: connection)
+        } catch {
+            throw ConnectionStoreError.keychainRefused(status: (error as? SecretWriteError)?.status)
+        }
+        return true
     }
 
     /// Passing nil deletes the secret. Returns false when the write failed.
@@ -204,6 +273,19 @@ public final class ConnectionStore<Record: ConnectionRecord> {
 
     // MARK: Writing
 
+    /// The record with its server address as JTKit uses it: `https://`
+    /// added to an address saved without a scheme (see
+    /// `Connection.normalizedServerAddress`). Saved that way at the next save.
+    static func normalized(_ record: Record) -> Record {
+        var connection = record.connection
+        let address = Connection.normalizedServerAddress(connection.serverURL)
+        guard address != connection.serverURL, [.jamfPro, .jamfSchool].contains(connection.service) else { return record }
+        connection.serverURL = address
+        var updated = record
+        updated.connection = connection
+        return updated
+    }
+
     private func write(_ updated: [Record]) throws {
         if let problem { throw problem }
         if !hasBackedUp {
@@ -220,7 +302,7 @@ public final class ConnectionStore<Record: ConnectionRecord> {
             try storage.save(updated)
             // what the storage holds now; an adapter may keep more than the
             // records it was given, e.g. what it last wrote
-            records = (try? storage.load()) ?? updated
+            records = ((try? storage.load()) ?? updated).map(Self.normalized)
         } catch {
             log?("[Connections] couldn’t save: \(error)")
             throw ConnectionStoreError.couldNotSave(error.localizedDescription)

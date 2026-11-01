@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 
 /// The app and system named at the top of an activity log export.
@@ -78,6 +79,16 @@ public nonisolated enum ActivityLogExport {
         await Task.detached(priority: .userInitiated) {
             text(entries, masked: masked, app: app, exported: exported)
         }.value
+    }
+
+    /// "Copy Log" and "Copy Log, Devices Masked": the whole log on the
+    /// clipboard, as the export writes it.
+    @MainActor
+    static func copy(_ entries: [ActivityLogEntry], masked: Bool, app: ActivityLogAppInfo,
+                     to pasteboard: NSPasteboard = .general) async {
+        let text = await textInBackground(entries, masked: masked, app: app)
+        pasteboard.clearContents()
+        pasteboard.setString(text, forType: .string)
     }
 
     static func transcript(of entry: ActivityLogEntry, dateFormatter: DateFormatter) -> String {

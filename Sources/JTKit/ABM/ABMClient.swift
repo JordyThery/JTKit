@@ -24,6 +24,8 @@ extension ABM {
         /// Apple’s limit on this client’s requests; nil only for a demo organization.
         public let rateLimit: RateLimit?
         private let http: HTTPClient
+        /// Which organization this is, for what is learned about its filter.
+        private let organizationKey: String
         private let poller: JamfPlatform.Poller
         private let now: @Sendable () -> Date
 
@@ -52,6 +54,7 @@ extension ABM {
             self.hints = hints
             self.now = now
             self.rateLimit = rateLimit
+            organizationKey = (tokens as? ABM.TokenProvider).map { "\(service.host)|\($0.clientID)" } ?? UUID().uuidString
             http = HTTPClient(baseURL: service.baseURL, tokens: tokens, recorder: recorder,
                               redirects: .sameHostHTTPSOnly, rateLimit: rateLimit, rules: .appleBusiness,
                               sleep: sleep, random: random, now: now)
@@ -81,16 +84,106 @@ extension ABM {
         /// One device; nil when it isn’t in the organization (never enrolled,
         /// or already released).
         public func device(serial: String) async throws -> OrgDevice? {
-            let serial = try checked(serial)
+            guard let serial = Self.lookupSerial(serial) else { return nil }
             guard let data = try await getUnlessNotFound("v1/orgDevices/\(serial)", recordsBodies: true) else { return nil }
             var device = try decode(Single<Attributes<OrgDevice>>.self, from: data).data.attributes
             if device.serialNumber.isEmpty { device.serialNumber = serial }
             return device
         }
 
+        /// Most serials one filtered request asks for (Apple documents no
+        /// maximum; this keeps the address short).
+        public static let serialFilterBatchSize = 50
+
+        /// Several devices at once, by serial number: Apple’s
+        /// `filter[serialNumber]` on `v1/orgDevices`, in batches of
+        /// `serialFilterBatchSize`, each batch’s pages followed by their
+        /// `links.next` as Apple gives them. Keys are the serials uppercased;
+        /// a serial that isn’t in the organization (or has other characters
+        /// than letters and digits) has no entry.
+        ///
+        /// Where Apple refuses the filter (400), or a page holds a device that
+        /// wasn’t asked for (the filter wasn’t applied), the batch is read one
+        /// serial at a time with `device(serial:)` instead, as before. After
+        /// a batch with missing serials, one of them is read on its own: if
+        /// Apple has it, the filter missed it, so that batch is read one at a
+        /// time too. Either way the filter isn’t used again for this
+        /// organization while the app runs.
+        public func devices(serials: [String]) async throws -> [String: OrgDevice] {
+            var wanted = [String]()
+            var seen = Set<String>()
+            for serial in serials {
+                guard let checked = Self.lookupSerial(serial)?.uppercased(), seen.insert(checked).inserted else { continue }
+                wanted.append(checked)
+            }
+            var found = [String: OrgDevice]()
+            var start = 0
+            while start < wanted.count {
+                let batch = Array(wanted[start..<min(start + Self.serialFilterBatchSize, wanted.count)])
+                start += batch.count
+                if SerialFilterTrust.shared.isUsable(organizationKey), let devices = try await filteredDevices(batch) {
+                    if let missing = batch.first(where: { devices[$0] == nil }) {
+                        if let device = try await device(serial: missing) {
+                            // Apple has a serial its filter didn't return
+                            await recorder.note("GET", "v1/orgDevices",
+                                                note: "The serial number filter left out a device Apple has; reading the devices one at a time.",
+                                                isWarning: true)
+                            SerialFilterTrust.shared.distrust(organizationKey)
+                            found[missing] = device
+                            for serial in batch where serial != missing {
+                                try Task.checkCancellation()
+                                if let device = try await self.device(serial: serial) { found[serial] = device }
+                            }
+                            continue
+                        }
+                    }
+                    found.merge(devices) { first, _ in first }
+                    continue
+                }
+                // the filter isn’t supported here: the rest one serial at a time
+                SerialFilterTrust.shared.distrust(organizationKey)
+                for serial in batch {
+                    try Task.checkCancellation()
+                    if let device = try await device(serial: serial) { found[serial] = device }
+                }
+            }
+            return found
+        }
+
+        /// One batch through the filter; nil when Apple refuses the filter
+        /// (400) or answers with a device that wasn’t asked for.
+        private func filteredDevices(_ batch: [String]) async throws -> [String: OrgDevice]? {
+            struct FilterIgnored: Error {}
+            let asked = Set(batch)
+            var devices = [String: OrgDevice]()
+            do {
+                try await list("v1/orgDevices", query: [
+                    URLQueryItem(name: "filter[serialNumber]", value: batch.joined(separator: ",")),
+                    URLQueryItem(name: "limit", value: "1000"),
+                    URLQueryItem(name: "fields[orgDevices]", value: OrgDevice.fields.joined(separator: ",")),
+                ], recordsBodies: true, eachPage: { items in
+                    for item in items {
+                        let device = try self.decode(Attributes<OrgDevice>.self, from: item).attributes
+                        let serial = device.serialNumber.uppercased()
+                        guard asked.contains(serial) else { throw FilterIgnored() }
+                        devices[serial] = device
+                    }
+                })
+            } catch is FilterIgnored {
+                await recorder.note("GET", "v1/orgDevices", note: "The serial number filter wasn’t applied; reading the devices one at a time.",
+                                    isWarning: true)
+                return nil
+            } catch let error as ABM.APIError where error.status == 400 {
+                await recorder.note("GET", "v1/orgDevices", note: "Apple doesn’t accept the serial number filter here; reading the devices one at a time.",
+                                    isWarning: true)
+                return nil
+            }
+            return devices
+        }
+
         /// A device’s AppleCare coverage; empty when it isn’t in the organization.
         public func appleCareCoverage(serial: String) async throws -> [AppleCareCoverage] {
-            let serial = try checked(serial)
+            guard let serial = Self.lookupSerial(serial) else { return [] }
             guard let data = try await getUnlessNotFound("v1/orgDevices/\(serial)/appleCareCoverage",
                                                          recordsBodies: true) else { return [] }
             struct Fields: Decodable {
@@ -109,7 +202,7 @@ extension ABM {
         /// say: not in it (404), or Apple’s documented server error for a
         /// device in an internal state, which isn’t retried or shown.
         public func activationLock(serial: String) async throws -> ActivationLock? {
-            let serial = try checked(serial)
+            guard let serial = Self.lookupSerial(serial) else { return nil }
             let response = try await sendUnlessNotFound(HTTPRequest(path: "v1/orgDevices/\(serial)/activationLockStatus",
                                                                     recordsBodies: true, serverErrorIsAnAnswer: true))
             guard let response, (200..<300).contains(response.status) else { return nil }
@@ -124,7 +217,7 @@ extension ABM {
         /// The ID of the service a device is assigned to; nil when unassigned
         /// or not in the organization.
         public func assignedServerID(serial: String) async throws -> String? {
-            let serial = try checked(serial)
+            guard let serial = Self.lookupSerial(serial) else { return nil }
             guard let data = try await getUnlessNotFound("v1/orgDevices/\(serial)/relationships/assignedServer",
                                                          recordsBodies: true) else { return nil }
             struct Reference: Decodable { let data: Item?; struct Item: Decodable { let id: String } }
@@ -343,8 +436,9 @@ extension ABM {
             return items
         }
 
-        private func list(_ path: String, query: [URLQueryItem], eachPage: ([Data]) throws -> Void) async throws {
-            var request = HTTPRequest(path: path, query: query)
+        private func list(_ path: String, query: [URLQueryItem], recordsBodies: Bool = false,
+                          eachPage: ([Data]) throws -> Void) async throws {
+            var request = HTTPRequest(path: path, query: query, recordsBodies: recordsBodies)
             var pages = 0
             while true {
                 try Task.checkCancellation()
@@ -360,6 +454,7 @@ extension ABM {
                 try eachPage(try elements.map { try JSONSerialization.data(withJSONObject: $0, options: [.fragmentsAllowed]) })
                 guard let next = (page["links"] as? [String: Any])?["next"] as? String, !next.isEmpty else { return }
                 request = try nextPage(next)
+                request.recordsBodies = recordsBodies
             }
         }
 
@@ -375,6 +470,13 @@ extension ABM {
         }
 
         // MARK: - Private
+
+        /// A lookup’s serial, or nil for one with other characters than
+        /// letters and digits: Apple has no such device, so the lookup
+        /// answers "not in the organization" without sending anything.
+        private static func lookupSerial(_ serial: String) -> String? {
+            try? ABM.checkedSerial(serial)
+        }
 
         private func checked(_ serial: String) throws -> String {
             do {
@@ -444,4 +546,15 @@ nonisolated enum RequestPathSegment {
         }
         return segment
     }
+}
+
+/// Organizations whose `filter[serialNumber]` can’t be trusted (refused,
+/// not applied, or leaving out a device Apple has), for as long as the app runs.
+nonisolated final class SerialFilterTrust: @unchecked Sendable {
+    static let shared = SerialFilterTrust()
+    private let lock = NSLock()
+    private var distrusted: Set<String> = []
+
+    func isUsable(_ organization: String) -> Bool { lock.withLock { !distrusted.contains(organization) } }
+    func distrust(_ organization: String) { _ = lock.withLock { distrusted.insert(organization) } }
 }

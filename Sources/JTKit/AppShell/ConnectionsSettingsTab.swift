@@ -152,6 +152,49 @@ public final class AllConnectionsChoice {
     }
 }
 
+/// New connections made with + that haven’t been saved yet: they get a
+/// role only on their first successful Save, so an empty “New tenant” is
+/// never the connection in use (an app that signs in when it changes would
+/// show a failure before anything is typed). Imports get theirs at once.
+@MainActor
+struct UnsavedNewConnections {
+    private(set) var ids: Set<UUID> = []
+
+    /// A record + just made: no role yet.
+    mutating func added(_ id: UUID) {
+        ids.insert(id)
+    }
+
+    /// After a Save: the roles to give, once, for a record + made.
+    mutating func saved<Record: ConnectionRecord>(_ record: Record, among roles: [ConnectionRole],
+                                                  store: ConnectionStore<Record>) -> [ConnectionRole] {
+        guard ids.remove(record.id) != nil else { return [] }
+        return ConnectionRoleFilling.roles(toGive: record.connection, among: roles, store: store)
+    }
+
+    mutating func removed(_ id: UUID) {
+        ids.remove(id)
+    }
+}
+
+/// Which role a new or imported connection gets: the first role that
+/// accepts it and has no connection in use (none chosen, or one that is no
+/// longer saved), unless it already has a role. So JamfMigrator’s first
+/// tenant becomes the Source, the next the Destination.
+enum ConnectionRoleFilling {
+    @MainActor
+    static func roles<Record: ConnectionRecord>(toGive connection: Connection, among roles: [ConnectionRole],
+                                                store: ConnectionStore<Record>) -> [ConnectionRole] {
+        guard !connection.isDemo,
+              !roles.contains(where: { $0.selection.wrappedValue == connection.id }),
+              let role = roles.first(where: { role in
+                  role.accepts(connection) && role.selection.wrappedValue.flatMap(store.record(id:)) == nil
+              })
+        else { return [] }
+        return [role]
+    }
+}
+
 /// Which services the editor offers for a connection, and which sign-in
 /// methods for a service.
 nonisolated enum ConnectionServiceChoices {
@@ -183,9 +226,12 @@ nonisolated enum ConnectionServiceChoices {
 
     /// Whether the stored secret of a kind still goes with the edited
     /// values: not once the service, the sign-in method or where the secret
-    /// is sent (the server URL, the Platform region or host, the Intune
-    /// tenant, the Jamf Protect URL) differs from the saved connection, so a
-    /// mistyped host never gets the saved secret.
+    /// is sent (the server, the Platform host override, the Intune tenant,
+    /// the Jamf Protect URL) differs from the saved connection, so a
+    /// mistyped host never gets the saved secret. A Jamf Platform API
+    /// client secret belongs to the API client, not the region, so a
+    /// region change keeps it; an address that changes only its scheme
+    /// (none, `http://`, `https://`) is the same server.
     static func storedSecretApplies(_ kind: ConnectionSecretKind, saved: Connection, edited: Connection) -> Bool {
         func same(_ a: String, _ b: String) -> Bool {
             a.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
@@ -195,13 +241,13 @@ nonisolated enum ConnectionServiceChoices {
         switch kind {
         case .main:
             switch edited.service {
-            case .jamfPlatform: return saved.region == edited.region && same(saved.hostOverride, edited.hostOverride)
-            case .jamfPro, .jamfSchool: return same(saved.serverURL, edited.serverURL)
+            case .jamfPlatform: return Connection.sameServer(saved.hostOverride, edited.hostOverride)
+            case .jamfPro, .jamfSchool: return Connection.sameServer(saved.serverURL, edited.serverURL)
             case .intune: return same(saved.tenantID, edited.tenantID)
             case .appleBusinessManager, .appleSchoolManager: return true
             }
         case .protect:
-            return same(saved.protect?.url ?? "", edited.protect?.url ?? "")
+            return Connection.sameServer(saved.protect?.url ?? "", edited.protect?.url ?? "")
         }
     }
 
@@ -209,6 +255,24 @@ nonisolated enum ConnectionServiceChoices {
     /// secret is for one service and one sign-in method.
     static func savingClearsStoredSecrets(saved: Connection, edited: Connection) -> Bool {
         saved.service != edited.service || saved.signIn != edited.signIn
+    }
+
+    /// What the editor says before Save when saving will delete stored
+    /// secrets (a new service or sign-in method), e.g. "Saving removes the
+    /// stored client secret from the Keychain: it was for the “API client”
+    /// sign-in. Revert to keep it." Nil when
+    /// nothing stored is removed.
+    /// - Parameter stored: the kinds stored (or unreadable) for the saved connection.
+    static func secretRemovalNotice(saved: Connection, edited: Connection, stored: Set<ConnectionSecretKind>) -> String? {
+        guard savingClearsStoredSecrets(saved: saved, edited: edited), !stored.isEmpty else { return nil }
+        var names = [String]()
+        if stored.contains(.main) { names.append((saved.signIn.secretName ?? "secret").lowercased()) }
+        if stored.contains(.protect) { names.append("Jamf Protect client secret") }
+        let what = names.count == 1 ? "the stored \(names[0])" : "the stored \(names.joined(separator: " and the "))"
+        let why = saved.service != edited.service
+            ? "it was for \(saved.service.displayName)"
+            : "it was for the “\(saved.signIn.displayName)” sign-in"
+        return "Saving removes \(what) from the Keychain: \(why). Revert to keep it."
     }
 
     /// The sign-in methods the app accepts for a service, the usual one first.
@@ -348,6 +412,9 @@ public struct ConnectionsSettingsTab<Record: ConnectionRecord, AppSection: View>
     let importer: ConnectionImport<Record>?
     let delete: ((Record) async throws -> Void)?
     let deleteMessage: String?
+    let deleteMessages: (Record) -> String?
+    let deleteRefusal: (Record) -> String?
+    let deleteTypedName: (Record) -> Bool
     let didDelete: (Record) -> Void
     let test: ConnectionTest<Record>?
     let environments: ConnectionEnvironmentLoader<Record>?
@@ -359,6 +426,11 @@ public struct ConnectionsSettingsTab<Record: ConnectionRecord, AppSection: View>
     @State private var editorHasChanges = false
     @State private var pendingSelection: UUID??
     @State private var pendingDeletion: Record?
+    /// + was clicked with unsaved changes: the service to add once discarded.
+    @State private var pendingAdd: ConnectionService?
+    @State private var unsavedNew = UnsavedNewConnections()
+    /// A deletion that asks for the connection’s name (`deleteTypedName`).
+    @State private var typedDeletion: Record?
     @State private var isDeleting = false
     @State private var listError: String?
     @State private var showingImporter = false
@@ -388,6 +460,13 @@ public struct ConnectionsSettingsTab<Record: ConnectionRecord, AppSection: View>
     ///     error is shown below the list.
     ///   - deleteMessage: the delete confirmation’s text, when the app’s
     ///     `delete` does more than remove the connection and its secrets.
+    ///   - deleteMessages: the confirmation’s text for one connection, e.g.
+    ///     when only some take more with them; nil uses `deleteMessage`.
+    ///   - deleteRefusal: why a connection can’t be deleted now, e.g. while
+    ///     it is in use; the − button is then disabled and the reason shown
+    ///     below the list. Nil allows it.
+    ///   - deleteTypedName: whether deleting a connection asks for its name
+    ///     to be typed, for a deletion that loses more than the connection.
     ///   - didDelete: called after a connection and its secrets were deleted,
     ///     e.g. to clear choices the app stored for it.
     ///   - test: tests the editor’s values; without it there is no Test Connection button.
@@ -411,6 +490,9 @@ public struct ConnectionsSettingsTab<Record: ConnectionRecord, AppSection: View>
         importer: ConnectionImport<Record>? = nil,
         delete: ((Record) async throws -> Void)? = nil,
         deleteMessage: String? = nil,
+        deleteMessages: @escaping (Record) -> String? = { _ in nil },
+        deleteRefusal: @escaping (Record) -> String? = { _ in nil },
+        deleteTypedName: @escaping (Record) -> Bool = { _ in false },
         didDelete: @escaping (Record) -> Void = { _ in },
         test: ConnectionTest<Record>? = nil,
         environments: ConnectionEnvironmentLoader<Record>? = nil,
@@ -432,6 +514,9 @@ public struct ConnectionsSettingsTab<Record: ConnectionRecord, AppSection: View>
         self.importer = importer
         self.delete = delete
         self.deleteMessage = deleteMessage
+        self.deleteMessages = deleteMessages
+        self.deleteRefusal = deleteRefusal
+        self.deleteTypedName = deleteTypedName
         self.didDelete = didDelete
         self.test = test
         self.environments = environments
@@ -441,8 +526,7 @@ public struct ConnectionsSettingsTab<Record: ConnectionRecord, AppSection: View>
     public var body: some View {
         VStack(spacing: 0) {
             if let problem = store.problem {
-                Label(problem.localizedDescription, systemImage: "exclamationmark.triangle.fill")
-                    .symbolRenderingMode(.multicolor)
+                WarningLabel(problem.localizedDescription)
                     .font(.callout)
                     .textSelection(.enabled)
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -471,13 +555,23 @@ public struct ConnectionsSettingsTab<Record: ConnectionRecord, AppSection: View>
         }
         .confirmationDialog(
             "Discard unsaved changes?",
-            isPresented: Binding(get: { pendingSelection != nil }, set: { if !$0 { pendingSelection = nil } })
+            isPresented: Binding(get: { pendingSelection != nil || pendingAdd != nil },
+                                 set: { if !$0 { pendingSelection = nil; pendingAdd = nil } })
         ) {
             Button("Discard Changes", role: .destructive) {
-                if let pendingSelection { editingID = pendingSelection }
+                if let service = pendingAdd {
+                    pendingAdd = nil
+                    editorHasChanges = false
+                    addRecord(for: service)
+                } else if let pendingSelection {
+                    editingID = pendingSelection
+                }
                 pendingSelection = nil
             }
-            Button("Cancel", role: .cancel) { pendingSelection = nil }
+            Button("Cancel", role: .cancel) {
+                pendingSelection = nil
+                pendingAdd = nil
+            }
         } message: {
             Text("The changes to this connection haven’t been saved.")
         }
@@ -489,7 +583,16 @@ public struct ConnectionsSettingsTab<Record: ConnectionRecord, AppSection: View>
             Button("Delete", role: .destructive) { deletePending() }
             Button("Cancel", role: .cancel) { pendingDeletion = nil }
         } message: {
-            Text(deleteMessage ?? "The connection and its Keychain secrets are removed.")
+            Text(pendingDeletion.map(confirmationText) ?? "")
+        }
+        .sheet(item: $typedDeletion) { record in
+            TypedNameDeletionSheet(name: record.connection.name, message: confirmationText(for: record)) {
+                typedDeletion = nil
+                pendingDeletion = record
+                deletePending()
+            } cancel: {
+                typedDeletion = nil
+            }
         }
         .tabItem { Label("Connections", systemImage: "network") }
         .settingsTabName(SettingsTabName.connections)
@@ -508,7 +611,7 @@ public struct ConnectionsSettingsTab<Record: ConnectionRecord, AppSection: View>
                 }
             }
             .onDeleteCommand {
-                if store.problem == nil { pendingDeletion = editingID.flatMap(store.record(id:)) }
+                if store.problem == nil && !isDeleting { askToDeleteSelection() }
             }
             if isDeleting {
                 HStack(spacing: 6) {
@@ -523,6 +626,15 @@ public struct ConnectionsSettingsTab<Record: ConnectionRecord, AppSection: View>
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .accessibilityElement(children: .combine)
             }
+            if let refusal = selectionRefusal {
+                Text(refusal)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 4)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
             if let listError {
                 Text(listError)
                     .font(.caption)
@@ -535,14 +647,15 @@ public struct ConnectionsSettingsTab<Record: ConnectionRecord, AppSection: View>
             HStack(spacing: 0) {
                 addButton
                 Button {
-                    pendingDeletion = editingID.flatMap(store.record(id:))
+                    askToDeleteSelection()
                 } label: {
                     Image(systemName: "minus")
                         .frame(width: 24, height: 20)
                 }
-                .help("Delete connection and its Keychain secrets")
+                .help(selectionRefusal ?? deleteHelp)
                 .accessibilityLabel("Delete Connection")
-                .disabled(editingID == nil || store.problem != nil || isDeleting)
+                .accessibilityHint(selectionRefusal ?? "")
+                .disabled(editingID == nil || store.problem != nil || isDeleting || selectionRefusal != nil)
                 Spacer()
             }
             .buttonStyle(.borderless)
@@ -621,10 +734,17 @@ public struct ConnectionsSettingsTab<Record: ConnectionRecord, AppSection: View>
     }
 
     private func addRecord(for service: ConnectionService) {
+        // like clicking another row: unsaved changes ask first
+        if editorHasChanges {
+            pendingAdd = service
+            return
+        }
         let record = newRecord(service)
         do {
             try store.save(record)
             listError = nil
+            // the role comes with its first Save (`didSaveRecord`)
+            unsavedNew.added(record.id)
             editingID = record.id
         } catch {
             listError = error.localizedDescription
@@ -636,6 +756,7 @@ public struct ConnectionsSettingsTab<Record: ConnectionRecord, AppSection: View>
         do {
             let record = try importer.importRecord(from: url, into: store)
             listError = nil
+            useIfNoneInUse(record)
             // like clicking the row: unsaved changes to another connection ask first
             if editorHasChanges {
                 pendingSelection = .some(record.id)
@@ -647,9 +768,49 @@ public struct ConnectionsSettingsTab<Record: ConnectionRecord, AppSection: View>
         }
     }
 
+    /// A new or imported connection becomes the one in use where none is.
+    private func useIfNoneInUse(_ record: Record) {
+        for role in ConnectionRoleFilling.roles(toGive: record.connection, among: roles, store: store) {
+            role.selection.wrappedValue = record.id
+        }
+    }
+
+    /// Why the selected connection can’t be deleted now; nil when it can.
+    private var selectionRefusal: String? {
+        editingID.flatMap(store.record(id:)).flatMap(deleteRefusal)
+    }
+
+    /// The − button’s tooltip: what deleting removes, unless the app’s
+    /// confirmation says more goes with it.
+    private var deleteHelp: String {
+        let record = editingID.flatMap(store.record(id:))
+        let saysMore = deleteMessage != nil || record.flatMap(deleteMessages) != nil
+        return saysMore ? "Delete connection" : "Delete connection and its Keychain secrets"
+    }
+
+    private func confirmationText(for record: Record) -> String {
+        deleteMessages(record) ?? deleteMessage ?? "The connection and its Keychain secrets are removed."
+    }
+
+    /// The confirmation for the selected connection: the typed-name sheet
+    /// or the dialog. Nothing while it is refused.
+    private func askToDeleteSelection() {
+        guard let record = editingID.flatMap(store.record(id:)), deleteRefusal(record) == nil else { return }
+        if deleteTypedName(record) {
+            typedDeletion = record
+        } else {
+            pendingDeletion = record
+        }
+    }
+
     private func deletePending() {
         guard let record = pendingDeletion else { return }
         pendingDeletion = nil
+        // refused since it was asked (e.g. the connection came into use)
+        if let refusal = deleteRefusal(record) {
+            listError = refusal
+            return
+        }
         guard let delete else {
             do {
                 try store.delete(id: record.id)
@@ -672,7 +833,15 @@ public struct ConnectionsSettingsTab<Record: ConnectionRecord, AppSection: View>
         }
     }
 
+    /// The editor saved a record: a new one made with + gets its role now.
+    private func didSaveRecord(_ record: Record) {
+        for role in unsavedNew.saved(record, among: roles, store: store) {
+            role.selection.wrappedValue = record.id
+        }
+    }
+
     private func finishDeleting(_ record: Record) {
+        unsavedNew.removed(record.id)
         listError = nil
         for role in roles where role.selection.wrappedValue == record.id {
             role.selection.wrappedValue = nil
@@ -701,6 +870,7 @@ public struct ConnectionsSettingsTab<Record: ConnectionRecord, AppSection: View>
                              test: test,
                              environments: environments,
                              hasChanges: $editorHasChanges,
+                             didSave: didSaveRecord,
                              appSection: appSection)
                 .id(editingID)
         } else {
@@ -732,6 +902,9 @@ extension ConnectionsSettingsTab where AppSection == EmptyView {
         importer: ConnectionImport<Record>? = nil,
         delete: ((Record) async throws -> Void)? = nil,
         deleteMessage: String? = nil,
+        deleteMessages: @escaping (Record) -> String? = { _ in nil },
+        deleteRefusal: @escaping (Record) -> String? = { _ in nil },
+        deleteTypedName: @escaping (Record) -> Bool = { _ in false },
         didDelete: @escaping (Record) -> Void = { _ in },
         test: ConnectionTest<Record>? = nil,
         environments: ConnectionEnvironmentLoader<Record>? = nil
@@ -741,9 +914,61 @@ extension ConnectionsSettingsTab where AppSection == EmptyView {
                   signInMethods: signInMethods, roles: roles, height: height,
                   footer: footer, readOnlyFields: readOnlyFields, protectServices: protectServices,
                   newRecord: newRecord, add: add, importer: importer, delete: delete, deleteMessage: deleteMessage,
+                  deleteMessages: deleteMessages, deleteRefusal: deleteRefusal, deleteTypedName: deleteTypedName,
                   didDelete: didDelete, test: test, environments: environments) { _ in
             EmptyView()
         }
+    }
+}
+
+// MARK: - Typed-name deletion
+
+/// Whether a typed name confirms deleting a connection: the name exactly,
+/// apart from spaces around it.
+nonisolated enum ConnectionDeletion {
+    static func confirms(typed: String, name: String) -> Bool {
+        let expected = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        return !expected.isEmpty && typed.trimmingCharacters(in: .whitespacesAndNewlines) == expected
+    }
+}
+
+/// Deleting a connection that takes more with it: Delete is enabled once
+/// the connection’s name is typed.
+private struct TypedNameDeletionSheet: View {
+    let name: String
+    let message: String
+    let delete: () -> Void
+    let cancel: () -> Void
+    @State private var typed = ""
+    @FocusState private var fieldIsFocused: Bool
+
+    private var confirmed: Bool { ConnectionDeletion.confirms(typed: typed, name: name) }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Delete “\(name)”?")
+                .font(.headline)
+            Text(message)
+                .fixedSize(horizontal: false, vertical: true)
+            // Return doesn’t delete: only a click on Delete does
+            Text("Type “\(name)” to confirm.")
+                .foregroundStyle(.secondary)
+            TextField("Connection name", text: $typed)
+                .textFieldStyle(.roundedBorder)
+                .autocorrectionDisabled()
+                .focused($fieldIsFocused)
+                .accessibilityHint("Type \(name) to enable Delete")
+                .onAppear { fieldIsFocused = true }
+            HStack {
+                Spacer()
+                Button("Cancel", role: .cancel, action: cancel)
+                    .keyboardShortcut(.cancelAction)
+                Button("Delete", role: .destructive, action: delete)
+                    .disabled(!confirmed)
+            }
+        }
+        .padding(20)
+        .frame(width: 400)
     }
 }
 
@@ -791,6 +1016,47 @@ private struct ConnectionRow: View {
 
 // MARK: - Editor
 
+/// The question before unsaved changes are left: Save, Discard Changes or
+/// Cancel. `pending` holds what leaving does (close the window, switch tab)
+/// while the question is asked.
+private struct UnsavedChangesGuard: ViewModifier {
+    let isChanged: Bool
+    let canSave: Bool
+    let name: String
+    @Binding var pending: (@MainActor () -> Void)?
+    let save: @MainActor () -> Bool
+    let revert: @MainActor () -> Void
+    let disappeared: @MainActor () -> Void
+
+    func body(content: Content) -> some View {
+        content
+            .background(WindowCloseGuard(isActive: isChanged) { close in pending = close })
+            .confirmationDialog(
+                "Save the changes to “\(name)”?",
+                isPresented: Binding(get: { pending != nil }, set: { if !$0 { pending = nil } }),
+                titleVisibility: .visible
+            ) {
+                Button("Save") {
+                    let leave = pending
+                    pending = nil
+                    if save() { leave?() }
+                }
+                .disabled(!canSave)
+                Button("Discard Changes", role: .destructive) {
+                    let leave = pending
+                    pending = nil
+                    revert()
+                    leave?()
+                }
+                Button("Cancel", role: .cancel) { pending = nil }
+            } message: {
+                Text(canSave ? "The changes to this connection haven’t been saved."
+                             : "The changes to this connection haven’t been saved, and can’t be until the problems shown are fixed.")
+            }
+            .onDisappear(perform: disappeared)
+    }
+}
+
 private struct ConnectionEditor<Record: ConnectionRecord, AppSection: View>: View {
 
     private enum TestState: Equatable {
@@ -808,6 +1074,7 @@ private struct ConnectionEditor<Record: ConnectionRecord, AppSection: View>: Vie
     let test: ConnectionTest<Record>?
     let environments: ConnectionEnvironmentLoader<Record>?
     @Binding var hasChanges: Bool
+    let didSave: (Record) -> Void
     let appSection: (Binding<Record>) -> AppSection
 
     @State private var saved: Record
@@ -824,6 +1091,14 @@ private struct ConnectionEditor<Record: ConnectionRecord, AppSection: View>: Vie
     @State private var importedKeyName: String?
     @State private var keyImportError: String?
     @State private var environmentState = EnvironmentListState.idle
+    /// Closes the Settings window, or switches to another Settings tab, once
+    /// the person chose Save or Discard.
+    @State private var pendingClose: PendingClose?
+    @Environment(\.settingsTabSelection) private var settingsTabs
+
+    private struct PendingClose {
+        let close: @MainActor () -> Void
+    }
 
     init(store: ConnectionStore<Record>, saved: Record, services: [ConnectionService],
          signInMethods: [ConnectionService: [SignInMethod]], optionalFields: Set<ConnectionOptionalField>,
@@ -831,6 +1106,7 @@ private struct ConnectionEditor<Record: ConnectionRecord, AppSection: View>: Vie
          roles: [ConnectionRole], footer: String?,
          test: ConnectionTest<Record>?, environments: ConnectionEnvironmentLoader<Record>?,
          hasChanges: Binding<Bool>,
+         didSave: @escaping (Record) -> Void = { _ in },
          appSection: @escaping (Binding<Record>) -> AppSection) {
         self.store = store
         self.services = services
@@ -843,6 +1119,7 @@ private struct ConnectionEditor<Record: ConnectionRecord, AppSection: View>: Vie
         self.test = test
         self.environments = environments
         self._hasChanges = hasChanges
+        self.didSave = didSave
         self.appSection = appSection
         self._saved = State(initialValue: saved)
         self._draft = State(initialValue: saved)
@@ -919,10 +1196,15 @@ private struct ConnectionEditor<Record: ConnectionRecord, AppSection: View>: Vie
             }
         }
         .formStyle(.grouped)
+        .modifier(unsavedChangesGuard)
         .fileImporter(isPresented: $showingKeyImporter, allowedContentTypes: ApplePrivateKey.contentTypes,
                       onCompletion: importPrivateKey)
         .onAppear(perform: loadSecrets)
-        .onChange(of: isChanged, initial: true) { hasChanges = isChanged }
+        .onChange(of: isChanged, initial: true) {
+            hasChanges = isChanged
+            // switching to another Settings tab with unsaved changes asks too
+            updateLeaveGuard()
+        }
         .onChange(of: draft) { testState = .idle }
         .onChange(of: secrets) {
             testState = .idle
@@ -930,6 +1212,25 @@ private struct ConnectionEditor<Record: ConnectionRecord, AppSection: View>: Vie
         }
         // a list loaded with other sign-in values may not be this integration’s
         .onChange(of: [current.region.rawValue, current.hostOverride, current.clientID]) { environmentState = .idle }
+    }
+
+    private func updateLeaveGuard() {
+        guard let settingsTabs else { return }
+        if isChanged {
+            settingsTabs.leaveGuard = { proceed in pendingClose = PendingClose(close: proceed) }
+        } else {
+            settingsTabs.leaveGuard = nil
+        }
+    }
+
+    /// Closing Settings, or switching to another Settings tab, with unsaved
+    /// changes asks Save / Discard Changes / Cancel first.
+    private var unsavedChangesGuard: UnsavedChangesGuard {
+        UnsavedChangesGuard(
+            isChanged: isChanged, canSave: canSave, name: ConnectionMenuText.name(of: current),
+            pending: Binding(get: { pendingClose?.close }, set: { pendingClose = $0.map(PendingClose.init) }),
+            save: { save() }, revert: { revert() },
+            disappeared: { settingsTabs?.leaveGuard = nil })
     }
 
     // MARK: Fields
@@ -952,6 +1253,7 @@ private struct ConnectionEditor<Record: ConnectionRecord, AppSection: View>: Vie
                     TextField("Host Override", text: connection.hostOverride, prompt: Text("Leave empty for the region’s gateway"))
                 }
                 textField(.environmentID, "Environment ID", text: connection.environmentID, prompt: "From Jamf Account")
+                fieldIssue(environmentIDIssue)
                 if environments != nil && !readOnlyFields.contains(.environmentID) {
                     environmentRows
                 }
@@ -964,6 +1266,7 @@ private struct ConnectionEditor<Record: ConnectionRecord, AppSection: View>: Vie
             case .jamfPro:
                 textField(.serverURL, "Server URL", text: connection.serverURL, prompt: "https://yourorg.jamfcloud.com")
                     .textContentType(.URL)
+                fieldIssue(serverURLIssue)
                 if current.signIn == .usernamePassword {
                     textField(.username, "Username", text: connection.username)
                         .textContentType(.username)
@@ -974,6 +1277,7 @@ private struct ConnectionEditor<Record: ConnectionRecord, AppSection: View>: Vie
             case .jamfSchool:
                 textField(.serverURL, "Server URL", text: connection.serverURL, prompt: "https://yourschool.jamfcloud.com")
                     .textContentType(.URL)
+                fieldIssue(serverURLIssue)
                 TextField("Network ID", text: connection.clientID)
                 secretField(.main)
             case .intune:
@@ -991,8 +1295,46 @@ private struct ConnectionEditor<Record: ConnectionRecord, AppSection: View>: Vie
                 TextField("Key ID", text: connection.keyID)
                 secretField(.main)
             }
+            if let notice = secretRemovalNotice {
+                Label(notice, systemImage: "exclamationmark.triangle.fill")
+                    .symbolRenderingMode(.multicolor)
+                    .font(.callout)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
         } footer: {
-            issuesFooter(current.issues.filter { !$0.contains("Jamf Protect") })
+            issuesFooter(current.issues.filter { !$0.contains("Jamf Protect") && $0 != environmentIDIssue && $0 != serverURLIssue })
+        }
+    }
+
+    /// The Environment ID’s problem, shown under the field.
+    private var environmentIDIssue: String? {
+        current.service == .jamfPlatform && !readOnlyFields.contains(.environmentID)
+            ? current.issues.first { $0 == JamfPlatform.APIError.environmentIDNotUUID } : nil
+    }
+
+    /// The server address’s problem, shown under the field once something is typed.
+    private var serverURLIssue: String? {
+        guard [.jamfPro, .jamfSchool].contains(current.service), !readOnlyFields.contains(.serverURL),
+              !current.serverURL.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return nil }
+        return Connection.addressProblem(current.serverURL)
+    }
+
+    /// Before Save: which stored secrets the change of service or sign-in removes.
+    private var secretRemovalNotice: String? {
+        ConnectionServiceChoices.secretRemovalNotice(saved: saved.connection, edited: current,
+                                                     stored: hasStoredSecret.union(unreadableSecrets))
+    }
+
+    /// A problem with the field above, in the same warning look as the footer.
+    @ViewBuilder
+    private func fieldIssue(_ issue: String?) -> some View {
+        if let issue {
+            Label(issue, systemImage: "exclamationmark.triangle.fill")
+                .symbolRenderingMode(.multicolor)
+                .font(.caption)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .fixedSize(horizontal: false, vertical: true)
         }
     }
 
@@ -1130,14 +1472,19 @@ private struct ConnectionEditor<Record: ConnectionRecord, AppSection: View>: Vie
         return storedSecretApplies(kind) ? "Stored in the Keychain · type to replace" : "Required after this change"
     }
 
-    /// The Apple private key is imported from its .pem file and never shown:
-    /// a status line and a button, no text.
+    /// The Apple private key is pasted or imported from a text file (.pem,
+    /// .p8, .txt) and never shown: a status line and two buttons, no text.
     private func privateKeyField(_ title: String) -> some View {
         let imported = !(secrets[.main] ?? "").isEmpty
         let hasKey = imported || storedSecretApplies(.main)
         return LabeledContent(title) {
             VStack(alignment: .leading, spacing: 4) {
-                Button(hasKey ? "Replace Private Key…" : "Import .pem File…") { showingKeyImporter = true }
+                HStack(spacing: 8) {
+                    Button(hasKey ? "Replace with Key File…" : "Import Key File…") { showingKeyImporter = true }
+                        .help("A .pem, .p8 or text file with the private key")
+                    Button("Paste Key") { pastePrivateKey() }
+                        .help("Paste the private key copied from a password manager or a text file")
+                }
                 Text(privateKeyStatus(imported: imported))
                     .font(.caption)
                     .foregroundStyle(.secondary)
@@ -1153,11 +1500,21 @@ private struct ConnectionEditor<Record: ConnectionRecord, AppSection: View>: Vie
 
     private func privateKeyStatus(imported: Bool) -> String {
         if imported {
-            return "\(importedKeyName ?? "Private key") imported · Save to keep it"
+            return "\(importedKeyName ?? "Private key") added · Save to keep it"
         }
         if storedSecretApplies(.main) { return "Stored in the Keychain" }
-        if hasStoredSecret.contains(.main) { return "Required after this change: the .pem file downloaded from Apple" }
-        return "Required: the .pem file downloaded from Apple"
+        if hasStoredSecret.contains(.main) { return "Required after this change: the private key downloaded from Apple" }
+        return "Required: the private key downloaded from Apple (a .pem file)"
+    }
+
+    private func pastePrivateKey() {
+        do {
+            secrets[.main] = try ApplePrivateKey.read(pasted: NSPasteboard.general.string(forType: .string))
+            importedKeyName = "Pasted key"
+            keyImportError = nil
+        } catch {
+            keyImportError = error.localizedDescription
+        }
     }
 
     private func importPrivateKey(_ result: Result<URL, any Error>) {
@@ -1339,6 +1696,7 @@ private struct ConnectionEditor<Record: ConnectionRecord, AppSection: View>: Vie
             secrets = [:]
             importedKeyName = nil
             saveError = nil
+            didSave(saved)
             return true
         } catch {
             saveError = error.localizedDescription

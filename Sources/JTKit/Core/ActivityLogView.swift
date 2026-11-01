@@ -35,7 +35,8 @@ public struct ActivityLogWindow: Scene {
 
 /// The window’s toolbar actions in the menu bar, so every command is there
 /// too: File › Export Activity Log for Bug Report… and Export Activity Log
-/// Unmasked…, Edit › Clear Activity Log…, View › Show Problems Only.
+/// Unmasked…, Edit › Copy Log, Copy Log, Devices Masked and Clear Activity
+/// Log…, View › Show Problems Only.
 /// Dimmed unless the Activity Log window is in front.
 struct ActivityLogCommands: Commands {
     @FocusedValue(\.activityLogActions) private var actions
@@ -48,6 +49,10 @@ struct ActivityLogCommands: Commands {
                 .disabled(!(actions?.hasEntries ?? false))
         }
         CommandGroup(after: .pasteboard) {
+            Button("Copy Log") { actions?.copy(false) }
+                .disabled(!(actions?.hasEntries ?? false))
+            Button("Copy Log, Devices Masked") { actions?.copy(true) }
+                .disabled(!(actions?.hasEntries ?? false))
             Button("Clear Activity Log…") { actions?.clear() }
                 .disabled(!(actions?.hasEntries ?? false))
         }
@@ -65,6 +70,7 @@ struct ActivityLogActions {
     let hasEntries: Bool
     let problemsOnly: Bool
     let export: (_ masked: Bool) -> Void
+    let copy: (_ masked: Bool) -> Void
     let clear: () -> Void
     let setProblemsOnly: (Bool) -> Void
 }
@@ -133,6 +139,7 @@ struct ActivityLogView: View {
             hasEntries: !log.entries.isEmpty,
             problemsOnly: problemsOnly,
             export: { prepareExport(masked: $0) },
+            copy: { copyLog(masked: $0) },
             clear: { confirmingClear = true },
             setProblemsOnly: { problemsOnly = $0 }
         ))
@@ -288,14 +295,29 @@ struct ActivityLogView: View {
             Menu("Export", systemImage: "square.and.arrow.up") {
                 Button("Export for Bug Report…") { prepareExport(masked: true) }
                 Button("Export Unmasked…") { prepareExport(masked: false) }
+                Divider()
+                Button("Copy Log") { copyLog(masked: false) }
+                Button("Copy Log, Devices Masked") { copyLog(masked: true) }
             }
-            .help("Export the whole log as text. The bug report replaces serial numbers, usernames and other identifiers with placeholders.")
+            .help("Export or copy the whole log as text. The bug report and the masked copy replace serial numbers, usernames and other identifiers with placeholders.")
             .disabled(log.entries.isEmpty || isPreparingExport)
             Button("Clear", systemImage: "trash") {
                 confirmingClear = true
             }
             .help("Clear the activity log")
             .disabled(log.entries.isEmpty)
+        }
+    }
+
+    /// Puts the whole log on the clipboard as text, as the export writes it.
+    private func copyLog(masked: Bool) {
+        guard !isPreparingExport, !log.entries.isEmpty else { return }
+        isPreparingExport = true
+        let entries = log.entries
+        let app = app
+        Task {
+            await ActivityLogExport.copy(entries, masked: masked, app: app)
+            isPreparingExport = false
         }
     }
 

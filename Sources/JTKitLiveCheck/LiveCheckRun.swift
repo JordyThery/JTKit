@@ -15,7 +15,10 @@ import Security
 ///   `JTKIT_LIVE_READ_ONLY_ROLES` (comma-separated roles kept read only for this app),
 ///   `JTKIT_LIVE_HOST_KEYCHAIN` (`before`/`after`, for `HOST_KEYCHAIN_TEST`).
 /// - Credentials as `JTKIT_LIVE_<ROLE>_<ITEM>`, e.g. `JTKIT_LIVE_JAMF_TEST_A_CLIENT_SECRET`,
-///   read from the login Keychain; never written to a file or log.
+///   read from the login Keychain; never written to a file or log. From 1.1.0
+///   the release check passes them only to its gateway (`jtkit-live-gateway`),
+///   and test processes ask the gateway for them (`credential`): a test
+///   runner’s environment is kept in the test’s result bundle.
 ///
 /// The allow-list is always `AllowList.defaultURL`; no setting moves it. A
 /// sandboxed test host can’t read that folder: it reads the copy the release
@@ -44,6 +47,8 @@ public nonisolated final class LiveCheckRun: @unchecked Sendable {
     public let hostKeychainLabel: String?
     private let environment: [String: String]
     private let lock = NSLock()
+    /// Secrets the gateway handed over, by `role|item`; in memory only.
+    private var fetchedSecrets: [String: String] = [:]
 
     public nonisolated enum RunError: Error, CustomStringConvertible {
         case notEnabled
@@ -81,8 +86,10 @@ public nonisolated final class LiveCheckRun: @unchecked Sendable {
     ///   - readBack: tests only; the standard read-back by default.
     ///   - allowListURL: tests only; otherwise the allow-list’s own place
     ///     (or a sandboxed test host’s copy, see above).
+    ///   - confirmer: the serial prompt for interruptive commands; nil: none
+    ///     is sent (the live UI tests pass the release check’s prompt).
     public init(environment: [String: String], upstream: URLSession? = nil, readBack: ReadBack? = nil,
-                allowListURL: URL? = nil) throws {
+                allowListURL: URL? = nil, confirmer: InterruptiveConfirmer? = nil) throws {
         guard environment["JTKIT_LIVE"] == "1" else { throw RunError.notEnabled }
         func setting(_ name: String) throws -> String {
             guard let value = environment[name], !value.isEmpty else { throw RunError.missingSetting(name) }
@@ -120,7 +127,9 @@ public nonisolated final class LiveCheckRun: @unchecked Sendable {
         self.ledger = ledger
         let policy = LiveCheckPolicy(allowList: allowList, roles: roles,
                                      includeProduction: environment["JTKIT_LIVE_INCLUDE_PRODUCTION"] == "1",
-                                     prefix: prefix, ledger: ledger, writesAllowed: writesAllowed)
+                                     prefix: prefix, ledger: ledger, writesAllowed: writesAllowed,
+                                     commandsFile: runFolder.appending(path: Self.deviceCommandsFileName),
+                                     confirmer: confirmer)
         self.policy = policy
         let refusalsFile = runFolder.appending(path: "refusals.jsonl")
         let appleFile = runFolder.appending(path: Self.appleRequestsFileName)
@@ -128,7 +137,7 @@ public nonisolated final class LiveCheckRun: @unchecked Sendable {
         let unrecordedFile = runFolder.appending(path: Self.unrecordedCreatesFileName)
         network = LiveCheckNetwork(policy: policy, upstream: upstream ?? LiveCheckNetwork.makeUpstream(), refusalsFile: refusalsFile,
                                    appleRequestsFile: appleFile, readBack: readBack ?? .standard, deletesFile: deletesFile,
-                                   unrecordedFile: unrecordedFile)
+                                   unrecordedFile: unrecordedFile, writesFile: runFolder.appending(path: Self.writesFileName))
     }
 
     /// `AllowList.defaultURL`, or for a sandboxed test host (which can’t read
@@ -147,6 +156,12 @@ public nonisolated final class LiveCheckRun: @unchecked Sendable {
     /// Creates the server accepted that the ledger doesn’t hold, from every
     /// test process of the run; any fails the run.
     public static let unrecordedCreatesFileName = "unrecorded-creates.jsonl"
+
+    /// Every write of the run with the tenant it went to, from all its test processes.
+    public static let writesFileName = "writes.jsonl"
+
+    /// Every device command of the run, from all its test processes.
+    public static let deviceCommandsFileName = "device-commands.jsonl"
 
     /// Every delete’s read-back of the run, from all its test processes.
     public static let deletesFileName = "deletes.jsonl"
@@ -193,10 +208,26 @@ public nonisolated final class LiveCheckRun: @unchecked Sendable {
     }
 
     /// A credential the script read from the Keychain, e.g. `credential("jamf-test-a", "client-secret")`.
+    ///
+    /// From this process’s environment (the gateway’s own), or else from the
+    /// run’s gateway (`LiveGateway.secretsCommand`, with its token from the
+    /// run folder): the release check passes the secrets only to the
+    /// gateway, never to a test runner, whose environment Xcode keeps in the
+    /// test’s result bundle.
     public func credential(_ role: String, _ item: String) throws -> String {
-        guard let value = environment[Self.variable(role: role, item: item)], !value.isEmpty else {
+        if let value = environmentCredential(role, item) { return value }
+        let key = "\(role)|\(item)"
+        if let cached = lock.withLock({ fetchedSecrets[key] }) { return cached }
+        guard let value = try? LiveGatewayClient(runFolder: runFolder).secretNow(role: role, item: item), !value.isEmpty else {
             throw RunError.missingCredential(role: role, item: item)
         }
+        lock.withLock { fetchedSecrets[key] = value }
+        return value
+    }
+
+    /// A credential in this process’s environment only.
+    func environmentCredential(_ role: String, _ item: String) -> String? {
+        guard let value = environment[Self.variable(role: role, item: item)], !value.isEmpty else { return nil }
         return value
     }
 
@@ -388,10 +419,16 @@ public nonisolated final class LiveCheckRun: @unchecked Sendable {
 
     // MARK: Report
 
-    public nonisolated struct StepResult: Codable, Sendable {
+    public nonisolated struct StepResult: Codable, Sendable, Equatable {
         public var step: String
         public var passed: Bool
         public var note: String?
+
+        public init(step: String, passed: Bool, note: String? = nil) {
+            self.step = step
+            self.passed = passed
+            self.note = note
+        }
     }
 
     /// Appends a step’s result to `results.jsonl` for the stage 5 report

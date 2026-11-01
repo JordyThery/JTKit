@@ -10,6 +10,47 @@ public nonisolated enum DemoScenario: String, Sendable, CaseIterable {
     /// device reads and commands with 403, as when the API client or app
     /// registration lacks the permission.
     case missingPermission
+    /// Every service answers its first request after sign-in with 429 Too
+    /// Many Requests and `Retry-After: 1`, then as usual: the “blocked,
+    /// waiting” an app shows while a service limits it.
+    case rateLimited
+}
+
+/// Another server’s answers, with its first request after sign-in refused
+/// with 429 and `Retry-After` (`DemoScenario.rateLimited`).
+public nonisolated final class DemoRateLimitedServer: DemoServer, @unchecked Sendable {
+    private let server: any DemoServer
+    private let retryAfter: Int
+    private let lock = NSLock()
+    private var limitedOnce = false
+    private var limitedCountValue = 0
+
+    /// How many requests were answered with 429.
+    public var limitedCount: Int { lock.withLock { limitedCountValue } }
+
+    public init(_ server: any DemoServer, retryAfter: Int = 1) {
+        self.server = server
+        self.retryAfter = max(retryAfter, 0)
+    }
+
+    public func respond(to request: DemoRequest) -> DemoResponse {
+        let isSignIn = Self.isSignIn(request)
+        let limits = lock.withLock {
+            guard !isSignIn, !limitedOnce else { return false }
+            limitedOnce = true
+            limitedCountValue += 1
+            return true
+        }
+        guard limits else { return server.respond(to: request) }
+        return DemoResponse(status: 429, headers: ["Content-Type": "application/json", "Retry-After": "\(retryAfter)"],
+                            body: Data(#"{"httpStatus":429,"errors":[{"code":"TOO_MANY_REQUESTS","description":"Too many requests. Try again later."}]}"#.utf8))
+    }
+
+    /// Token requests: Jamf’s `auth/token` and `oauth/token`, Microsoft’s and Apple’s OAuth endpoints.
+    static func isSignIn(_ request: DemoRequest) -> Bool {
+        let path = request.pathSegments.map { $0.lowercased() }
+        return path.last == "token" || path.contains("oauth2") || path.contains("oauth")
+    }
 }
 
 /// An in-memory Jamf Platform API: sign-in, device groups, environments and

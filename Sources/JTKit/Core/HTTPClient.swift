@@ -203,7 +203,7 @@ extension BearerTokenSource {
 /// and short network drops only for reads and for edits marked safe to
 /// repeat. `Retry-After` is read as seconds or as an HTTP date; otherwise
 /// the wait doubles from 1 s, with up to 0.5 s of randomness. No wait is
-/// longer than 120 s. A 401 gets a new token and one more try (part of the 4).
+/// longer than 60 s. A 401 gets a new token and one more try (part of the 4).
 public nonisolated struct RetryRules: Sendable, Hashable {
     public let maxAttempts: Int
     public let firstWait: TimeInterval
@@ -225,7 +225,11 @@ public nonisolated struct RetryRules: Sendable, Hashable {
     /// while and a short retry only spends another request.
     public static let appleBusiness = RetryRules(fixedWaits: [5, 15, 45], everyNetworkErrorIsADrop: true)
 
-    public init(maxAttempts: Int = 4, firstWait: TimeInterval = 1, randomness: TimeInterval = 0.5, longestWait: TimeInterval = 120,
+    /// The longest wait by default, also when `Retry-After` asks for more.
+    public static let defaultLongestWait: TimeInterval = 60
+
+    public init(maxAttempts: Int = 4, firstWait: TimeInterval = 1, randomness: TimeInterval = 0.5,
+                longestWait: TimeInterval = RetryRules.defaultLongestWait,
                 fixedWaits: [TimeInterval]? = nil, everyNetworkErrorIsADrop: Bool = false) {
         self.maxAttempts = maxAttempts
         self.firstWait = firstWait
@@ -326,7 +330,11 @@ nonisolated enum RequestPath {
 /// checks every request before it leaves, and retries by `RetryRules`.
 /// Every attempt, wait and refusal is written to the activity log by the
 /// `RequestRecorder` underneath.
-actor HTTPClient {
+///
+/// Public from 1.1.0, for an app’s own service that no JTKit client covers
+/// (a GitHub or Azure request, a file download): the same checks, retries,
+/// rate limits and activity log as JTKit’s own clients.
+public actor HTTPClient {
     public nonisolated let baseURL: URL
     public nonisolated let recorder: RequestRecorder
     private let tokens: (any BearerTokenSource)?
@@ -336,6 +344,9 @@ actor HTTPClient {
     private let redirects: RedirectRule
     private let writeSpacing: Duration
     private let maxConcurrent: Int?
+    /// Made with the public init: only an `https://` base address is used,
+    /// so a token never goes out in clear.
+    private nonisolated(unsafe) var requiresHTTPS = false
     private let rateLimit: RateLimit?
     /// When the requests in the current window started, oldest first.
     private var recentRequests: [Date] = []
@@ -366,11 +377,33 @@ actor HTTPClient {
     ///   - sleep, random, now: injectable for tests.
     public init(
         baseURL: URL,
+        tokens: (any BearerTokenSource)? = nil,
+        recorder: RequestRecorder,
+        headers: [String: String] = [:],
+        permits: @escaping @Sendable (HTTPRequest) -> Bool = { _ in true },
+        redirects: RedirectRule = .sameHostHTTPSOnly,
+        writeSpacing: Duration = .zero,
+        maxConcurrent: Int? = nil,
+        rateLimit: RateLimit? = nil,
+        rules: RetryRules = .standard,
+        sleep: @escaping @Sendable (Duration) async throws -> Void = { try await Task.sleep(for: $0) },
+        random: @escaping @Sendable () -> Double = { Double.random(in: 0...1) },
+        now: @escaping @Sendable () -> Date = { Date() }
+    ) {
+        self.init(baseURL: baseURL, tokens: tokens, recorder: recorder, headers: headers, permits: permits,
+                  pathMapping: .none, redirects: redirects, writeSpacing: writeSpacing, maxConcurrent: maxConcurrent,
+                  rateLimit: rateLimit, rules: rules, sleep: sleep, random: random, now: now)
+        requiresHTTPS = true
+    }
+
+    /// As the public init, with a path mapping (`.jamfProDirect`).
+    init(
+        baseURL: URL,
         tokens: (any BearerTokenSource)?,
         recorder: RequestRecorder,
         headers: [String: String] = [:],
         permits: @escaping @Sendable (HTTPRequest) -> Bool = { _ in true },
-        pathMapping: PathMapping = .none,
+        pathMapping: PathMapping,
         redirects: RedirectRule = .sameHostHTTPSOnly,
         writeSpacing: Duration = .zero,
         maxConcurrent: Int? = nil,
@@ -430,7 +463,36 @@ actor HTTPClient {
     ///
     /// - Throws: `HTTPError`, `CancellationError`, or the token source’s error.
     public func send(_ request: HTTPRequest) async throws -> HTTPResponse {
-        guard RequestPath.isSafe(request.path), permits(request) else {
+        try await send(request, permittedAs: .itself)
+    }
+
+    /// Which request the app’s `permits` decides on.
+    enum Permission: Sendable {
+        /// The request sent.
+        case itself
+        /// The request the app made, which JTKit sends in another form
+        /// (Jamf Pro’s `v1` computer paths for the app’s `v4` request).
+        case appRequest(HTTPRequest)
+        /// JTKit’s own read that the app doesn’t make, e.g. the Jamf Pro
+        /// version probe: not the app’s list to decide. The path checks,
+        /// the demo boundary and the live check still apply.
+        case jtkitRead
+    }
+
+    func send(_ request: HTTPRequest, permittedAs permission: Permission) async throws -> HTTPResponse {
+        let permitted: Bool
+        switch permission {
+        case .itself: permitted = permits(request)
+        case .appRequest(let original): permitted = permits(original)
+        case .jtkitRead: permitted = request.isRead
+        }
+        if requiresHTTPS, baseURL.scheme?.lowercased() != "https" {
+            await recorder.note(request.method, request.path,
+                                note: "Refused before sending: \(baseURL.absoluteString) isn’t an https:// address.",
+                                category: "Blocked", isWarning: true)
+            throw HTTPError.invalidURL("\(baseURL.absoluteString) isn’t an https:// address, so nothing was sent.")
+        }
+        guard RequestPath.isSafe(request.path), permitted else {
             await recorder.note(request.method, request.path,
                                 note: "Refused before sending: not a request this app makes.",
                                 category: "Blocked", isWarning: true)
@@ -461,8 +523,9 @@ actor HTTPClient {
             let data: Data
             let http: HTTPURLResponse
             do {
+                let recordsBodies = request.recordsBodies || (recorder.recordsBodies?(request.method.uppercased(), request.path) ?? false)
                 (data, http) = try await recorder.send(urlRequest, attempt: attempt, of: rules.maxAttempts,
-                                                       recordsBodies: request.recordsBodies, recordedJSON: request.recordedJSON,
+                                                       recordsBodies: recordsBodies, recordedJSON: request.recordedJSON,
                                                        redirects: redirects, withholdsContents: request.withholdsContents,
                                                        knownSecrets: knownSecrets)
             } catch let error as URLError {
@@ -470,7 +533,7 @@ actor HTTPClient {
                 if isDrop && repeatable && attempt < rules.maxAttempts {
                     mayHaveBeenDone = true
                     try await wait(rules.backoff(afterAttempt: attempt, random: random()),
-                                   reason: "Network error", request: request, nextAttempt: attempt + 1)
+                                   reason: "Network error", kind: .networkError, request: request, nextAttempt: attempt + 1)
                     continue
                 }
                 throw HTTPError.transport(method: request.method, path: request.path, code: error.code,
@@ -504,9 +567,11 @@ actor HTTPClient {
             case 429 where attempt < rules.maxAttempts,
                  500..<600 where repeatable && attempt < rules.maxAttempts:
                 if http.statusCode != 429 { mayHaveBeenDone = true }
-                let delay = RetryRules.retryAfter(response.header("Retry-After"), now: now())
-                    ?? rules.backoff(afterAttempt: attempt, random: random())
-                try await wait(delay, reason: "HTTP \(http.statusCode)", request: request, nextAttempt: attempt + 1)
+                let askedFor = RetryRules.retryAfter(response.header("Retry-After"), now: now())
+                let delay = askedFor ?? rules.backoff(afterAttempt: attempt, random: random())
+                let kind: WaitReason = askedFor != nil ? .askedToWait
+                    : http.statusCode == 429 ? .tooManyRequests : .serverError(http.statusCode)
+                try await wait(delay, reason: "HTTP \(http.statusCode)", kind: kind, request: request, nextAttempt: attempt + 1)
             default:
                 throw HTTPError.status(response, method: request.method, path: request.path, duringSignIn: false)
             }
@@ -568,7 +633,7 @@ actor HTTPClient {
                                 note: "\(rateLimit.explanation): waiting \(Int(delay.rounded(.up))) s.",
                                 category: "Retry", isWarning: true)
             do {
-                try await sleep(.milliseconds(Int((delay * 1000).rounded())))
+                try await recorder.wait(delay, reason: .rateLimit(rateLimit.explanation), now: current, sleep: sleep)
             } catch {
                 await recorder.note(request.method, request.path, note: "Canceled while waiting.", category: "Retry")
                 throw CancellationError()
@@ -583,16 +648,17 @@ actor HTTPClient {
         return cleaned == text ? data : Data(cleaned.utf8)
     }
 
-    /// Waits before the next attempt, written to the log first. Canceling
-    /// the task stops the wait at once.
-    private func wait(_ seconds: TimeInterval, reason: String, request: HTTPRequest, nextAttempt: Int) async throws {
+    /// Waits before the next attempt, written to the log first and shown in
+    /// the recorder’s `waits`. Canceling the task, or the waits, stops the
+    /// wait at once.
+    private func wait(_ seconds: TimeInterval, reason: String, kind: WaitReason, request: HTTPRequest, nextAttempt: Int) async throws {
         let delay = min(max(seconds, 0), rules.longestWait)
         let shown = delay < 10 && delay.rounded() != delay ? String(format: "%.1f", delay) : String(format: "%.0f", delay)
         await recorder.note(request.method, request.path,
                             note: "\(reason): waiting \(shown) s, attempt \(nextAttempt) of \(rules.maxAttempts).",
                             category: "Retry", isWarning: true)
         do {
-            try await sleep(.milliseconds(Int((delay * 1000).rounded())))
+            try await recorder.wait(delay, reason: kind, now: now(), sleep: sleep)
         } catch {
             await recorder.note(request.method, request.path, note: "Canceled while waiting.", category: "Retry")
             throw CancellationError()

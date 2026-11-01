@@ -43,6 +43,9 @@ public nonisolated enum LiveDecision: Sendable, Equatable {
             /// A change to (or action on) an object in the ledger.
             case change
             case delete
+            /// A command to listed test devices (`DeviceCommands`); an
+            /// interruptive one is sent only after the serial prompt.
+            case command(name: String, level: DeviceCommandLevel, serials: [String])
         }
         public var kind: Kind
         public var role: String
@@ -74,6 +77,11 @@ public nonisolated enum LiveDecision: Sendable, Equatable {
 ///    only for a group this run created and removed.
 /// 6. Jamf writes: no scope to all computers, all mobile devices or all
 ///    users, and every group in a scope is a group this run created.
+/// 7. Device commands (1.1.0): only to the tenant’s listed test devices, at
+///    most 3 devices a run; interruptive ones only after the serial prompt
+///    (`DeviceCommands`). Without listed devices none are sent.
+/// 8. Production tenants: reads without `--include-production` when the
+///    allow-list says `productionReads`; never a write.
 public nonisolated final class LiveCheckPolicy: @unchecked Sendable {
     public let entries: [AllowList.Entry]
     public let includeProduction: Bool
@@ -83,21 +91,39 @@ public nonisolated final class LiveCheckPolicy: @unchecked Sendable {
     /// Off during the release check’s first stages: every tenant is then
     /// treated as read only, whatever the allow-list says.
     public let writesAllowed: Bool
+    /// Production tenants are read without `includeProduction` (the allow-list’s `productionReads`).
+    public let productionReads: Bool
+    /// The run’s `device-commands.jsonl`: the device limit counts every test process’s commands.
+    public let commandsFile: URL?
+    /// Asks the serial prompt for an interruptive command; nil: none is ever sent.
+    public let confirmer: InterruptiveConfirmer?
+    let devices = DeviceRegistry()
 
     private let lock = NSLock()
+    private var sentCommands: [SentDeviceCommand] = []
     /// Earlier runs’ JTKTEST groups in Entra’s recycle bin the sweep may
     /// purge, by target (`LiveCheckRun.adoptDeletedGroupForPurge`).
     private var purgeable: [String: Set<String>] = [:]
     /// Apple’s access tokens, which carry no organization, by the client they were issued to.
     private var appleTokens: [String: String] = [:]
+    /// Devices claimed by commands decided but maybe not yet recorded (`decideCommand`).
+    private let commandLock = NSLock()
+    private var reservedDevices: [String: Set<String>] = [:]
 
     /// - Parameters:
     ///   - allowList: the loaded allow-list.
     ///   - roles: the roles this run uses; every other entry is refused.
+    ///   - productionReads: production tenants are read without `includeProduction`.
+    ///   - commandsFile: the run’s `device-commands.jsonl` (`LiveCheckRun` passes it).
+    ///   - confirmer: the serial prompt for interruptive commands.
     public init(allowList: AllowList, roles: Set<String>?, includeProduction: Bool, prefix: String, ledger: Ledger,
-                writesAllowed: Bool = true) {
+                writesAllowed: Bool = true, productionReads: Bool? = nil, commandsFile: URL? = nil,
+                confirmer: InterruptiveConfirmer? = nil) {
         entries = allowList.entries(roles: roles)
         self.writesAllowed = writesAllowed
+        self.productionReads = productionReads ?? (allowList.productionReads ?? false)
+        self.commandsFile = commandsFile
+        self.confirmer = confirmer
         self.includeProduction = includeProduction
         self.prefix = prefix
         self.ledger = ledger
@@ -126,7 +152,12 @@ public nonisolated final class LiveCheckPolicy: @unchecked Sendable {
             return .refuse(refusal.reason)
         case .success(let (entry, target, isSignIn)):
             if entry.production && !includeProduction {
-                return .refuse("\(entry.role) is a production tenant; it’s only read with --include-production")
+                let isRead = request.method == "GET" || request.method == "HEAD"
+                guard productionReads && (isSignIn || isRead) else {
+                    return .refuse(productionReads
+                                   ? "\(entry.role) is a production tenant: \(request.method) refused, it’s only read"
+                                   : "\(entry.role) is a production tenant; it’s only read with --include-production")
+                }
             }
             if isSignIn {
                 return .allow(.init(kind: .signIn, role: entry.role, target: target, resource: nil, id: nil))
@@ -221,14 +252,14 @@ public nonisolated final class LiveCheckPolicy: @unchecked Sendable {
         if isRead {
             return .allow(.init(kind: .read, role: role, target: target, resource: nil, id: nil))
         }
+        if Self.isDeviceCommand(lowered, method: request.method) && !Self.isApple(entry.service) {
+            return decideCommand(request, entry: entry, target: target)
+        }
         guard entry.access != .readOnly else {
             return .refuse("\(role) is read only: \(request.method) refused")
         }
         guard writesAllowed else {
             return .refuse("Writes are off in this stage of the release check: \(request.method) refused")
-        }
-        if Self.isDeviceCommand(lowered, method: request.method) {
-            return .refuse("Device commands are never sent in a live check")
         }
         if target.hasPrefix("intune:") {
             if let refusal = graphRefusal(request, target: target, path: lowered) { return .refuse(refusal) }
@@ -273,6 +304,83 @@ public nonisolated final class LiveCheckPolicy: @unchecked Sendable {
         default:
             return .refuse("\(request.method) is refused")
         }
+    }
+
+    // MARK: Device commands
+
+    private func decideCommand(_ request: LiveRequest, entry: AllowList.Entry, target: String) -> LiveDecision {
+        // production is only read, also with --include-production
+        guard !entry.production else { return .refuse("\(entry.role) is a production tenant: device commands are never sent") }
+        let listed = entry.testDeviceSerials
+        guard !listed.isEmpty else { return .refuse("Device commands are never sent in a live check") }
+        guard writesAllowed else {
+            return .refuse("Writes are off in this stage of the release check: \(request.method) refused")
+        }
+        let command = DeviceCommands.classify(request)
+        guard !command.references.isEmpty else {
+            return .refuse("\(command.name) names no device: refused")
+        }
+        var serials = Set<String>()
+        let family = DeviceRegistry.family(of: request.url.path(percentEncoded: false))
+        for reference in command.references {
+            guard let device = devices.device(target: target, reference: reference, family: family) else {
+                return .refuse("\(command.name) to a device that isn’t one of \(entry.role)’s test devices is refused")
+            }
+            serials.insert(device.serial)
+        }
+        // checked and claimed in one step: two commands at once can’t both
+        // take the last device
+        let withinLimit = commandLock.withLock {
+            let earlier = Set(sentDeviceCommands().filter { $0.target == target.lowercased() }.map(\.serial))
+                .union(reservedDevices[target.lowercased()] ?? [])
+            guard earlier.union(serials).count <= DeviceCommands.maxDevicesPerRun else { return false }
+            reservedDevices[target.lowercased(), default: []].formUnion(serials)
+            return true
+        }
+        guard withinLimit else {
+            return .refuse("At most \(DeviceCommands.maxDevicesPerRun) devices get commands in a run: \(command.name) to another one is refused")
+        }
+        return .allow(.init(kind: .command(name: command.name, level: command.level, serials: serials.sorted()),
+                            role: entry.role, target: target, resource: nil, id: nil))
+    }
+
+    /// The prompts an interruptive command needs, one per device.
+    func prompts(for allowed: LiveDecision.Allowed, references: [String], family: String? = nil) -> [InterruptivePrompt] {
+        guard case .command(let name, _, let serials) = allowed.kind else { return [] }
+        let entry = entries.first { $0.role == allowed.role }
+        return serials.map { serial in
+            let learned = references.lazy.compactMap { self.devices.device(target: allowed.target, reference: $0, family: family) }
+                .first { $0.serial == serial }?.name
+            let listed = entry?.testDevices?.first { $0.serial.uppercased() == serial }?.name
+            return InterruptivePrompt(command: name, deviceName: learned ?? listed ?? "the test device", tenant: allowed.role,
+                                      expectedSerial: serial)
+        }
+    }
+
+    /// Records a command sent, for the device limit.
+    func recordSent(_ allowed: LiveDecision.Allowed) {
+        guard case .command(let name, let level, let serials) = allowed.kind else { return }
+        let sent = serials.map { SentDeviceCommand(role: allowed.role, target: allowed.target.lowercased(), serial: $0,
+                                                   command: name, level: level) }
+        lock.withLock { sentCommands += sent }
+        guard let commandsFile else { return }
+        for command in sent {
+            if let line = try? JSONEncoder().encode(command) { LiveCheckNetwork.appendLine(line, to: commandsFile) }
+        }
+    }
+
+    /// Commands sent so far in the run: the file shared by its test
+    /// processes, or this process’s own without one.
+    public func sentDeviceCommands() -> [SentDeviceCommand] {
+        guard let commandsFile else { return lock.withLock { sentCommands } }
+        guard let text = try? String(contentsOf: commandsFile, encoding: .utf8) else { return [] }
+        return text.split(separator: "\n").compactMap { try? JSONDecoder().decode(SentDeviceCommand.self, from: Data($0.utf8)) }
+    }
+
+    /// Learns the listed test devices’ IDs from a read’s answer.
+    func learnDevices(from body: Data, target: String, role: String, path: String = "") {
+        guard let entry = entries.first(where: { $0.role == role }) else { return }
+        devices.learn(from: body, target: target, listed: entry.testDeviceSerials, family: DeviceRegistry.family(of: path))
     }
 
     // MARK: Graph

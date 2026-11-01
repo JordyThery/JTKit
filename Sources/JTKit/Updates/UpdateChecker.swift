@@ -141,10 +141,26 @@ public final class UpdateChecker {
                 throw UpdateError(message: "GitHub answered with HTTP \(status).")
             }
             let decoded = try JSONDecoder().decode(Response.self, from: data)
-            let version = decoded.tag_name.hasPrefix("v") ? String(decoded.tag_name.dropFirst()) : decoded.tag_name
-            let downloadURL = decoded.assets?.first { $0.name.hasSuffix(".zip") }
+            var tag = decoded.tag_name
+            var name = decoded.name
+            var notes = decoded.body
+            var downloadURL = decoded.assets?.first { $0.name.hasSuffix(".zip") }
                 .flatMap { URL(string: $0.browser_download_url) }
-            let pageURL = decoded.html_url.flatMap(URL.init(string:))
+            var pageURL = decoded.html_url.flatMap(URL.init(string:))
+            if ReleaseVersion(tag: tag) == nil {
+                // GitHub’s latest is a tag that isn’t a version: the highest
+                // release that is one
+                guard let highest = try await GitHubReleases.latest(owner: configuration.owner, repo: configuration.repository,
+                                                                    session: session) else {
+                    throw UpdateError(message: "No release of \(configuration.appName) has a version number.")
+                }
+                tag = highest.tag
+                name = highest.name
+                notes = highest.notes
+                downloadURL = highest.assets.first { $0.name.hasSuffix(".zip") }?.downloadURL
+                pageURL = highest.pageURL
+            }
+            let version = tag.hasPrefix("v") ? String(tag.dropFirst()) : tag
             // Only offer this app’s own downloads and pages, on GitHub over HTTPS.
             guard downloadURL.map({ Self.isTrustedDownload($0, configuration: configuration) }) ?? true,
                   pageURL.map({ Self.isTrustedPage($0, configuration: configuration) }) ?? true else {
@@ -153,8 +169,8 @@ public final class UpdateChecker {
             activity?("Update check: latest release \(version), installed \(currentVersion).")
             return Release(
                 version: version,
-                name: decoded.name ?? "\(configuration.appName) \(version)",
-                notes: decoded.body ?? "",
+                name: name ?? "\(configuration.appName) \(version)",
+                notes: notes ?? "",
                 downloadURL: downloadURL,
                 pageURL: pageURL
             )

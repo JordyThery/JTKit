@@ -1,7 +1,7 @@
 import Foundation
 
 // The Platform API’s own device calls: a device by serial, its DDM declarations, and the
-// restart and shut down device actions. They exist only on the gateway; on
+// restart, shut down and check-in device actions. They exist only on the gateway; on
 // a Jamf Pro server reached directly they are refused before sending.
 
 extension JamfPlatform {
@@ -32,7 +32,7 @@ extension JamfPlatform {
 
     /// Jamf refused a device action (HTTP 422): the device can’t take it.
     public struct DeviceActionRefused: Error, LocalizedError, Sendable, Hashable {
-        /// "restart", "shut down".
+        /// "restart", "shut down", "check in".
         public var verb: String
 
         public var errorDescription: String? {
@@ -77,7 +77,8 @@ extension JamfPlatform.Client {
     /// - Throws: `JamfPlatform.DeviceMismatch` when devices came back but
     ///   none has the serial; `JamfPlatform.APIError`.
     public func device(serial: String) async throws -> JamfPlatform.Device? {
-        let safe = try JamfPro.validatedIdentifier(serial)
+        // other characters: no device has that serial; nothing is sent
+        guard let safe = try? JamfPro.validatedIdentifier(serial) else { return nil }
         struct Page: Decodable { let results: [Tolerant<JamfPlatform.Device>]? }
         let response: HTTPResponse
         do {
@@ -143,8 +144,14 @@ extension JamfPlatform.Client {
         }
     }
 
+    /// The Jamf Account permission the device actions (restart, shut down,
+    /// check-in) need. Erase and unmanage would need
+    /// `destructive-device-actions:execute`; JTKit has neither.
+    public static let deviceActionsPermission = "device-actions:execute"
+
     /// Restarts a device through the Platform API’s device actions, by its
-    /// Platform API ID (`device(serial:)`). Never repeated after a server error.
+    /// Platform API ID (`device(serial:)`). Never repeated after a server
+    /// error. Needs `device-actions:execute`, named when it is refused.
     ///
     /// - Throws: `JamfPlatform.DeviceActionRefused` for a 422; `JamfPlatform.APIError`.
     public func restart(deviceID: String) async throws {
@@ -156,6 +163,17 @@ extension JamfPlatform.Client {
         try await deviceAction(deviceID, "shutdown", verb: "shut down", privilege: .sendMobileDeviceShutDownCommand)
     }
 
+    /// Asks a device to check in for pending commands
+    /// (`device-actions/v1/devices/{id}/check-in`), by its Platform API ID
+    /// (`device(serial:)`). Nothing changes on the device; the Platform
+    /// API’s counterpart of a Blank Push. Needs `device-actions:execute`,
+    /// named when it is refused. Never repeated after a server error.
+    ///
+    /// - Throws: `JamfPlatform.DeviceActionRefused` for a 422; `JamfPlatform.APIError`.
+    public func checkIn(deviceID: String) async throws {
+        try await deviceAction(deviceID, "check-in", verb: "check in", privilege: .viewMDMCommandInformation)
+    }
+
     private func deviceAction(_ deviceID: String, _ action: String, verb: String, privilege: JamfPro.Privilege) async throws {
         do {
             _ = try await send(HTTPRequest(method: "POST",
@@ -163,6 +181,10 @@ extension JamfPlatform.Client {
                                privilege: privilege)
         } catch let error as JamfPlatform.APIError where error.status == 422 {
             throw JamfPlatform.DeviceActionRefused(verb: verb)
+        } catch var error as JamfPlatform.APIError where error.server == .platformAPI {
+            // the gateway asks for its own permission, not a Jamf Pro privilege
+            error.permission = Self.deviceActionsPermission
+            throw error
         }
     }
 }

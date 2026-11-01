@@ -229,7 +229,7 @@ public struct ConnectionPicker<Record: ConnectionRecord, Extra: View>: View {
             let records = store.records.filter { role.accepts($0.connection) }
             let demoLabel = role.demo.flatMap { $0.isActive ? $0.label(allTitle: role.all?.title, roleName: role.accessibilityName) : nil }
             let label = demoLabel ?? self.label
-            let help = role.usesDemo ? DemoMode.helpText : self.help
+            let help = role.usesDemo ? (role.demo?.mode.help ?? DemoMode.helpText) : self.help
             let usesAll = role.usesAll(connectionCount: records.count)
             let current = usesAll ? nil : role.selection.wrappedValue.flatMap { id in records.first { $0.id == id } }
             let title = label?.title

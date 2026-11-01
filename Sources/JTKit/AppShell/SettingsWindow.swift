@@ -34,6 +34,27 @@ final class SettingsTabSelection {
     static let shared = SettingsTabSelection()
 
     var selected = SettingsTabName.general
+    /// Set while a tab has unsaved changes (the Connections editor): called
+    /// instead of switching tabs, with `proceed`, which switches once the
+    /// person chose Save or Discard. Cancel just doesn’t call it.
+    @ObservationIgnored var leaveGuard: (@MainActor (_ proceed: @escaping @MainActor () -> Void) -> Void)?
+
+    /// The tab the person clicked: switched to at once, or after the
+    /// unsaved changes of the tab they leave were saved or discarded.
+    func request(_ tab: String) {
+        guard tab != selected else { return }
+        guard let leaveGuard else {
+            selected = tab
+            return
+        }
+        leaveGuard { [weak self] in self?.selected = tab }
+    }
+}
+
+extension EnvironmentValues {
+    /// The Settings window’s tab selection, when it opens tabs by name; nil
+    /// elsewhere (tabs can then be switched without asking).
+    @Entry var settingsTabSelection: SettingsTabSelection?
 }
 
 extension View {
@@ -177,7 +198,9 @@ public struct SettingsTabs<General: View, AppTabs: View>: View {
         // Without a name on every tab a bound selection would make unnamed
         // tabs unselectable, so apps opt in.
         if opensTabsByName {
-            TabView(selection: $selection.selected) { tabs }
+            // a tab with unsaved changes can ask before it is left
+            TabView(selection: Binding(get: { selection.selected }, set: { selection.request($0) })) { tabs }
+                .environment(\.settingsTabSelection, selection)
         } else {
             TabView { tabs }
         }

@@ -503,7 +503,9 @@ struct PlatformDeviceTests {
         }
         #expect(elsewhere?.status == 404)
         await #expect(throws: JamfPlatform.DeviceMismatch(serial: "WRONG", count: 2)) { _ = try await client.device(serial: "WRONG") }
-        await #expect(throws: JamfPlatform.APIError.self) { _ = try await client.device(serial: "a\"b") }
+        let sent = server.requests.count
+        #expect(try await client.device(serial: "a\"b") == nil, "other characters: not found")
+        #expect(server.requests.count == sent, "and not sent")
     }
 
     @Test("Declarations: the Error detail first, then the description, then the code; the Blueprint ID")

@@ -114,8 +114,12 @@ for t in json.load(open(sys.argv[1]))["tenants"]:
 EOF
 }
 
-# Reads each CREDENTIALS item into TEST_RUNNER_JTKIT_LIVE_<ROLE>_<ITEM>.
-# The value goes straight into the variable; nothing is printed.
+# Reads each CREDENTIALS item into RC_SECRETS[JTKIT_LIVE_<ROLE>_<ITEM>], a
+# shell variable that isn’t exported: the secrets reach only the gateway
+# (rc_gateway_start), which hands them to the test processes on a request
+# with its token. Never a test runner’s environment: Xcode keeps that in the
+# test’s result bundle. Nothing is printed.
+typeset -gA RC_SECRETS
 rc_read_credentials() {
     local spec role service item kc account var value
     for spec in "${CREDENTIALS[@]}"; do
@@ -126,11 +130,11 @@ rc_read_credentials() {
         [[ -n "$kc" ]] || rc_fail "The allow-list names no Keychain service for $role ($service)"
         account="$item"
         [[ "$kc" == "be.jordythery.release-check" ]] && account="$role/$item"
-        var="TEST_RUNNER_JTKIT_LIVE_${${(U)role}//[^A-Z0-9]/_}_${${(U)item}//[^A-Z0-9]/_}"
+        var="JTKIT_LIVE_${${(U)role}//[^A-Z0-9]/_}_${${(U)item}//[^A-Z0-9]/_}"
         if ! value="$(security find-generic-password -s "$kc" -a "$account" -w 2>/dev/null)"; then
             rc_fail "No Keychain item $kc / $account for $role. Run: $RC_LIB_DIR/release-check-setup.sh $role $item"
         fi
-        export "$var=$value"
+        RC_SECRETS[$var]="$value"
         RC_SECRET_VARS+=("$var")
     done
     unset value
@@ -138,7 +142,9 @@ rc_read_credentials() {
 
 rc_forget_credentials() {
     local var
-    for var in "${RC_SECRET_VARS[@]}"; do unset "$var"; done
+    # also a variable an older template exported
+    for var in "${RC_SECRET_VARS[@]}"; do unset "$var" "TEST_RUNNER_$var"; done
+    RC_SECRETS=()
     RC_SECRET_VARS=()
 }
 
@@ -358,6 +364,69 @@ rc_test() {
     return 1
 }
 
+# MARK: The gateway of live tests (JTKit 1.1.0)
+#
+# It also hands the run’s secrets to every test process that needs them (the
+# sign-in test, the unit-test live checks and the cleanup: started there with
+# --secrets-only, it sends nothing), so the secrets are in no test runner’s
+# environment.
+
+# A live UI test (a LIVE_TESTS entry in $UI_TESTS) launches the real app
+# under -JTKitLiveCheck. Its requests, and the UI test’s own, go to
+# jtkit-live-gateway, which decides each by the release check’s rules and
+# keeps the run’s ledger and files (the UI test runner and the app may be
+# sandboxed; only the gateway writes the live folder). Built once a run from
+# the JTKit under test; started right before each live UI test and stopped
+# right after, so it never writes the ledger while a unit test does; stopped
+# on every exit. It stops by itself once this check’s lock is released.
+RC_GATEWAY_PID="" RC_GATEWAY_BIN=""
+
+rc_gateway_build() {
+    [[ -n "$RC_GATEWAY_BIN" ]] && return 0
+    local scratch="$RC_BASE/state/gateway-build"
+    rc_log "  building the live gateway (jtkit-live-gateway)"
+    if ! xcrun swift build --package-path "$RC_LIB_DIR/.." --product jtkit-live-gateway --scratch-path "$scratch" \
+            > "$RC_RUN/logs/gateway-build.log" 2>&1; then
+        rc_log "  the live gateway didn’t build (logs/gateway-build.log)"
+        return 1
+    fi
+    RC_GATEWAY_BIN="$scratch/debug/jtkit-live-gateway"
+    [[ -x "$RC_GATEWAY_BIN" ]]
+}
+
+# rc_gateway_start [--secrets-only]
+rc_gateway_start() {
+    rc_gateway_build || return 1
+    rc_gateway_stop
+    rm -f "$RC_LIVE_DIR/live-launch.json" "$RC_LIVE_DIR/live-gateway.token"
+    # the secrets are exported in this subshell only, which becomes the gateway
+    (
+        local name
+        for name in "${(@k)RC_SECRETS}"; do export "$name=${RC_SECRETS[$name]}"; done
+        exec "$RC_GATEWAY_BIN" "$@"
+    ) >> "$RC_RUN/logs/gateway.log" 2>&1 &!
+    RC_GATEWAY_PID=$!
+    local waited=0
+    while (( waited < 60 )); do
+        [[ -s "$RC_LIVE_DIR/live-launch.json" && -s "$RC_LIVE_DIR/live-gateway.token" ]] && return 0
+        kill -0 "$RC_GATEWAY_PID" 2>/dev/null || break
+        sleep 0.5; (( waited++ ))
+    done
+    rc_log "  the live gateway didn’t start (logs/gateway.log)"
+    rc_gateway_stop
+    return 1
+}
+
+rc_gateway_stop() {
+    [[ -n "$RC_GATEWAY_PID" ]] || return 0
+    kill "$RC_GATEWAY_PID" 2>/dev/null
+    local waited=0
+    while kill -0 "$RC_GATEWAY_PID" 2>/dev/null && (( waited < 20 )); do sleep 0.5; (( waited++ )); done
+    kill -9 "$RC_GATEWAY_PID" 2>/dev/null
+    RC_GATEWAY_PID=""
+    rm -f "$RC_LIVE_DIR/live-launch.json" "$RC_LIVE_DIR/live-gateway.token"
+}
+
 rc_tests_in() {
     # The test methods of a class file, in file order.
     grep -hoE 'func (test[A-Za-z0-9_]+)\(\)' "$1" | sed -E 's/func (test[A-Za-z0-9_]+)\(\)/\1/'
@@ -424,16 +493,21 @@ except FileNotFoundError: print(0)' "$RC_LIVE_DIR/ledger.json") || { rc_check_fa
 # failure. The helper ends within a second once this shell is gone (also
 # after a crash or kill -9) or its .held file is removed (rc_unlock);
 # taking the lock waits that long. The holder’s
-# process ID and app are in the .owner file beside it, for the message only.
+# process ID and app are in the .owner file beside it, for the message and for
+# the gateway and the app under the live-check switch, which stop or refuse
+# once that process is gone; the helper removes the file then.
 RC_LOCK="$RC_BASE/state/release-check.lock"
 rc_lock() {
     mkdir -p "$RC_BASE/state" && chmod 700 "$RC_BASE/state" || rc_fail "Can’t make $RC_BASE/state"
     [[ -e "$RC_LOCK" ]] || : >> "$RC_LOCK" || rc_fail "Can’t make the release-check lock at $RC_LOCK"
     local held="$RC_LOCK.held.$$" waited=0
     rm -f "$held"
+    # The helper removes the .owner file too once its holder is gone, also
+    # after a kill -9 that skipped rc_unlock: a gateway or an app started
+    # under that run then stops or refuses (they check the owner).
     /usr/bin/lockf -s -t 2 "$RC_LOCK" /bin/sh -c \
-        ': > "$2" || exit 1; while kill -0 "$1" 2>/dev/null && [ -e "$2" ]; do sleep 1; done; rm -f "$2"' \
-        rc-lock $$ "$held" 2>/dev/null &!
+        ': > "$2" || exit 1; while kill -0 "$1" 2>/dev/null && [ -e "$2" ]; do sleep 1; done; rm -f "$2"; o="$(cat "$3" 2>/dev/null)"; [ "${o%% *}" = "$1" ] && rm -f "$3"; exit 0' \
+        rc-lock $$ "$held" "$RC_LOCK.owner" 2>/dev/null &!
     RC_LOCK_PID=$!
     # Taken once the helper says so; refused once it ends without saying so.
     while [[ ! -e "$held" ]] && kill -0 "$RC_LOCK_PID" 2>/dev/null && (( waited < 100 )); do
@@ -555,7 +629,7 @@ rc_live_sync() {
     [[ -n "${RC_LIVE_PARENT:-}" && -d "$RC_LIVE_DIR" ]] || return 0
     local file
     for file in ledger.json results.jsonl refusals.jsonl apple-requests.jsonl host-keychain.before host-keychain.after deletes.jsonl \
-                unrecorded-creates.jsonl; do
+                unrecorded-creates.jsonl writes.jsonl device-commands.jsonl; do
         [[ -f "$RC_LIVE_DIR/$file" ]] && cp "$RC_LIVE_DIR/$file" "$RC_RUN/live/$file"
     done
     return 0
@@ -611,14 +685,17 @@ rc_cleanup() {
     (( RC_CLEANED )) && return 0
     RC_CLEANED=1
     setopt local_options no_err_exit
+    rc_gateway_stop
     if (( RC_LIVE_STARTED )); then
         rc_log "Cleanup: removing this run’s test objects"
         rc_live_environment 1
+        rc_gateway_start --secrets-only || rc_check_failed "the live gateway for the cleanup’s credentials"
         if rc_test "$CLEANUP_TEST" --once --cleanup-line; then
             RC_CLEANUP_STATUS="passed"
         else
             RC_CLEANUP_STATUS="FAILED (see logs/${CLEANUP_TEST//\//-}.*.log)"
         fi
+        rc_gateway_stop
     fi
     rc_live_off
     rc_forget_credentials
@@ -721,7 +798,7 @@ print("; ".join("%s “%s” (%s)" % (c.get("resource", ""), c.get("name", ""), 
     fi
     RC_LIVE_IN_CONTAINER="${TEST_HOST_CONTAINER:-}" RC_ALLOWLIST_COPY="${RC_ALLOWLIST_COPY:-}" \
     RC_READ_ONLY_ROLES="${(j:, :)READ_ONLY_ROLES}" RC_HOST_KEYCHAIN="${RC_HOST_KEYCHAIN:-}" \
-    RC_CHECK_ERRORS_TEXT="${(j:|:)RC_CHECK_ERRORS}" \
+    RC_CHECK_ERRORS_TEXT="${(j:|:)RC_CHECK_ERRORS}" RC_REPORT_ALLOWLIST="${RC_ALLOWLIST:-}" \
     "$RC_PY" - "$RC_RUN" "$APP_NAME" "$result" "$RC_KIND" "$RC_JTKIT" "${RC_CLEANUP_STATUS:-not needed}" \
         "${(j:|:)RC_STAGE_NAMES}" "${(j:|:)RC_STAGE_STATUS}" <<'EOF'
 import json, os, sys
@@ -789,6 +866,32 @@ for entry in lines_of("live/apple-requests.jsonl"):
 if apple:
     lines += ["", "## Apple requests (paced to 9 a minute, at most 40 a run per organization)", ""]
     lines += [f"- {role}: {count}" for role, count in sorted(apple.items())]
+# Which tenant each write went to (B3), and the device commands, each device
+# as its place on the allow-list's test devices (never its serial).
+writes = lines_of("live/writes.jsonl")
+commands = lines_of("live/device-commands.jsonl")
+if writes or commands:
+    lines += ["", "## Writes per tenant", ""]
+    per = {}
+    for w in writes:
+        per.setdefault(w.get("role", "?"), {}).setdefault(w.get("kind", "?"), 0)
+        per[w.get("role", "?")][w.get("kind", "?")] += 1
+    for role in sorted(per):
+        lines.append(f"- {role}: " + ", ".join(f"{n} {k}" for k, n in sorted(per[role].items())))
+    if commands:
+        places = {}
+        try:
+            with open(os.environ.get("RC_REPORT_ALLOWLIST") or "") as f:
+                for t in json.load(f).get("tenants", []):
+                    for n, d in enumerate(t.get("testDevices") or [], 1):
+                        places[(t["role"], str(d.get("serial", "")).upper())] = n
+        except (OSError, ValueError):
+            pass
+        lines += ["", "Device commands:", ""]
+        for c in commands:
+            place = places.get((c.get("role"), str(c.get("serial", "")).upper()))
+            device = f"test device {place}" if place else "a test device"
+            lines.append(f"- {c.get('role', '?')}: {c.get('command', '?')} to {device} ({c.get('level', '')})")
 checks = [c for c in os.environ.get("RC_CHECK_ERRORS_TEXT", "").split("|") if c]
 if checks:
     lines += ["", f"## Checks that couldn’t run ({len(checks)})", ""]
@@ -868,12 +971,20 @@ release_check_main() {
 
     # Stage 1: build and sign in
     rc_check_allowlist
+    # Allow-list version 2 (JTKit 1.1.0) may say "productionReads": production
+    # roles then take part without --include-production, read only (JTKit’s
+    # policy refuses their writes). A version 1 list has no such key.
+    local production_reads
+    production_reads="$("$RC_PY" -c 'import json,sys; print(1 if json.load(open(sys.argv[1])).get("productionReads") is True else 0)' "$RC_ALLOWLIST")" \
+        || rc_fail "Check failed: reading productionReads from the allow-list"
+    (( production_reads )) && rc_log "Production roles are read without --include-production (the allow-list’s productionReads)"
+    local include_production=$(( RC_PRODUCTION || production_reads ))
     if (( RC_ALL_TENANTS )); then
         local all_roles
-        all_roles="$("$RC_PY" -c 'import json,sys; print(" ".join(sorted({t["role"] for t in json.load(open(sys.argv[1]))["tenants"] if sys.argv[2]=="1" or not t.get("production")})))' "$RC_ALLOWLIST" "$RC_PRODUCTION")" \
+        all_roles="$("$RC_PY" -c 'import json,sys; print(" ".join(sorted({t["role"] for t in json.load(open(sys.argv[1]))["tenants"] if sys.argv[2]=="1" or not t.get("production")})))' "$RC_ALLOWLIST" "$include_production")" \
             || rc_fail "Check failed: reading the roles from the allow-list"
         RC_ROLES=(${=all_roles})
-    elif (( ! RC_PRODUCTION )); then
+    elif (( ! include_production )); then
         # The app’s production roles take part only with --include-production.
         local kept_roles
         kept_roles="$("$RC_PY" -c 'import json,sys; prod={t["role"] for t in json.load(open(sys.argv[1]))["tenants"] if t.get("production")}; print(" ".join(r for r in sys.argv[2:] if r not in prod))' "$RC_ALLOWLIST" "${ROLES[@]}")" \
@@ -902,12 +1013,17 @@ release_check_main() {
         unset TEST_RUNNER_JTKIT_LIVE_HOST_KEYCHAIN
         rc_live_off
     fi
+    # the gateway is built now, before anything is created on a tenant
+    rc_gateway_build || { rc_stage "1 build and sign in" "FAILED"; rc_fail "The live gateway didn’t build (logs/gateway-build.log)"; }
     rc_read_credentials
     rc_live_environment 0
+    rc_gateway_start --secrets-only || { rc_stage "1 build and sign in" "FAILED"; rc_fail "The live gateway didn’t start (logs/gateway.log)"; }
     if ! rc_test "$SIGNIN_TEST"; then
+        rc_gateway_stop
         rc_stage "1 build and sign in" "FAILED"
         rc_fail "Sign-in failed (logs/${SIGNIN_TEST//\//-}.*.log)"
     fi
+    rc_gateway_stop
     rc_live_off
     # Stages 2 and 3 need no credentials: they’re read again for stage 4.
     rc_forget_credentials
@@ -947,14 +1063,25 @@ release_check_main() {
     RC_LIVE_STARTED=1
     rc_live_environment 1
     if [[ "$RC_FAULT" == interrupt-live ]]; then
+        rc_gateway_start --secrets-only || rc_fail "The live gateway didn’t start (logs/gateway.log)"
         rc_interrupt_live "${LIVE_TESTS[1]}"
     fi
     for test in "${LIVE_TESTS[@]}"; do
         rc_log "  live: $test"
+        # a live UI test gets the full gateway; a unit-test live check only
+        # its credentials from it (its own guarded network keeps the ledger)
+        local mode=(--secrets-only)
+        [[ -n "$UI_TESTS" && "$test" == "$UI_TESTS/"* ]] && mode=()
+        if ! rc_gateway_start "${mode[@]}"; then
+            rc_stage "4 live checks" "FAILED: $test (no live gateway)"
+            rc_fail "Live check failed: $test (the live gateway didn’t start)"
+        fi
         if ! rc_test "$test" --once --results-line; then
+            rc_gateway_stop
             rc_stage "4 live checks" "FAILED: $test"
             rc_fail "Live check failed: $test"
         fi
+        rc_gateway_stop
     done
     rc_stage "4 live checks" "passed"
     return 0
