@@ -100,6 +100,24 @@ struct JamfPlatformTestConnectionTests {
     }
 }
 
+@Suite("Review A-C #10: platformGroups names its privileges")
+struct PlatformGroupsPrivilegeTests {
+    @Test("A Jamf Pro 403 names the four group read privileges")
+    func refusal() async throws {
+        let server = MockServer { _ in .json(403, #"{"httpStatus":403,"errors":[]}"#) }
+        let client = try JamfPlatform.Client(baseURL: URL(string: "https://pro.example.com")!, scope: .organization, server: .jamfPro,
+                                             tokens: FixedToken("tok"), recorder: RequestRecorder(session: server.session, log: nil),
+                                             sleep: { _ in }, random: { 0 })
+        do {
+            _ = try await client.platformGroups()
+            Issue.record("expected a refusal")
+        } catch let error as JamfPlatform.APIError {
+            #expect(error.privileges == JamfPlatform.Client.platformGroupsPrivileges)
+            #expect(error.privileges.contains(.readStaticMobileDeviceGroups))
+        }
+    }
+}
+
 @Suite("Jamf School check-in text and move batches (C10, C11)")
 struct JamfSchoolHelperTests {
     @Test("The raw check-in text is kept, from the list and from a single device")
@@ -142,6 +160,18 @@ struct PublicHTTPClientTests {
         await #expect(throws: HTTPError.self) { _ = try await client.send(HTTPRequest(method: "DELETE", path: "a")) }
         await #expect(throws: HTTPError.self) { _ = try await client.send(HTTPRequest(path: "../etc")) }
         #expect(server.requests.count == 1)
+    }
+}
+
+@Suite("Review A-C #6: the public HTTP client and http://")
+struct PublicHTTPClientSchemeTests {
+    @Test("An http:// base address is refused before anything is sent, so the token never goes in clear")
+    func http() async throws {
+        let server = MockServer { _ in .json(200, "{}") }
+        let client = HTTPClient(baseURL: URL(string: "http://downloads.example.com")!, tokens: FixedToken("tok"),
+                                recorder: RequestRecorder(session: server.session, log: nil))
+        await #expect(throws: HTTPError.self) { _ = try await client.send(HTTPRequest(path: "a.json")) }
+        #expect(server.requests.isEmpty)
     }
 }
 
@@ -206,6 +236,20 @@ struct TimestampedBackupStoreTests {
         #expect(file == 0o600 && folder == 0o700)
         #expect(store.directory(for: "..").lastPathComponent == "_..")
         #expect(store.backups(for: "none").isEmpty)
+    }
+
+    @Test("Review A-C #9: a root folder the app passed keeps its permissions; one the store makes is 0700")
+    func rootPermissions() throws {
+        let parent = FileManager.default.temporaryDirectory.appending(path: "JTKitBackupRoot-\(UUID().uuidString)", directoryHint: .isDirectory)
+        defer { try? FileManager.default.removeItem(at: parent) }
+        let existing = parent.appending(path: "Existing", directoryHint: .isDirectory)
+        try FileManager.default.createDirectory(at: existing, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o755])
+        try TimestampedBackupStore(root: existing).write(Data("x".utf8), for: "a")
+        #expect(try FileManager.default.attributesOfItem(atPath: existing.path)[.posixPermissions] as? Int == 0o755)
+        let made = parent.appending(path: "Made", directoryHint: .isDirectory)
+        try TimestampedBackupStore(root: made).write(Data("x".utf8), for: "a")
+        #expect(try FileManager.default.attributesOfItem(atPath: made.path)[.posixPermissions] as? Int == 0o700)
+        #expect(try FileManager.default.attributesOfItem(atPath: made.appending(path: "a").path)[.posixPermissions] as? Int == 0o700)
     }
 
     @Test("Pruning keeps each key’s newest backup, and everything for Forever")

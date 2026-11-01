@@ -344,6 +344,9 @@ public actor HTTPClient {
     private let redirects: RedirectRule
     private let writeSpacing: Duration
     private let maxConcurrent: Int?
+    /// Made with the public init: only an `https://` base address is used,
+    /// so a token never goes out in clear.
+    private nonisolated(unsafe) var requiresHTTPS = false
     private let rateLimit: RateLimit?
     /// When the requests in the current window started, oldest first.
     private var recentRequests: [Date] = []
@@ -390,6 +393,7 @@ public actor HTTPClient {
         self.init(baseURL: baseURL, tokens: tokens, recorder: recorder, headers: headers, permits: permits,
                   pathMapping: .none, redirects: redirects, writeSpacing: writeSpacing, maxConcurrent: maxConcurrent,
                   rateLimit: rateLimit, rules: rules, sleep: sleep, random: random, now: now)
+        requiresHTTPS = true
     }
 
     /// As the public init, with a path mapping (`.jamfProDirect`).
@@ -459,7 +463,36 @@ public actor HTTPClient {
     ///
     /// - Throws: `HTTPError`, `CancellationError`, or the token source’s error.
     public func send(_ request: HTTPRequest) async throws -> HTTPResponse {
-        guard RequestPath.isSafe(request.path), permits(request) else {
+        try await send(request, permittedAs: .itself)
+    }
+
+    /// Which request the app’s `permits` decides on.
+    enum Permission: Sendable {
+        /// The request sent.
+        case itself
+        /// The request the app made, which JTKit sends in another form
+        /// (Jamf Pro’s `v1` computer paths for the app’s `v4` request).
+        case appRequest(HTTPRequest)
+        /// JTKit’s own read that the app doesn’t make, e.g. the Jamf Pro
+        /// version probe: not the app’s list to decide. The path checks,
+        /// the demo boundary and the live check still apply.
+        case jtkitRead
+    }
+
+    func send(_ request: HTTPRequest, permittedAs permission: Permission) async throws -> HTTPResponse {
+        let permitted: Bool
+        switch permission {
+        case .itself: permitted = permits(request)
+        case .appRequest(let original): permitted = permits(original)
+        case .jtkitRead: permitted = request.isRead
+        }
+        if requiresHTTPS, baseURL.scheme?.lowercased() != "https" {
+            await recorder.note(request.method, request.path,
+                                note: "Refused before sending: \(baseURL.absoluteString) isn’t an https:// address.",
+                                category: "Blocked", isWarning: true)
+            throw HTTPError.invalidURL("\(baseURL.absoluteString) isn’t an https:// address, so nothing was sent.")
+        }
+        guard RequestPath.isSafe(request.path), permitted else {
             await recorder.note(request.method, request.path,
                                 note: "Refused before sending: not a request this app makes.",
                                 category: "Blocked", isWarning: true)

@@ -24,6 +24,8 @@ extension ABM {
         /// Apple’s limit on this client’s requests; nil only for a demo organization.
         public let rateLimit: RateLimit?
         private let http: HTTPClient
+        /// Which organization this is, for what is learned about its filter.
+        private let organizationKey: String
         private let poller: JamfPlatform.Poller
         private let now: @Sendable () -> Date
 
@@ -52,6 +54,7 @@ extension ABM {
             self.hints = hints
             self.now = now
             self.rateLimit = rateLimit
+            organizationKey = (tokens as? ABM.TokenProvider).map { "\(service.host)|\($0.clientID)" } ?? UUID().uuidString
             http = HTTPClient(baseURL: service.baseURL, tokens: tokens, recorder: recorder,
                               redirects: .sameHostHTTPSOnly, rateLimit: rateLimit, rules: .appleBusiness,
                               sleep: sleep, random: random, now: now)
@@ -101,7 +104,11 @@ extension ABM {
         ///
         /// Where Apple refuses the filter (400), or a page holds a device that
         /// wasn’t asked for (the filter wasn’t applied), the batch is read one
-        /// serial at a time with `device(serial:)` instead, as before.
+        /// serial at a time with `device(serial:)` instead, as before. After
+        /// a batch with missing serials, one of them is read on its own: if
+        /// Apple has it, the filter missed it, so that batch is read one at a
+        /// time too. Either way the filter isn’t used again for this
+        /// organization while the app runs.
         public func devices(serials: [String]) async throws -> [String: OrgDevice] {
             var wanted = [String]()
             var seen = Set<String>()
@@ -111,16 +118,30 @@ extension ABM {
             }
             var found = [String: OrgDevice]()
             var start = 0
-            var filterWorks = true
             while start < wanted.count {
                 let batch = Array(wanted[start..<min(start + Self.serialFilterBatchSize, wanted.count)])
                 start += batch.count
-                if filterWorks, let devices = try await filteredDevices(batch) {
+                if SerialFilterTrust.shared.isUsable(organizationKey), let devices = try await filteredDevices(batch) {
+                    if let missing = batch.first(where: { devices[$0] == nil }) {
+                        if let device = try await device(serial: missing) {
+                            // Apple has a serial its filter didn't return
+                            await recorder.note("GET", "v1/orgDevices",
+                                                note: "The serial number filter left out a device Apple has; reading the devices one at a time.",
+                                                isWarning: true)
+                            SerialFilterTrust.shared.distrust(organizationKey)
+                            found[missing] = device
+                            for serial in batch where serial != missing {
+                                try Task.checkCancellation()
+                                if let device = try await self.device(serial: serial) { found[serial] = device }
+                            }
+                            continue
+                        }
+                    }
                     found.merge(devices) { first, _ in first }
                     continue
                 }
                 // the filter isn’t supported here: the rest one serial at a time
-                filterWorks = false
+                SerialFilterTrust.shared.distrust(organizationKey)
                 for serial in batch {
                     try Task.checkCancellation()
                     if let device = try await device(serial: serial) { found[serial] = device }
@@ -525,4 +546,15 @@ nonisolated enum RequestPathSegment {
         }
         return segment
     }
+}
+
+/// Organizations whose `filter[serialNumber]` can’t be trusted (refused,
+/// not applied, or leaving out a device Apple has), for as long as the app runs.
+nonisolated final class SerialFilterTrust: @unchecked Sendable {
+    static let shared = SerialFilterTrust()
+    private let lock = NSLock()
+    private var distrusted: Set<String> = []
+
+    func isUsable(_ organization: String) -> Bool { lock.withLock { !distrusted.contains(organization) } }
+    func distrust(_ organization: String) { _ = lock.withLock { distrusted.insert(organization) } }
 }

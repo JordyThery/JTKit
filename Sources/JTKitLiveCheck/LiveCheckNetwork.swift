@@ -8,11 +8,19 @@ public nonisolated struct LiveRefusal: Sendable, Equatable, Codable {
     public var reason: String
 }
 
-/// The error a client sees for a refused request.
-public nonisolated struct LiveCheckRefused: LocalizedError, Sendable {
+/// The error a client sees for a refused request. As an `NSError` (what a
+/// session hands on) it keeps its text and reason in `userInfo`.
+public nonisolated struct LiveCheckRefused: LocalizedError, CustomNSError, Sendable {
     public var refusal: LiveRefusal
     public var errorDescription: String? {
         "Live check refused \(refusal.method) \(refusal.location): \(refusal.reason)"
+    }
+
+    public static let reasonKey = "JTKitLiveCheckRefusalReason"
+    public static var errorDomain: String { "JTKitLiveCheck.LiveCheckRefused" }
+    public var errorCode: Int { 1 }
+    public var errorUserInfo: [String: Any] {
+        [NSLocalizedDescriptionKey: errorDescription ?? "", Self.reasonKey: refusal.reason]
     }
 }
 
@@ -263,7 +271,7 @@ public nonisolated final class LiveCheckNetwork: @unchecked Sendable {
                 recordUnrecorded(.init(resource: resource, name: name, status: status, reason: "\(error)"))
             }
         case .read where (200..<300).contains(status):
-            policy.learnDevices(from: body, target: allowed.target, role: allowed.role)
+            policy.learnDevices(from: body, target: allowed.target, role: allowed.role, path: request.url.path(percentEncoded: false))
         case .signIn where request.url.host() == "account.apple.com" && (200..<300).contains(status):
             if let token = (try? JSONSerialization.jsonObject(with: body) as? [String: Any])?["access_token"] as? String,
                let clientID = LiveCheckPolicy.formValue("client_id", in: request.body) {
@@ -295,7 +303,8 @@ extension LiveCheckNetwork {
     /// calling (background) queue.
     func confirmInterruptive(_ allowed: LiveDecision.Allowed, request: LiveRequest) -> String? {
         let references = DeviceCommands.classify(request).references
-        let prompts = policy.prompts(for: allowed, references: references)
+        let prompts = policy.prompts(for: allowed, references: references,
+                                     family: DeviceRegistry.family(of: request.url.path(percentEncoded: false)))
         guard let confirmer = policy.confirmer else {
             return "An interruptive command (\(prompts.first?.command ?? "command")) is sent only after the serial prompt’s confirmation, and this run has no prompt"
         }

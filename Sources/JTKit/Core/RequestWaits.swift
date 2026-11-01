@@ -116,6 +116,11 @@ extension RequestRecorder {
     func wait(_ seconds: TimeInterval, reason: WaitReason, now: Date,
               sleep: @escaping @Sendable (Duration) async throws -> Void) async throws {
         let duration = Duration.milliseconds(Int((max(seconds, 0) * 1000).rounded()))
+        // under the live-check switch the release check’s gateway hears of it
+        if case .active(let active) = LiveLaunch.state {
+            let reported = seconds
+            await Task.detached { LiveLaunch.reportWait(seconds: reported, to: active) }.value
+        }
         guard let waits else {
             try await sleep(duration)
             return

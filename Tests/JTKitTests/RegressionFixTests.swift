@@ -238,6 +238,32 @@ struct WindowCloseGuardTests {
         closeGuard.detach()
         #expect(window.delegate === original)
     }
+
+    @Test func aNewGuardBeforeTheOldOneGoesKeepsTheWindowsOwnDelegate() {
+        // review A-C #4: `.id` swaps editors, the new guard attaches first
+        let window = window()
+        let original = Delegate()
+        window.delegate = original
+        var first: CloseGuard? = CloseGuard()
+        first?.attach(to: window)
+        let second = CloseGuard()
+        second.attach(to: window)
+        first?.detach()
+        first = nil
+        (window.delegate as? NSWindowDelegate)?.windowDidResize?(Notification(name: NSWindow.didResizeNotification))
+        #expect(original.resized == 1, "still reaches the window’s own delegate")
+        second.detach()
+        #expect(window.delegate === original)
+
+        // the other order: the old guard goes after the new one detached
+        let third = CloseGuard()
+        third.attach(to: window)
+        let fourth = CloseGuard()
+        fourth.attach(to: window)
+        fourth.detach()
+        third.detach()
+        #expect(window.delegate === original)
+    }
 }
 
 @MainActor
@@ -291,6 +317,28 @@ struct RoleFillingTests {
         let second = SampleTenant(name: "B", clientId: "b")
         try connections.save(second)
         #expect(ConnectionRoleFilling.roles(toGive: second.connection, among: roles, store: connections).map(\.title) == ["Destination"])
+    }
+
+    @Test func aConnectionMadeWithPlusGetsItsRoleOnItsFirstSaveOnly() throws {
+        // review A-C #7: an empty "New tenant" is never the connection in use
+        let connections = store()
+        let active = Choice()
+        let roles = [ConnectionRole.active(selection: active.binding)]
+        var unsaved = UnsavedNewConnections()
+        let placeholder = SampleTenant(name: "New tenant", clientId: "")
+        try connections.save(placeholder)
+        unsaved.added(placeholder.id)
+        #expect(active.id == nil, "not in use before it is saved")
+
+        let other = SampleTenant(name: "Saved earlier", clientId: "x")
+        try connections.save(other)
+        #expect(unsaved.saved(other, among: roles, store: connections).isEmpty, "only records made with +")
+
+        let given = unsaved.saved(placeholder, among: roles, store: connections)
+        #expect(given.count == 1)
+        for role in given { role.selection.wrappedValue = placeholder.id }
+        #expect(active.id == placeholder.id)
+        #expect(unsaved.saved(placeholder, among: roles, store: connections).isEmpty, "once")
     }
 
     @Test func aRoleInUseKeepsItsConnection() throws {
@@ -556,7 +604,8 @@ struct ComputersAPIVersionTests {
         #expect(server.requests.map(\.path) == ["/pro/v4/computers-inventory"])
     }
 
-    @Test func aVersionThatCantBeReadUsesV4AndIsAskedAgain() async throws {
+    @Test func aVersionThatCantBeReadUsesV4OneTryNotRepeatedForAMinute() async throws {
+        // review A-C #5: a 5xx probe isn't retried four times before every request
         let page = page
         let server = MockServer { request in
             request.path.hasSuffix("jamf-pro-version") ? .json(500, "{}") : .json(200, page)
@@ -564,20 +613,39 @@ struct ComputersAPIVersionTests {
         let jamf = try client(server)
         _ = try await jamf.computer(serial: "C02OLD")
         _ = try await jamf.computer(serial: "C02OLD")
-        #expect(server.requests.filter { $0.path.hasSuffix("jamf-pro-version") }.count == 8, "4 attempts, twice: not remembered")
+        #expect(server.requests.filter { $0.path.hasSuffix("jamf-pro-version") }.count == 1)
         #expect(server.requests.filter { $0.path == "/api/v4/computers-inventory" }.count == 2)
     }
 
-    @Test func aRefusedVersionReadIsRememberedAsV4() async throws {
-        let page = page
-        let server = MockServer { _ in .json(200, page) }
+    @Test func requestsAtTheSameTimeShareOneProbe() async throws {
+        let server = server(version: "11.29.0", page: page)
+        let log = ActivityLog()
+        let jamf = try client(server, log: log)
+        try await withThrowingTaskGroup(of: Void.self) { group in
+            for _ in 0..<4 { group.addTask { _ = try await jamf.computer(serial: "C02OLD") } }
+            try await group.waitForAll()
+        }
+        #expect(server.requests.filter { $0.path.hasSuffix("jamf-pro-version") }.count == 1)
+        #expect(log.entries.filter { $0.note?.contains("older than 11.30.0") == true }.count == 1)
+    }
+
+    @Test func theAppsAllowListDecidesOnItsOwnRequestNotTheProbeOrTheV1Form() async throws {
+        // review A-C #2: an app whose list names only the v4 computer paths
+        let server = server(version: "11.29.2", page: page)
         let jamf = try JamfPlatform.Client(
             baseURL: URL(string: "https://jss-\(UUID().uuidString.lowercased()).example")!, scope: .organization, server: .jamfPro,
             tokens: FixedToken("tok"), recorder: RequestRecorder(session: server.session, log: nil),
-            permits: { !$0.path.contains("jamf-pro-version") }, sleep: { _ in }, random: { 0 })
-        _ = try await jamf.computer(serial: "C02OLD")
-        _ = try await jamf.computer(serial: "C02OLD")
-        #expect(server.requests.map(\.path) == ["/api/v4/computers-inventory", "/api/v4/computers-inventory"])
+            permits: { $0.path.hasPrefix("pro/v4/computers-inventory") }, sleep: { _ in }, random: { 0 })
+        guard case .one = try await jamf.computer(serial: "C02OLD") else {
+            Issue.record("the computer wasn’t found over v1")
+            return
+        }
+        try await jamf.setAssetTag("A1", computerID: "7")
+        #expect(server.requests.map(\.path) == ["/api/v1/jamf-pro-version", "/api/v1/computers-inventory",
+                                                "/api/v1/computers-inventory-detail/7"])
+        // what the app doesn't allow stays refused, in either form
+        await #expect(throws: JamfPlatform.APIError.self) { _ = try await jamf.json("pro/v1/computers-inventory") }
+        #expect(server.requests.count == 3)
     }
 }
 

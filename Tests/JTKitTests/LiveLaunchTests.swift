@@ -23,7 +23,8 @@ private struct Setup {
     let lockOwner: URL
     let allowList: URL
 
-    init(lockOwner owner: String? = "4123 Example App", allowList: Bool = true, launchFile: Bool = true) {
+    init(lockOwner owner: String? = "\(getpid()) Example App", allowList: Bool = true, launchFile: Bool = true,
+         launchOwner: String = "\(getpid()) Example App") {
         let state = folder()
         lockOwner = state.appending(path: "release-check.lock.owner")
         if let owner { try? Data(owner.utf8).write(to: lockOwner) }
@@ -32,7 +33,7 @@ private struct Setup {
         if launchFile {
             let connection = Connection(id: UUID(), name: "jamf-test-a", service: .jamfPlatform, region: .eu,
                                         environmentID: environmentA, clientID: "client-a")
-            let launch = LiveLaunch.LaunchFile(port: 50123, lockOwner: "4123 Example App",
+            let launch = LiveLaunch.LaunchFile(port: 50123, lockOwner: launchOwner,
                                                connections: [.init(role: "jamf-test-a", connection: connection)])
             try? JSONEncoder().encode(launch).write(to: runFolder.appending(path: LiveLaunch.launchFileName))
         }
@@ -248,7 +249,7 @@ struct LiveGatewayTests {
             "JTKIT_LIVE_JAMF_TEST_A_CLIENT_ID": "client-a", "JTKIT_LIVE_JAMF_TEST_A_CLIENT_SECRET": "s3cret",
         ], upstream: upstream.session, readBack: ReadBack(attempts: 1, interval: 0), allowListURL: listURL)
         let owner = folder().appending(path: "release-check.lock.owner")
-        try Data("4123 Example App".utf8).write(to: owner)
+        try Data("\(getpid()) Example App".utf8).write(to: owner)
         return (run, owner, listURL)
     }
 
@@ -266,7 +267,7 @@ struct LiveGatewayTests {
         let (run, owner, listURL) = try makeRun(upstream: upstream)
         let gateway = try LiveGateway(run: run, roles: ["jamf-test-a"], lockOwnerURL: owner)
         defer { gateway.stop() }
-        #expect(gateway.environment["JTKIT_LIVE_JAMF_TEST_A_CLIENT_SECRET"] == "s3cret")
+        #expect(gateway.environment.keys.sorted() == [LiveLaunch.tokenVariable], "only the token, never a secret")
         #expect(gateway.connections.first?.clientID == "client-a")
 
         // the app as it starts under the switch
@@ -342,7 +343,7 @@ struct LiveGatewayTests {
         #expect(status.refusals.isEmpty && status.violations.isEmpty && status.notRemoved.isEmpty)
 
         let environment = client.appEnvironment(roles: ["jamf-test-a"], from: ["JTKIT_LIVE_JAMF_TEST_A_CLIENT_SECRET": "s3cret"])
-        #expect(environment["JTKIT_LIVE_JAMF_TEST_A_CLIENT_SECRET"] == "s3cret")
+        #expect(environment["JTKIT_LIVE_JAMF_TEST_A_CLIENT_SECRET"] == nil, "no secret in the app's launch environment")
         #expect(environment["JTKIT_LIVE_APP_ROLES"] == "jamf-test-a")
         #expect(environment[LiveLaunch.tokenVariable]?.isEmpty == false)
 

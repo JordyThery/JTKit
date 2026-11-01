@@ -132,7 +132,26 @@ final class DeviceRegistry: @unchecked Sendable {
     /// target → identifier (lowercased) → device
     private var devices: [String: [String: Device]] = [:]
 
-    func learn(from body: Data, target: String, listed: Set<String>) {
+    /// Which kind of device a path is about, for numeric IDs: Jamf Pro
+    /// numbers computers and mobile devices separately, so computer 7 and
+    /// mobile device 7 are different devices. Nil when the path doesn’t say.
+    static func family(of path: String) -> String? {
+        let lowered = path.lowercased()
+        if lowered.contains("mobiledevice") || lowered.contains("mobile-device") { return "mobile" }
+        if lowered.contains("computer") { return "computer" }
+        return nil
+    }
+
+    /// The key an identifier is kept under: a number with its family
+    /// (`computer#7`), anything else (a UUID, UDID, management ID) as is.
+    static func key(_ identifier: String, family: String?) -> String? {
+        let id = identifier.lowercased()
+        guard !id.isEmpty else { return nil }
+        guard id.allSatisfy(\.isNumber) else { return id }
+        return family.map { "\($0)#\(id)" }
+    }
+
+    func learn(from body: Data, target: String, listed: Set<String>, family: String? = nil) {
         guard !listed.isEmpty, !body.isEmpty, let object = try? JSONSerialization.jsonObject(with: body) else { return }
         var found: [(String, Device)] = []
         LiveCheckPolicy.visitObjects(in: object) { dictionary in
@@ -151,7 +170,9 @@ final class DeviceRegistry: @unchecked Sendable {
                     if let number = source[key] as? NSNumber { ids.append(number.stringValue) }
                 }
             }
-            for id in ids where !id.isEmpty { found.append((id, Device(serial: serial, name: name))) }
+            for id in ids {
+                if let key = Self.key(id, family: family) { found.append((key, Device(serial: serial, name: name))) }
+            }
         }
         guard !found.isEmpty else { return }
         lock.withLock {
@@ -162,8 +183,11 @@ final class DeviceRegistry: @unchecked Sendable {
         }
     }
 
-    func device(target: String, reference: String) -> Device? {
-        lock.withLock { devices[target.lowercased()]?[reference.lowercased()] }
+    /// - Parameter family: the command’s (`family(of:)` of its path); a
+    ///   number is only found among devices of the same family.
+    func device(target: String, reference: String, family: String? = nil) -> Device? {
+        guard let key = Self.key(reference, family: family) else { return nil }
+        return lock.withLock { devices[target.lowercased()]?[key] }
     }
 }
 

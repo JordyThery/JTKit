@@ -300,6 +300,97 @@ struct ReleaseCheckScriptTests {
         #expect(third.output.contains("TOOK-THE-LOCK"), "\(third.output)")
     }
 
+    @Test("Review B #1: a check killed with kill -9 leaves no owner file behind")
+    func killedCheckLeavesNoOwner() throws {
+        let home = try Self.makeHome()
+        defer { try? FileManager.default.removeItem(at: home) }
+        let first = Process()
+        first.executableURL = URL(filePath: "/bin/zsh")
+        first.arguments = ["-c", """
+            APP_NAME="First App"; source "\(Self.template.path)"; rc_log() { print -r -- "$*" }
+            rc_lock && sleep 60
+            """]
+        first.environment = ["PATH": "/usr/bin:/bin", "HOME": home.path]
+        try first.run()
+        let owner = Self.base(home).appending(path: "state/release-check.lock.owner")
+        var deadline = Date().addingTimeInterval(10)
+        while !FileManager.default.fileExists(atPath: owner.path), Date() < deadline { Thread.sleep(forTimeInterval: 0.05) }
+        #expect(FileManager.default.fileExists(atPath: owner.path))
+        kill(first.processIdentifier, SIGKILL)
+        first.waitUntilExit()
+        deadline = Date().addingTimeInterval(10)
+        while FileManager.default.fileExists(atPath: owner.path), Date() < deadline { Thread.sleep(forTimeInterval: 0.1) }
+        #expect(!FileManager.default.fileExists(atPath: owner.path), "the lock’s helper removed it")
+    }
+
+    @Test("Review B #6: the gateway gets the secrets in its own environment; the shell exports none")
+    func secretsReachOnlyTheGateway() throws {
+        let home = try Self.makeHome()
+        defer { try? FileManager.default.removeItem(at: home) }
+        let fake = home.appending(path: "fake-gateway")
+        try Self.write("""
+            #!/bin/zsh
+            print -r -- "gateway-args=$*" >> "$RC_TEST_OUT"
+            print -r -- "gateway-secret=$JTKIT_LIVE_JAMF_TEST_A_CLIENT_SECRET" >> "$RC_TEST_OUT"
+            print -n "{}" > "$RC_TEST_LIVE/live-launch.json"; print -n tok > "$RC_TEST_LIVE/live-gateway.token"
+            sleep 30
+            """, to: fake)
+        try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: fake.path)
+        let out = home.appending(path: "out.txt")
+        let live = home.appending(path: "live", directoryHint: .isDirectory)
+        try FileManager.default.createDirectory(at: live, withIntermediateDirectories: true)
+        let result = try Self.zsh("""
+            export RC_TEST_OUT="\(out.path)" RC_TEST_LIVE="\(live.path)"
+            RC_RUN="\(home.path)"; mkdir -p "$RC_RUN/logs"; RC_LIVE_DIR="\(live.path)"; RC_GATEWAY_BIN="\(fake.path)"
+            RC_SECRETS[JTKIT_LIVE_JAMF_TEST_A_CLIENT_SECRET]="not-a-real-secret"
+            rc_gateway_start --secrets-only && print STARTED
+            print "shell-env=$(printenv JTKIT_LIVE_JAMF_TEST_A_CLIENT_SECRET)."
+            rc_gateway_stop
+            """, home: home)
+        #expect(result.output.contains("STARTED") && result.output.contains("shell-env=."), "\(result.output)")
+        let seen = (try? String(contentsOf: out, encoding: .utf8)) ?? ""
+        #expect(seen.contains("gateway-args=--secrets-only") && seen.contains("gateway-secret=not-a-real-secret"), "\(seen)")
+    }
+
+    @Test("Review B #3: the report says which tenant each write went to, and device commands without serials")
+    func reportListsWritesPerTenant() throws {
+        let home = try Self.makeHome()
+        defer { try? FileManager.default.removeItem(at: home) }
+        let run = home.appending(path: "run", directoryHint: .isDirectory)
+        try Self.write(#"{"role":"jamf-test-a","target":"platform:x","method":"POST","kind":"create","status":201}"# + "\n"
+                       + #"{"role":"jamf-test-b","target":"platform:y","method":"DELETE","kind":"delete","status":204}"# + "\n",
+                       to: run.appending(path: "live/writes.jsonl"))
+        try Self.write(#"{"role":"lab","target":"lab.example","serial":"C02TESTDEV2","command":"Blank Push","level":"commands"}"# + "\n",
+                       to: run.appending(path: "live/device-commands.jsonl"))
+        let list = home.appending(path: "allowlist.json")
+        try Self.write(#"{"version":2,"tenants":[{"role":"lab","service":"jamfPro","host":"lab.example","access":"read","testDevices":[{"serial":"C02TESTDEV1"},{"serial":"C02TESTDEV2"}]}]}"#,
+                       to: list)
+        let result = try Self.zsh("""
+            RC_RUN="\(run.path)"; RC_ALLOWLIST="\(list.path)"; RC_PY=/usr/bin/python3; RC_KIND=test; RC_JTKIT=local
+            RC_STAGE_NAMES=() RC_STAGE_STATUS=() RC_CHECK_ERRORS=() READ_ONLY_ROLES=()
+            rc_report > /dev/null; cat "$RC_RUN/report.md"
+            """, home: home)
+        #expect(result.output.contains("## Writes per tenant"), "\(result.output)")
+        #expect(result.output.contains("- jamf-test-a: 1 create") && result.output.contains("- jamf-test-b: 1 delete"), "\(result.output)")
+        #expect(result.output.contains("- lab: Blank Push to test device 2 (commands)"), "\(result.output)")
+        #expect(!result.output.contains("C02TESTDEV2"), "no serial in the report")
+
+        // and for a sandboxed test host they're copied back before its folder goes
+        let source = try String(contentsOf: Self.template, encoding: .utf8)
+        let sync = String(source[try #require(source.range(of: "rc_live_sync() {")).lowerBound...].prefix(600))
+        #expect(sync.contains("writes.jsonl") && sync.contains("device-commands.jsonl"))
+    }
+
+    @Test("Review B #16: the gateway is built in stage 1, before the sign-in and before anything is created")
+    func gatewayBuiltInStageOne() throws {
+        let source = try String(contentsOf: Self.template, encoding: .utf8)
+        let main = String(source[try #require(source.range(of: "release_check_main() {")).lowerBound...])
+        let build = try #require(main.range(of: "rc_gateway_build")).lowerBound
+        let signIn = try #require(main.range(of: #"rc_test "$SIGNIN_TEST""#)).lowerBound
+        let stage2 = try #require(main.range(of: "# Stage 2")).lowerBound
+        #expect(build < signIn && signIn < stage2)
+    }
+
     @Test("While the lock is held, the exit trap (cleanup and report) still sees a command that failed")
     func exitTrapSeesFailuresUnderTheLock() throws {
         let home = try Self.makeHome()
@@ -390,11 +481,14 @@ struct ReleaseCheckScriptTests {
             security() { print -r -- "not-a-real-secret" }
             CREDENTIALS=("jamf-test-a:jamfPlatform:client-secret") RC_ROLES=(jamf-test-a) RC_SECRET_VARS=()
             rc_read_credentials
-            print "read=$(printenv TEST_RUNNER_JTKIT_LIVE_JAMF_TEST_A_CLIENT_SECRET)"
+            print "read=${RC_SECRETS[JTKIT_LIVE_JAMF_TEST_A_CLIENT_SECRET]}"
+            print "exported=$(printenv TEST_RUNNER_JTKIT_LIVE_JAMF_TEST_A_CLIENT_SECRET)$(printenv JTKIT_LIVE_JAMF_TEST_A_CLIENT_SECRET)."
             rc_forget_credentials
-            print "after=$(printenv TEST_RUNNER_JTKIT_LIVE_JAMF_TEST_A_CLIENT_SECRET)."
+            print "after=${RC_SECRETS[JTKIT_LIVE_JAMF_TEST_A_CLIENT_SECRET]}."
             """, home: home)
         #expect(result.output.contains("read=not-a-real-secret") && result.output.contains("after=."), "\(result.output)")
+        // review B #6: never in the environment a test runner inherits
+        #expect(result.output.contains("exported=."), "\(result.output)")
 
         let source = try String(contentsOf: Self.template, encoding: .utf8)
         let main = String(source[try #require(source.range(of: "release_check_main() {")).lowerBound...])

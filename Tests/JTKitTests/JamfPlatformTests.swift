@@ -750,6 +750,45 @@ struct JamfPlatformBlueprintTests {
         #expect(clock.recorded == [.seconds(2)])
     }
 
+    @Test("Review A-C #1: redeploying a Blueprint that was already DEPLOYED, without lastDeployment, isn’t done at once")
+    func redeployWithoutLastDeployment() async throws {
+        let id = "0a1b2c3d-5555-4444-8444-0123456789ab"
+        let path = "/blueprints/v1/blueprints/\(id)"
+        @Sendable func json(_ state: String) -> String {
+            #"{"id":"\#(id)","name":"iPad apps","deploymentState":{"state":"\#(state)"},"steps":[]}"#
+        }
+        // 1: the read before the POST and 2: the first check still say DEPLOYED
+        // (the previous deployment); 3: deploying; 4: deployed again
+        let states = ["DEPLOYED", "DEPLOYED", "OUT_OF_DATE", "DEPLOYED"]
+        let gets = Counter()
+        let server = MockServer { request in
+            switch (request.method, request.path) {
+            case ("POST", path + "/deploy"): return MockResponse(status: 202, body: Data())
+            case ("GET", path + "/report"): return .json(404, "{}")
+            default: return .json(200, json(states[min(gets.next(), states.count) - 1]))
+            }
+        }
+        let api = try blueprints(server)
+        let previous = try await api.startDeployment(id: id)
+        let clock = PollClock()
+        let outcome = try await api.watchDeployment(id: id, previousStart: previous, poller: clock.poller)
+        #expect(outcome.isFinished && outcome.value?.didSucceed == true)
+        #expect(clock.recorded.count == 2, "done on the third check, not the first: \(clock.recorded)")
+
+        // still DEPLOYED throughout: never confirmed, never reported done
+        let unchanged = MockServer { request in
+            switch (request.method, request.path) {
+            case ("POST", path + "/deploy"): return MockResponse(status: 202, body: Data())
+            case ("GET", path + "/report"): return .json(404, "{}")
+            default: return .json(200, json("DEPLOYED"))
+            }
+        }
+        let again = try blueprints(unchanged)
+        let start = try await again.startDeployment(id: id)
+        let stuck = try await again.watchDeployment(id: id, previousStart: start, poller: PollClock().poller)
+        #expect(!stuck.isFinished)
+    }
+
     @Test("Reading one answer: lastDeployment wins when it is there; a failure state is FAILED")
     func deploymentStatusFromOneAnswer() {
         typealias Status = JamfPlatform.DeploymentStatus

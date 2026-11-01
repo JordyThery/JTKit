@@ -15,7 +15,10 @@ import Security
 ///   `JTKIT_LIVE_READ_ONLY_ROLES` (comma-separated roles kept read only for this app),
 ///   `JTKIT_LIVE_HOST_KEYCHAIN` (`before`/`after`, for `HOST_KEYCHAIN_TEST`).
 /// - Credentials as `JTKIT_LIVE_<ROLE>_<ITEM>`, e.g. `JTKIT_LIVE_JAMF_TEST_A_CLIENT_SECRET`,
-///   read from the login Keychain; never written to a file or log.
+///   read from the login Keychain; never written to a file or log. From 1.1.0
+///   the release check passes them only to its gateway (`jtkit-live-gateway`),
+///   and test processes ask the gateway for them (`credential`): a test
+///   runner’s environment is kept in the test’s result bundle.
 ///
 /// The allow-list is always `AllowList.defaultURL`; no setting moves it. A
 /// sandboxed test host can’t read that folder: it reads the copy the release
@@ -44,6 +47,8 @@ public nonisolated final class LiveCheckRun: @unchecked Sendable {
     public let hostKeychainLabel: String?
     private let environment: [String: String]
     private let lock = NSLock()
+    /// Secrets the gateway handed over, by `role|item`; in memory only.
+    private var fetchedSecrets: [String: String] = [:]
 
     public nonisolated enum RunError: Error, CustomStringConvertible {
         case notEnabled
@@ -203,10 +208,26 @@ public nonisolated final class LiveCheckRun: @unchecked Sendable {
     }
 
     /// A credential the script read from the Keychain, e.g. `credential("jamf-test-a", "client-secret")`.
+    ///
+    /// From this process’s environment (the gateway’s own), or else from the
+    /// run’s gateway (`LiveGateway.secretsCommand`, with its token from the
+    /// run folder): the release check passes the secrets only to the
+    /// gateway, never to a test runner, whose environment Xcode keeps in the
+    /// test’s result bundle.
     public func credential(_ role: String, _ item: String) throws -> String {
-        guard let value = environment[Self.variable(role: role, item: item)], !value.isEmpty else {
+        if let value = environmentCredential(role, item) { return value }
+        let key = "\(role)|\(item)"
+        if let cached = lock.withLock({ fetchedSecrets[key] }) { return cached }
+        guard let value = try? LiveGatewayClient(runFolder: runFolder).secretNow(role: role, item: item), !value.isEmpty else {
             throw RunError.missingCredential(role: role, item: item)
         }
+        lock.withLock { fetchedSecrets[key] = value }
+        return value
+    }
+
+    /// A credential in this process’s environment only.
+    func environmentCredential(_ role: String, _ item: String) -> String? {
+        guard let value = environment[Self.variable(role: role, item: item)], !value.isEmpty else { return nil }
         return value
     }
 

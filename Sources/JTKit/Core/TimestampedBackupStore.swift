@@ -41,8 +41,8 @@ public nonisolated struct TimestampedBackup: Identifiable, Hashable, Sendable {
 /// Backups as the Blueprint apps keep them before every write: one folder
 /// per key under `root` (`<root>/<key>/2026-10-07T14-03-11.123Z.json`),
 /// the exact bytes, never overwritten, readable by the user’s account only
-/// (folders 0700, files 0600), since a backup can hold another component’s
-/// secrets. The app picks `root` (under the live-check switch: the run’s
+/// (the folders it makes 0700, files 0600), since a backup can hold another
+/// component’s secrets. A `root` that already exists keeps its permissions. The app picks `root` (under the live-check switch: the run’s
 /// folder).
 public nonisolated struct TimestampedBackupStore: Sendable {
     public struct BackupError: Error, LocalizedError, Sendable {
@@ -82,9 +82,14 @@ public nonisolated struct TimestampedBackupStore: Sendable {
         let files = FileManager.default
         let ownerOnly: [FileAttributeKey: Any] = [.posixPermissions: 0o700]
         do {
+            let rootExisted = files.fileExists(atPath: root.path(percentEncoded: false))
             try files.createDirectory(at: directory, withIntermediateDirectories: true, attributes: ownerOnly)
-            // also folders made earlier with the default permissions
-            try files.setAttributes(ownerOnly, ofItemAtPath: root.path(percentEncoded: false))
+            // only folders the store made: `root` when it created it, and each
+            // key’s folder (also one made earlier with the default permissions);
+            // a `root` the app passed keeps its own
+            if !rootExisted {
+                try files.setAttributes(ownerOnly, ofItemAtPath: root.path(percentEncoded: false))
+            }
             try files.setAttributes(ownerOnly, ofItemAtPath: directory.path(percentEncoded: false))
             let base = date.formatted(Self.fileNameFormat)
             var counter = 1

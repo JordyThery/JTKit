@@ -25,10 +25,14 @@ public final class LiveJamfPlatformAPI: @unchecked Sendable {
     /// - Parameters:
     ///   - role: a Jamf Platform API role of the run, e.g. "jamf-test-a".
     ///   - environment: where the release check passed the secret; this process’s by default.
+    ///   - environment: tests only: a secret there is used instead of the gateway’s.
     public init(gateway: LiveGatewayClient, role: String,
                 environment: [String: String] = ProcessInfo.processInfo.environment) throws {
+        // the secret from the gateway, never from this runner's environment
+        // (Xcode keeps that in the result bundle)
+        let fromEnvironment = environment[LiveCheckRun.variable(role: role, item: "client-secret")].flatMap { $0.isEmpty ? nil : $0 }
         guard let connection = gateway.launch.connections.first(where: { $0.role == role && $0.connection.service == "jamfPlatform" })?.connection,
-              let secret = environment[LiveCheckRun.variable(role: role, item: "client-secret")], !secret.isEmpty else {
+              let secret = try fromEnvironment ?? gateway.secretNow(role: role, item: "client-secret"), !secret.isEmpty else {
             throw Failure(status: 0, body: "\(role) has no Jamf Platform API connection or client secret in this run")
         }
         self.gateway = gateway

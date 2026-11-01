@@ -10,14 +10,15 @@ import os
 /// release check’s rules (allow-list, ledger, prefix, access levels) before
 /// anything leaves the Mac; the app itself holds none of those rules. It
 /// uses only the release check’s connections (from the run folder, their
-/// secrets from the test’s environment), never its saved ones, with demo
+/// secrets handed over by the gateway on a request with its token: only
+/// the token is in the app’s environment), never its saved ones, with demo
 /// mode and the update check off.
 ///
 /// It works only:
 /// - in a Debug build (in a Release build the switch is refused);
 /// - while a release check holds its lock (the gateway writes the lock’s
 ///   owner into the run folder; where the app can read the lock itself, the
-///   two must match);
+///   two must match) and that release check is still running;
 /// - with the allow-list present (its own place, or the run’s copy).
 ///
 /// Refused, the app reaches nothing: every request fails before it is sent.
@@ -51,11 +52,18 @@ public nonisolated enum LiveLaunch {
             /// The allow-list role, e.g. "jamf-test-a".
             public var role: String
             public var connection: Connection
+            /// The run’s item holding the secret, e.g. "jamfpro-password";
+            /// nil: the sign-in’s usual one (`secretItem(_:)`).
+            public var secretItem: String?
 
-            public init(role: String, connection: Connection) {
+            public init(role: String, connection: Connection, secretItem: String? = nil) {
                 self.role = role
                 self.connection = connection
+                self.secretItem = secretItem
             }
+
+            /// The item of the run holding this connection’s main secret.
+            var mainItem: String? { secretItem ?? LiveLaunch.secretItem(connection.signIn) }
         }
 
         public var port: UInt16
@@ -76,8 +84,9 @@ public nonisolated enum LiveLaunch {
         public var port: UInt16
         var token: String
         public var connections: [LaunchFile.Entry]
-        /// Secrets by connection ID and kind, from the environment.
-        var secrets: [UUID: String]
+        /// Secrets by connection ID and the run’s item (`secretKey`),
+        /// handed over by the gateway.
+        var secrets: [String: String]
     }
 
     public enum State: Sendable, Equatable {
@@ -162,9 +171,11 @@ public nonisolated enum LiveLaunch {
                 || manager.isReadableFile(atPath: folder.appending(path: "allowlist.json").path) else {
             return .refused("The live-check switch works only with the allow-list present.")
         }
-        guard let data = try? Data(contentsOf: folder.appending(path: launchFileName)),
-              let launch = try? JSONDecoder().decode(LaunchFile.self, from: data) else {
+        guard let data = try? Data(contentsOf: folder.appending(path: launchFileName)) else {
             return .refused("The live check’s gateway isn’t running: \(launchFileName) is missing.")
+        }
+        guard let launch = try? JSONDecoder().decode(LaunchFile.self, from: data) else {
+            return .refused("The live check’s gateway wrote a \(launchFileName) this app can’t read.")
         }
         let owner = launch.lockOwner.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !owner.isEmpty else {
@@ -179,19 +190,53 @@ public nonisolated enum LiveLaunch {
                 return .refused("The live-check switch works only while a release check holds its lock.")
             }
         }
+        // a run folder a killed release check left behind
+        guard ownerIsAlive(owner) else {
+            return .refused("The release check that started the live check isn’t running any more.")
+        }
         guard let token = environment[tokenVariable], !token.isEmpty, launch.port > 0 else {
             return .refused("The live check’s gateway didn’t pass its token.")
         }
         // the roles the UI test gave this app (all of the run’s by default)
         let roles = Set((environment["JTKIT_LIVE_APP_ROLES"] ?? "").split(separator: ",").map(String.init))
         let connections = roles.isEmpty ? launch.connections : launch.connections.filter { roles.contains($0.role) }
-        var secrets: [UUID: String] = [:]
+        // the secrets: from the gateway, with its token (tests may pass them in the environment)
+        var wanted: [(UUID, String, String)] = []
         for entry in connections {
-            if let item = secretItem(entry.connection.signIn), let value = environment[variable(role: entry.role, item: item)] {
-                secrets[entry.connection.id] = value
+            if let item = entry.mainItem { wanted.append((entry.connection.id, entry.role, item)) }
+            if entry.connection.protect != nil { wanted.append((entry.connection.id, entry.role, protectItem)) }
+        }
+        var secrets: [String: String] = [:]
+        var missing: [(UUID, String, String)] = []
+        for (id, role, item) in wanted {
+            if let value = environment[variable(role: role, item: item)], !value.isEmpty {
+                secrets[secretKey(id, item)] = value
+            } else {
+                missing.append((id, role, item))
+            }
+        }
+        if !missing.isEmpty {
+            let handed = fetchSecrets(missing.map { ($0.1, $0.2) }, port: launch.port, token: token)
+            for (id, role, item) in missing {
+                if let value = handed["\(role)|\(item)"] { secrets[secretKey(id, item)] = value }
             }
         }
         return .active(Active(runFolder: folder, port: launch.port, token: token, connections: connections, secrets: secrets))
+    }
+
+    /// The run’s item for a connection’s Jamf Protect client secret.
+    static let protectItem = "protect-client-secret"
+
+    static func secretKey(_ id: UUID, _ item: String) -> String {
+        "\(id.uuidString.lowercased())|\(item)"
+    }
+
+    /// Whether the process holding the release check’s lock (`<pid> <app>`)
+    /// is still running; one this app may not signal counts as running.
+    static func ownerIsAlive(_ owner: String) -> Bool {
+        guard let first = owner.split(separator: " ").first, let pid = Int32(first), pid > 0 else { return false }
+        if kill(pid, 0) == 0 { return true }
+        return errno == EPERM
     }
 
     /// The release check’s name for a sign-in method’s secret, e.g. "client-secret".
@@ -211,9 +256,16 @@ public nonisolated enum LiveLaunch {
     }
 
     /// The same stable ID for a role in every launch, so a choice the app
-    /// made in a run (the connection in use) still matches.
+    /// made in a run (the connection in use) still matches. The gateway
+    /// gives the release check’s connections these IDs.
     public static func connectionID(role: String) -> UUID {
-        var bytes = Array("jtkit-live:\(role)".utf8)
+        connectionID(role: role, service: nil)
+    }
+
+    /// The same for one of a role’s two connections (e.g. its Platform API
+    /// and its Jamf Pro one), by the service’s stored name (`jamfPro`).
+    public static func connectionID(role: String, service: String?) -> UUID {
+        var bytes = Array((service.map { "jtkit-live:\(role)/\($0)" } ?? "jtkit-live:\(role)").utf8)
         while bytes.count < 16 { bytes.append(0) }
         var folded = [UInt8](repeating: 0, count: 16)
         for (index, byte) in bytes.enumerated() { folded[index % 16] = folded[index % 16] &* 31 &+ byte }
@@ -226,13 +278,22 @@ public nonisolated enum LiveLaunch {
     // MARK: Secrets
 
     /// The release check’s secrets, in memory: what the connection store
-    /// uses under the switch instead of the app’s Keychain items. Writes are refused.
-    public static var secrets: any SecretStore { LiveSecretStore() }
+    /// uses under the switch instead of the app’s Keychain items. Writes are
+    /// refused. The connections’ main secrets; `secrets(for:)` per kind.
+    public static var secrets: any SecretStore { LiveSecretStore(kind: .main) }
+
+    /// The release check’s secrets of one kind: a connection’s Jamf Protect
+    /// secret is its own item of the run, never the main secret.
+    public static func secrets(for kind: ConnectionSecretKind) -> any SecretStore { LiveSecretStore(kind: kind) }
 
     struct LiveSecretStore: SecretStore {
+        let kind: ConnectionSecretKind
+
         func secret(for account: String) -> String? {
-            guard case .active(let active) = LiveLaunch.state, let id = UUID(uuidString: account) else { return nil }
-            return active.secrets[id]
+            guard case .active(let active) = LiveLaunch.state, let id = UUID(uuidString: account),
+                  let entry = active.connections.first(where: { $0.connection.id == id }) else { return nil }
+            let item = kind == .protect ? LiveLaunch.protectItem : entry.mainItem
+            return item.flatMap { active.secrets[LiveLaunch.secretKey(id, $0)] }
         }
 
         func setSecret(_ secret: String?, for account: String) -> Bool {
@@ -321,6 +382,91 @@ nonisolated final class LiveLocked<Value>: @unchecked Sendable {
     private var value: Value
     init(_ value: Value) { self.value = value }
     func withLock<T>(_ body: (inout Value) -> T) -> T { lock.withLock { body(&value) } }
+}
+
+// MARK: - The gateway’s commands
+
+extension LiveLaunch {
+    /// A command to the gateway (JTKitLiveCheck’s `LiveGatewayRequest`).
+    struct Command: Codable, Sendable {
+        struct SecretItem: Codable, Sendable {
+            var role: String
+            var item: String
+            var value: String = ""
+        }
+
+        var token: String
+        var method = "GET"
+        var url = ""
+        var headers: [String: String] = [:]
+        var command: String
+        var secrets: [SecretItem]?
+        var waitSeconds: Double?
+    }
+
+    /// The run’s secrets for these items, handed over by the gateway (by
+    /// `role|item`); empty when it doesn’t answer within a few seconds.
+    static func fetchSecrets(_ items: [(role: String, item: String)], port: UInt16, token: String,
+                             timeout: TimeInterval = 10) -> [String: String] {
+        let command = Command(token: token, command: "secrets", secrets: items.map { Command.SecretItem(role: $0.role, item: $0.item) })
+        guard let payload = try? JSONEncoder().encode(command),
+              let answer = LiveGatewaySocket.exchange(LiveGatewayFrame.frame(payload), port: port, timeout: timeout),
+              let response = try? JSONDecoder().decode(LiveGatewayFrame.Response.self, from: answer),
+              let body = response.body,
+              let handed = try? JSONDecoder().decode([Command.SecretItem].self, from: body) else { return [:] }
+        return Dictionary(handed.map { ("\($0.role)|\($0.item)", $0.value) }, uniquingKeysWith: { first, _ in first })
+    }
+
+    /// Under the switch: tells the gateway the app waits `seconds` before
+    /// trying a request again, so a live UI test’s `waitForNetwork` doesn’t
+    /// take the wait for the end of the app’s work. Nothing otherwise.
+    static func reportWait(seconds: TimeInterval, to active: Active) {
+        guard seconds > 0 else { return }
+        let command = Command(token: active.token, command: "wait", waitSeconds: seconds)
+        guard let payload = try? JSONEncoder().encode(command) else { return }
+        // waits briefly, off the caller (a request waiting for its retry)
+        _ = LiveGatewaySocket.exchange(LiveGatewayFrame.frame(payload), port: active.port, timeout: 5)
+    }
+}
+
+/// One framed exchange with the gateway on 127.0.0.1, blocking the calling
+/// thread up to `timeout`.
+nonisolated enum LiveGatewaySocket {
+    static func exchange(_ frame: Data, port: UInt16, timeout: TimeInterval) -> Data? {
+        let socketFD = socket(AF_INET, SOCK_STREAM, 0)
+        guard socketFD >= 0 else { return nil }
+        defer { close(socketFD) }
+        var time = timeval(tv_sec: Int(timeout), tv_usec: 0)
+        setsockopt(socketFD, SOL_SOCKET, SO_RCVTIMEO, &time, socklen_t(MemoryLayout<timeval>.size))
+        setsockopt(socketFD, SOL_SOCKET, SO_SNDTIMEO, &time, socklen_t(MemoryLayout<timeval>.size))
+        var noSignal: Int32 = 1
+        setsockopt(socketFD, SOL_SOCKET, SO_NOSIGPIPE, &noSignal, socklen_t(MemoryLayout<Int32>.size))
+        var address = sockaddr_in()
+        address.sin_len = UInt8(MemoryLayout<sockaddr_in>.size)
+        address.sin_family = sa_family_t(AF_INET)
+        address.sin_port = port.bigEndian
+        address.sin_addr.s_addr = inet_addr("127.0.0.1")
+        let connected = withUnsafePointer(to: &address) {
+            $0.withMemoryRebound(to: sockaddr.self, capacity: 1) { connect(socketFD, $0, socklen_t(MemoryLayout<sockaddr_in>.size)) }
+        }
+        guard connected == 0 else { return nil }
+        let sent = frame.withUnsafeBytes { send(socketFD, $0.baseAddress, frame.count, 0) }
+        guard sent == frame.count else { return nil }
+        func read(_ count: Int) -> Data? {
+            var data = Data()
+            var buffer = [UInt8](repeating: 0, count: min(max(count, 1), 65_536))
+            while data.count < count {
+                let got = recv(socketFD, &buffer, min(buffer.count, count - data.count), 0)
+                guard got > 0 else { return nil }
+                data.append(buffer, count: got)
+            }
+            return data
+        }
+        guard let header = read(4) else { return nil }
+        let length = Int(header.withUnsafeBytes { $0.loadUnaligned(as: UInt32.self) }.bigEndian)
+        guard length >= 0, length < 64 * 1024 * 1024 else { return nil }
+        return length == 0 ? Data() : read(length)
+    }
 }
 
 // MARK: - The wire to the gateway

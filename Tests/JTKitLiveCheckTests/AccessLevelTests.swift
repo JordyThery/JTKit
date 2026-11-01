@@ -330,3 +330,76 @@ final class Locked<Value>: @unchecked Sendable {
     var value: Value { lock.withLock { storage } }
     func withLock<T>(_ body: (inout Value) -> T) -> T { lock.withLock { body(&storage) } }
 }
+
+// MARK: - The 1.1.0 review of Part B
+
+@Suite("Review B #4, #5, #7, #13: device commands")
+struct DeviceCommandReviewTests {
+    @Test func aProductionTenantTakesNoTestDevicesAndNoCommands() throws {
+        // review B #4
+        let json = #"""
+        {"version": 2, "tenants": [
+          {"role": "production", "service": "jamfPro", "host": "prod.jamf.example", "access": "read", "production": true,
+           "testDevices": [{"serial": "C02TESTDEV1"}]}]}
+        """#
+        let url = tempFolder().appending(path: "allowlist.json")
+        try Data(json.utf8).write(to: url)
+        try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: url.path)
+        #expect(throws: AllowList.LoadError.self) { _ = try AllowList.load(from: url) }
+
+        // and with --include-production, a list built in code still gets no command through
+        let list = AllowList(version: 2, tenants: [
+            .init(role: "production", service: .jamfPro, host: "prod.jamf.example", access: .readOnly, production: true,
+                  testDevices: [.init(serial: listedSerial)]),
+        ])
+        let policy = LiveCheckPolicy(allowList: list, roles: nil, includeProduction: true, prefix: prefix,
+                                     ledger: Ledger(fileURL: tempFolder().appending(path: "ledger.json")), writesAllowed: true)
+        let body = try JSONSerialization.data(withJSONObject: ["results": [
+            ["id": "7", "general": ["managementId": "AAAA-BBBB"], "hardware": ["serialNumber": listedSerial]]]])
+        let read = request("GET", "https://prod.jamf.example/api/v4/computers-inventory")
+        guard case .allow(let allowed) = policy.decide(read) else { Issue.record("read refused"); return }
+        LiveCheckNetwork(policy: policy).didAnswer(allowed, request: read, status: 200, body: body)
+        #expect(policy.decide(request("POST", "https://prod.jamf.example/api/v2/mdm/blank-push",
+                                      json: ["clientManagementIds": ["aaaa-bbbb"]]))
+                == .refuse("production is a production tenant: device commands are never sent"))
+    }
+
+    @Test func aComputersNumberDoesntNameAMobileDevice() {
+        // review B #5
+        let policy = levelPolicy()
+        let body = try! JSONSerialization.data(withJSONObject: ["computer": ["general": ["id": 7, "serial_number": listedSerial]]])
+        let read = request("GET", "https://lab.jamf.example/JSSResource/computers/serialnumber/\(listedSerial)")
+        guard case .allow(let allowed) = policy.decide(read) else { Issue.record("read refused"); return }
+        LiveCheckNetwork(policy: policy).didAnswer(allowed, request: read, status: 200, body: body)
+        #expect(policy.decide(request("POST", "https://lab.jamf.example/JSSResource/computercommands/command/BlankPush/id/7")).isAllowed)
+        #expect(!policy.decide(request("POST", "https://lab.jamf.example/JSSResource/mobiledevicecommands/command/BlankPush/id/7")).isAllowed,
+                "mobile device 7 is another device")
+    }
+
+    @Test func aRoleTheAppKeepsReadOnlyGetsNoCommands() {
+        // review B #7
+        let list = levelList().readingOnly(["lab-read"])
+        #expect(list.tenants.first { $0.role == "lab-read" }?.testDevices == nil)
+        let policy = levelPolicy(list)
+        learn(policy, serial: listedSerial, id: deviceID(1))
+        #expect(policy.decide(request("POST", "\(gateway)/device-actions/v1/devices/\(deviceID(1))/check-in", headers: labHeaders))
+                == .refuse("Device commands are never sent in a live check"))
+    }
+
+    @Test func twoCommandsAtOnceCantBothTakeTheLastDevice() {
+        // review B #13: decided, not yet recorded
+        let policy = levelPolicy(commandsFile: tempFolder().appending(path: "device-commands.jsonl"))
+        for (index, serial) in ([listedSerial] + otherSerials).enumerated() { learn(policy, serial: serial, id: deviceID(index + 1)) }
+        for index in 1...2 {
+            guard case .allow(let allowed) = policy.decide(
+                request("POST", "\(gateway)/device-actions/v1/devices/\(deviceID(index))/check-in", headers: labHeaders)) else {
+                Issue.record("device \(index) was refused"); return
+            }
+            policy.recordSent(allowed)
+        }
+        let third = policy.decide(request("POST", "\(gateway)/device-actions/v1/devices/\(deviceID(3))/check-in", headers: labHeaders))
+        let fourth = policy.decide(request("POST", "\(gateway)/device-actions/v1/devices/\(deviceID(4))/check-in", headers: labHeaders))
+        #expect(third.isAllowed)
+        #expect(!fourth.isAllowed, "the third device was already taken")
+    }
+}

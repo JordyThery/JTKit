@@ -82,16 +82,22 @@ struct AppleRig {
     let client: ABM.Client
 
     init(_ server: MockServer = Apple.server(), service: ABM.Service = .business, pem: String? = nil,
-         hints: [String] = []) {
+         hints: [String] = [], clientID: String = "BUSINESSAPI.abc") {
         self.server = server
         self.pem = pem ?? key.pemRepresentation
         let recorder = ABM.recorder(service, session: server.session, log: log, connection: "Lab Org")
         let time = time
         let pemText = self.pem
-        tokens = ABM.TokenProvider(service: service, clientID: "BUSINESSAPI.abc", keyID: "key-1",
+        tokens = ABM.TokenProvider(service: service, clientID: clientID, keyID: "key-1",
                                    privateKey: { pemText }, recorder: recorder, now: { time.now })
         client = ABM.Client(service: service, tokens: tokens, recorder: recorder, hints: hints,
                             sleep: { try await time.sleep($0) }, random: { 0 }, now: { time.now })
+    }
+
+    /// A rig for an organization no other test uses (what JTKit learns
+    /// about an organization's filter is kept per organization).
+    static func freshOrganization(_ server: MockServer) -> AppleRig {
+        AppleRig(server, clientID: "BUSINESSAPI.\(UUID().uuidString)")
     }
 
     var signIns: [RecordedRequest] { server.requests.filter { $0.path == Apple.tokenPath } }
@@ -908,7 +914,7 @@ struct ABMActivityTests {
 struct ABMSerialFilterTests {
     @Test("One filtered request per batch; pages follow links.next as given; unknown serials have no entry")
     func filtered() async throws {
-        let rig = AppleRig(Apple.server { request in
+        let rig = AppleRig.freshOrganization(Apple.server { request in
             guard request.path == "/v1/orgDevices" else { return nil }
             if request.queryValue("cursor") == "2" {
                 return .json(200, #"{"data":[{"type":"orgDevices","id":"C02B","attributes":\#(Apple.device("C02B"))}],"links":{}}"#)
@@ -923,24 +929,45 @@ struct ABMSerialFilterTests {
         let devices = try await rig.client.devices(serials: ["c02a", "C02B", "C02C", "C02A", "bad serial!"])
         #expect(Set(devices.keys) == ["C02A", "C02B"])
         #expect(devices["C02A"]?.deviceModel == "MacBook Air")
-        #expect(rig.api.count == 2)
+        #expect(rig.api.map(\.path) == ["/v1/orgDevices", "/v1/orgDevices", "/v1/orgDevices/C02C"], "one missing serial read on its own")
         #expect(rig.api[1].url.absoluteString.contains("filter%5BserialNumber%5D=C02A,C02B,C02C"), "the next link as given")
+    }
+
+    @Test("Review A-C #3: a filter that leaves out a device Apple has: that batch one at a time, and no filter afterwards")
+    func partialFilter() async throws {
+        let rig = AppleRig.freshOrganization(Apple.server { request in
+            switch request.path {
+            case "/v1/orgDevices":
+                // Apple applies only the first value of the list
+                return .json(200, #"{"data":[{"type":"orgDevices","id":"C02A","attributes":\#(Apple.device("C02A"))}],"links":{}}"#)
+            case let path where path.hasPrefix("/v1/orgDevices/"):
+                let serial = String(path.dropFirst("/v1/orgDevices/".count))
+                return .json(200, #"{"data":{"type":"orgDevices","id":"\#(serial)","attributes":\#(Apple.device(serial))}}"#)
+            default: return nil
+            }
+        })
+        let devices = try await rig.client.devices(serials: ["C02A", "C02B", "C02C"])
+        #expect(Set(devices.keys) == ["C02A", "C02B", "C02C"], "none reported missing")
+        #expect(rig.log.entries.contains { $0.note?.contains("left out a device") == true })
+        _ = try await rig.client.devices(serials: ["C02D"])
+        #expect(rig.api.filter { $0.path == "/v1/orgDevices" }.count == 1, "the filter isn’t used again for this organization")
     }
 
     @Test("Batches of fifty")
     func batches() async throws {
-        let rig = AppleRig(Apple.server { request in
+        let rig = AppleRig.freshOrganization(Apple.server { request in
             request.path == "/v1/orgDevices" ? .json(200, #"{"data":[],"links":{}}"#) : nil
         })
         let serials = (1...120).map { String(format: "SN%04d", $0) }
         #expect(try await rig.client.devices(serials: serials).isEmpty)
-        let sizes = rig.api.map { ($0.queryValue("filter[serialNumber]") ?? "").split(separator: ",").count }
+        let sizes = rig.api.filter { $0.path == "/v1/orgDevices" }
+            .map { ($0.queryValue("filter[serialNumber]") ?? "").split(separator: ",").count }
         #expect(sizes == [50, 50, 20])
     }
 
     @Test("A 400 for the filter: one serial at a time, as before, for this batch and the rest")
     func unsupported() async throws {
-        let rig = AppleRig(Apple.server { request in
+        let rig = AppleRig.freshOrganization(Apple.server { request in
             switch request.path {
             case "/v1/orgDevices": return Apple.error(400, code: "PARAMETER_ERROR.INVALID", title: "Invalid filter")
             case "/v1/orgDevices/C02A": return .json(200, #"{"data":{"type":"orgDevices","id":"C02A","attributes":\#(Apple.device("C02A"))}}"#)
@@ -957,7 +984,7 @@ struct ABMSerialFilterTests {
 
     @Test("A filter that isn’t applied (a device not asked for): one serial at a time")
     func ignored() async throws {
-        let rig = AppleRig(Apple.server { request in
+        let rig = AppleRig.freshOrganization(Apple.server { request in
             switch request.path {
             case "/v1/orgDevices":
                 return .json(200, #"{"data":[{"type":"orgDevices","id":"OTHER1","attributes":\#(Apple.device("OTHER1"))}],"links":{"next":"https://api-business.apple.com/v1/orgDevices?cursor=2"}}"#)
@@ -972,7 +999,7 @@ struct ABMSerialFilterTests {
 
     @Test("Other errors are thrown, not hidden by the fallback")
     func otherErrors() async throws {
-        let rig = AppleRig(Apple.server { request in
+        let rig = AppleRig.freshOrganization(Apple.server { request in
             request.path == "/v1/orgDevices" ? Apple.error(403, code: "FORBIDDEN", title: "Forbidden") : nil
         })
         #expect(await appleError { _ = try await rig.client.devices(serials: ["C02A"]) }?.status == 403)

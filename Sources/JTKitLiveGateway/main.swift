@@ -7,7 +7,12 @@ import JTKitLiveCheck
 // without it). Decides every request of the app under -JTKitLiveCheck and of
 // the UI test by the release check’s rules (LiveCheckRun, LiveGateway).
 // Stops on SIGTERM or SIGINT, and by itself once the release check’s lock is
-// released or held by another check. Prints no secret.
+// released or held by another check, or the release check holding it is gone
+// (killed without its cleanup). Prints no secret.
+//
+// `--secrets-only`: only hands the run’s secrets to the test processes (unit
+// test live checks), sends nothing. The secrets come only in this process’s
+// environment, never a test runner’s (Xcode keeps those in its result bundle).
 
 var environment: [String: String] = [:]
 for (key, value) in ProcessInfo.processInfo.environment where !key.hasPrefix("TEST_RUNNER_") {
@@ -24,8 +29,10 @@ func lockOwner() -> String {
 let gateway: LiveGateway
 do {
     let run = try LiveCheckRun(environment: environment)
-    gateway = try LiveGateway(run: run)
-    print("jtkit-live-gateway: listening on 127.0.0.1:\(gateway.port) for \(run.roles.sorted().joined(separator: ", "))")
+    let secretsOnly = CommandLine.arguments.contains("--secrets-only")
+    gateway = try LiveGateway(run: run, secretsOnly: secretsOnly)
+    print("jtkit-live-gateway: listening on 127.0.0.1:\(gateway.port) for \(run.roles.sorted().joined(separator: ", "))"
+          + (secretsOnly ? " (secrets only)" : ""))
 } catch {
     FileHandle.standardError.write(Data("jtkit-live-gateway: \(error)\n".utf8))
     exit(1)
@@ -52,6 +59,7 @@ let watch = DispatchSource.makeTimerSource(queue: .main)
 watch.schedule(deadline: .now() + 2, repeating: 2)
 watch.setEventHandler {
     if lockOwner() != owner { stop("the release check’s lock was released") }
+    if !LiveGateway.ownerIsAlive(owner) { stop("the release check holding the lock is gone") }
 }
 watch.resume()
 

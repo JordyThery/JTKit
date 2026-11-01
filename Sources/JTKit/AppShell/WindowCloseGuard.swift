@@ -57,14 +57,26 @@ final class CloseGuard: NSObject, NSWindowDelegate {
         guard self.window !== window || window.delegate !== self else { return }
         detach()
         self.window = window
-        original = window.delegate
+        // another guard in front (an editor replaced before the old one is
+        // dismantled): take over the delegate it kept, not the guard itself,
+        // which goes away
+        if let other = window.delegate as? CloseGuard {
+            original = other.original
+        } else {
+            original = window.delegate
+        }
         window.delegate = self
     }
 
-    /// Gives the window its own delegate back.
+    /// Gives the window its own delegate back, also when another guard
+    /// took over in front of this one.
     func detach() {
-        if let window, window.delegate === self {
-            window.delegate = original
+        if let window {
+            if window.delegate === self {
+                window.delegate = original
+            } else if let other = window.delegate as? CloseGuard, other.original === self {
+                other.original = original
+            }
         }
         window = nil
         original = nil

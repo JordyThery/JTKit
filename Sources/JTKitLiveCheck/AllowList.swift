@@ -200,7 +200,8 @@ public nonisolated struct AllowList: Codable, Sendable, Equatable {
             return Entry(role: entry.role, service: entry.service, host: entry.host, aliases: entry.aliases, region: entry.region,
                          environmentID: entry.environmentID, entraTenantID: entry.entraTenantID, clientID: entry.clientID,
                          access: .readOnly, production: entry.production, keychainService: entry.keychainService,
-                         customer: entry.customer, testDevices: entry.testDevices)
+                         // read only for this app: no device commands either
+                         customer: entry.customer, testDevices: nil)
         }
         return list
     }
@@ -234,6 +235,9 @@ extension AllowList.Entry {
             throw AllowList.LoadError.incomplete(role: role, reason: "Apple Business or Apple School Manager is read only")
         }
         if let testDevices, !testDevices.isEmpty {
+            if production {
+                throw AllowList.LoadError.incomplete(role: role, reason: "a production tenant takes no test devices: it is only read")
+            }
             if service == .appleBusinessManager || service == .appleSchoolManager {
                 throw AllowList.LoadError.incomplete(role: role, reason: "Apple Business or Apple School Manager takes no commands")
             }

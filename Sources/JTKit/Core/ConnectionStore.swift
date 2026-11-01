@@ -93,7 +93,7 @@ public final class ConnectionStore<Record: ConnectionRecord> {
             let records = LiveLaunch.connections.compactMap { liveRecord?($0) }
             self.storage = InMemoryConnectionStorage(records)
             self.secretLocations = Dictionary(uniqueKeysWithValues: secrets.keys.map {
-                ($0, SecretLocation(store: LiveLaunch.secrets))
+                ($0, SecretLocation(store: LiveLaunch.secrets(for: $0)))
             })
         } else {
             self.storage = storage

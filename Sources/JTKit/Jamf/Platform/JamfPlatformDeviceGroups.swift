@@ -152,8 +152,15 @@ extension JamfPlatform.Client {
     /// Every computer and mobile device group with its platform ID
     /// (`pro/v2/groups`), through the Platform API or on a Jamf Pro server
     /// reached directly, following all pages.
+    /// On Jamf Pro a refusal names the group read privileges (`platformGroupsPrivileges`).
     public func platformGroups(pageSize: Int = 200, maxPages: Int = 1_000) async throws -> [JamfPlatform.PlatformGroup] {
         try await allPages(Self.platformGroupsPath, pageSize: pageSize, maxPages: maxPages,
-                           item: JamfPlatform.PlatformGroup.init(json:))
+                           privileges: Self.platformGroupsPrivileges, item: JamfPlatform.PlatformGroup.init(json:))
     }
+
+    /// What `pro/v2/groups` needs on Jamf Pro: reading smart and static
+    /// computer and mobile device groups.
+    public static let platformGroupsPrivileges: [JamfPro.Privilege] = [
+        .readSmartComputerGroups, .readStaticComputerGroups, .readSmartMobileDeviceGroups, .readStaticMobileDeviceGroups,
+    ]
 }

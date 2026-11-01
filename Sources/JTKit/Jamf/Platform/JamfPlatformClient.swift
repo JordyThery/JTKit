@@ -158,45 +158,48 @@ extension JamfPlatform {
 
         /// Sends the request; a computer request to `v4` goes to the `v1`
         /// paths on a Jamf Pro older than 11.30.0 (see `ComputersAPIVersion`).
+        /// The app’s allow-list decides on the request the app made (the
+        /// `v4` one), not on the `v1` form JTKit sends.
         private func sendFallingBack(_ request: HTTPRequest) async throws -> HTTPResponse {
-            guard let older = ComputersAPIVersion.v1(of: request) else { return try await http.send(request) }
-            return try await http.send(await usesV1Paths() ? older : request)
+            guard let older = ComputersAPIVersion.v1(of: request), await usesV1Paths() else { return try await http.send(request) }
+            return try await http.send(older, permittedAs: .appRequest(request))
         }
 
         /// Whether this server is a Jamf Pro older than 11.30.0, asked once
-        /// per server (`v1/jamf-pro-version`, no privilege needed) and
-        /// remembered. Only for a Jamf Pro server reached directly: the
-        /// Platform API gateway fronts Jamf Cloud, which is current. When the
-        /// version can’t be asked (no answer, an error status), the `v4` paths
-        /// are used and it is asked again next time; a refused request or an
-        /// answer without a readable version is remembered as `v4`.
+        /// per server (`v1/jamf-pro-version`, no privilege needed, JTKit’s
+        /// own read: the app’s allow-list doesn’t decide it) and remembered;
+        /// requests at the same time share one probe. Only for a Jamf Pro
+        /// server reached directly: the Platform API gateway fronts Jamf
+        /// Cloud, which is current. When the version can’t be asked (no
+        /// answer, an error status, not retried), the `v4` paths are used and
+        /// it is asked again after a minute; an answer without a readable
+        /// version is remembered as `v4`.
         private func usesV1Paths() async -> Bool {
             guard server == .jamfPro else { return false }
-            let key = baseURL.absoluteString
-            if let known = ComputersAPIVersion.shared.known(for: key) { return known == .v1 }
-            let version: String
+            return await ComputersAPIVersion.shared.version(for: baseURL.absoluteString) { await self.probeVersion() } == .v1
+        }
+
+        /// One probe; nil when the version couldn’t be asked.
+        private func probeVersion() async -> ComputersAPIVersion.Version? {
+            let response: HTTPResponse
             do {
-                let response = try await http.send(HTTPRequest(path: "pro/v1/jamf-pro-version"))
-                guard let read = try? JSONDecoder().decode(JamfPro.Version.self, from: response.data).version else {
-                    // it answered, without a version it can read: the current paths
-                    ComputersAPIVersion.shared.set(.v4, for: key)
-                    return false
-                }
-                version = read
-            } catch HTTPError.refused {
-                ComputersAPIVersion.shared.set(.v4, for: key)
-                return false
+                response = try await http.send(HTTPRequest(path: "pro/v1/jamf-pro-version", serverErrorIsAnAnswer: true),
+                                               permittedAs: .jtkitRead)
             } catch {
-                return false
+                return nil
+            }
+            guard (200..<300).contains(response.status) else { return nil }
+            guard let version = try? JSONDecoder().decode(JamfPro.Version.self, from: response.data).version else {
+                // it answered, without a version it can read: the current paths
+                return .v4
             }
             let older = ComputersAPIVersion.isOlderThanV4(version)
-            ComputersAPIVersion.shared.set(older ? .v1 : .v4, for: key)
             if older {
                 await http.recorder.note("GET", "pro/v1/jamf-pro-version",
                                          note: "Jamf Pro \(version) is older than 11.30.0, so computer requests to it use the v1 paths.",
                                          category: "API", isWarning: true)
             }
-            return older
+            return older ? .v1 : .v4
         }
 
         /// A GET, read as lossless JSON.
@@ -264,6 +267,10 @@ nonisolated final class ComputersAPIVersion: @unchecked Sendable {
 
     private let lock = NSLock()
     private var known: [String: Version] = [:]
+    private var probes: [String: Task<Version?, Never>] = [:]
+    private var failedAt: [String: Date] = [:]
+    /// How long a probe that got no answer isn’t repeated.
+    static let retryAfterFailure: TimeInterval = 60
 
     func known(for server: String) -> Version? {
         lock.withLock { known[server] }
@@ -271,6 +278,40 @@ nonisolated final class ComputersAPIVersion: @unchecked Sendable {
 
     func set(_ version: Version, for server: String) {
         lock.withLock { known[server] = version }
+    }
+
+    /// The server’s paths: known, or from one probe shared by every request
+    /// waiting for it. A probe without an answer gives `v4` and isn’t
+    /// repeated for `retryAfterFailure`.
+    func version(for server: String, now: Date = Date(), probe: @escaping @Sendable () async -> Version?) async -> Version {
+        let task: Task<Version?, Never>? = lock.withLock {
+            if known[server] != nil { return nil }
+            if let failed = failedAt[server], now.timeIntervalSince(failed) < Self.retryAfterFailure { return nil }
+            if let running = probes[server] { return running }
+            let started = Task { await probe() }
+            probes[server] = started
+            return started
+        }
+        guard let task else { return known(for: server) ?? .v4 }
+        let result = await task.value
+        lock.withLock {
+            probes[server] = nil
+            if let result {
+                known[server] = result
+                failedAt[server] = nil
+            } else {
+                failedAt[server] = now
+            }
+        }
+        return result ?? .v4
+    }
+
+    /// Tests only.
+    func forget(_ server: String) {
+        lock.withLock {
+            known[server] = nil
+            failedAt[server] = nil
+        }
     }
 
     /// The first Jamf Pro with the `v4` computer paths.

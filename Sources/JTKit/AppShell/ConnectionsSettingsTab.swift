@@ -152,6 +152,31 @@ public final class AllConnectionsChoice {
     }
 }
 
+/// New connections made with + that haven’t been saved yet: they get a
+/// role only on their first successful Save, so an empty “New tenant” is
+/// never the connection in use (an app that signs in when it changes would
+/// show a failure before anything is typed). Imports get theirs at once.
+@MainActor
+struct UnsavedNewConnections {
+    private(set) var ids: Set<UUID> = []
+
+    /// A record + just made: no role yet.
+    mutating func added(_ id: UUID) {
+        ids.insert(id)
+    }
+
+    /// After a Save: the roles to give, once, for a record + made.
+    mutating func saved<Record: ConnectionRecord>(_ record: Record, among roles: [ConnectionRole],
+                                                  store: ConnectionStore<Record>) -> [ConnectionRole] {
+        guard ids.remove(record.id) != nil else { return [] }
+        return ConnectionRoleFilling.roles(toGive: record.connection, among: roles, store: store)
+    }
+
+    mutating func removed(_ id: UUID) {
+        ids.remove(id)
+    }
+}
+
 /// Which role a new or imported connection gets: the first role that
 /// accepts it and has no connection in use (none chosen, or one that is no
 /// longer saved), unless it already has a role. So JamfMigrator’s first
@@ -401,6 +426,9 @@ public struct ConnectionsSettingsTab<Record: ConnectionRecord, AppSection: View>
     @State private var editorHasChanges = false
     @State private var pendingSelection: UUID??
     @State private var pendingDeletion: Record?
+    /// + was clicked with unsaved changes: the service to add once discarded.
+    @State private var pendingAdd: ConnectionService?
+    @State private var unsavedNew = UnsavedNewConnections()
     /// A deletion that asks for the connection’s name (`deleteTypedName`).
     @State private var typedDeletion: Record?
     @State private var isDeleting = false
@@ -527,13 +555,23 @@ public struct ConnectionsSettingsTab<Record: ConnectionRecord, AppSection: View>
         }
         .confirmationDialog(
             "Discard unsaved changes?",
-            isPresented: Binding(get: { pendingSelection != nil }, set: { if !$0 { pendingSelection = nil } })
+            isPresented: Binding(get: { pendingSelection != nil || pendingAdd != nil },
+                                 set: { if !$0 { pendingSelection = nil; pendingAdd = nil } })
         ) {
             Button("Discard Changes", role: .destructive) {
-                if let pendingSelection { editingID = pendingSelection }
+                if let service = pendingAdd {
+                    pendingAdd = nil
+                    editorHasChanges = false
+                    addRecord(for: service)
+                } else if let pendingSelection {
+                    editingID = pendingSelection
+                }
                 pendingSelection = nil
             }
-            Button("Cancel", role: .cancel) { pendingSelection = nil }
+            Button("Cancel", role: .cancel) {
+                pendingSelection = nil
+                pendingAdd = nil
+            }
         } message: {
             Text("The changes to this connection haven’t been saved.")
         }
@@ -696,11 +734,17 @@ public struct ConnectionsSettingsTab<Record: ConnectionRecord, AppSection: View>
     }
 
     private func addRecord(for service: ConnectionService) {
+        // like clicking another row: unsaved changes ask first
+        if editorHasChanges {
+            pendingAdd = service
+            return
+        }
         let record = newRecord(service)
         do {
             try store.save(record)
             listError = nil
-            useIfNoneInUse(record)
+            // the role comes with its first Save (`didSaveRecord`)
+            unsavedNew.added(record.id)
             editingID = record.id
         } catch {
             listError = error.localizedDescription
@@ -789,7 +833,15 @@ public struct ConnectionsSettingsTab<Record: ConnectionRecord, AppSection: View>
         }
     }
 
+    /// The editor saved a record: a new one made with + gets its role now.
+    private func didSaveRecord(_ record: Record) {
+        for role in unsavedNew.saved(record, among: roles, store: store) {
+            role.selection.wrappedValue = record.id
+        }
+    }
+
     private func finishDeleting(_ record: Record) {
+        unsavedNew.removed(record.id)
         listError = nil
         for role in roles where role.selection.wrappedValue == record.id {
             role.selection.wrappedValue = nil
@@ -818,6 +870,7 @@ public struct ConnectionsSettingsTab<Record: ConnectionRecord, AppSection: View>
                              test: test,
                              environments: environments,
                              hasChanges: $editorHasChanges,
+                             didSave: didSaveRecord,
                              appSection: appSection)
                 .id(editingID)
         } else {
@@ -1021,6 +1074,7 @@ private struct ConnectionEditor<Record: ConnectionRecord, AppSection: View>: Vie
     let test: ConnectionTest<Record>?
     let environments: ConnectionEnvironmentLoader<Record>?
     @Binding var hasChanges: Bool
+    let didSave: (Record) -> Void
     let appSection: (Binding<Record>) -> AppSection
 
     @State private var saved: Record
@@ -1052,6 +1106,7 @@ private struct ConnectionEditor<Record: ConnectionRecord, AppSection: View>: Vie
          roles: [ConnectionRole], footer: String?,
          test: ConnectionTest<Record>?, environments: ConnectionEnvironmentLoader<Record>?,
          hasChanges: Binding<Bool>,
+         didSave: @escaping (Record) -> Void = { _ in },
          appSection: @escaping (Binding<Record>) -> AppSection) {
         self.store = store
         self.services = services
@@ -1064,6 +1119,7 @@ private struct ConnectionEditor<Record: ConnectionRecord, AppSection: View>: Vie
         self.test = test
         self.environments = environments
         self._hasChanges = hasChanges
+        self.didSave = didSave
         self.appSection = appSection
         self._saved = State(initialValue: saved)
         self._draft = State(initialValue: saved)
@@ -1640,6 +1696,7 @@ private struct ConnectionEditor<Record: ConnectionRecord, AppSection: View>: Vie
             secrets = [:]
             importedKeyName = nil
             saveError = nil
+            didSave(saved)
             return true
         } catch {
             saveError = error.localizedDescription

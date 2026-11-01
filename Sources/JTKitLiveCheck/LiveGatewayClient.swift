@@ -47,17 +47,43 @@ public final class LiveGatewayClient: @unchecked Sendable {
         session = URLSession(configuration: configuration)
     }
 
-    /// The variables an app is launched with under the switch: the token,
-    /// the roles it gets, and those roles’ secrets from this process’s
-    /// environment (the release check passed them, read from the Keychain).
+    /// The variables an app is launched with under the switch: the token
+    /// and the roles it gets. No secret: the app asks the gateway for its
+    /// connections’ secrets with the token, so they never reach a launch
+    /// environment (Xcode keeps those in the test’s result bundle).
     public func appEnvironment(roles: [String], from environment: [String: String] = ProcessInfo.processInfo.environment) -> [String: String] {
-        var variables = ["JTKIT_LIVE_GATEWAY_TOKEN": token, "JTKIT_LIVE_APP_ROLES": roles.joined(separator: ",")]
-        for entry in launch.connections where roles.contains(entry.role) {
-            guard let item = entry.connection.secretItem else { continue }
-            let name = LiveCheckRun.variable(role: entry.role, item: item)
-            if let secret = environment[name] { variables[name] = secret }
+        ["JTKIT_LIVE_GATEWAY_TOKEN": token, "JTKIT_LIVE_APP_ROLES": roles.joined(separator: ",")]
+    }
+
+    /// A secret of the run, from the gateway.
+    public func secret(role: String, item: String) async throws -> String? {
+        let request = LiveGatewayRequest(token: token, command: LiveGateway.secretsCommand,
+                                         secrets: [LiveSecretItem(role: role, item: item)])
+        let answer = try await Self.exchange(request, port: launch.port)
+        if let error = answer.error { throw ClientError.failed(error) }
+        guard let body = answer.body, let items = try? JSONDecoder().decode([LiveSecretItem].self, from: body) else { return nil }
+        return items.first { $0.role == role && $0.item == item }?.value
+    }
+
+    /// The same, waiting for the answer (up to `timeout`), for code that
+    /// can’t await; not on the queue the gateway answers on.
+    public func secretNow(role: String, item: String, timeout: TimeInterval = 15) throws -> String? {
+        let box = SecretBox()
+        let done = DispatchSemaphore(value: 0)
+        let request = LiveGatewayRequest(token: token, command: LiveGateway.secretsCommand,
+                                         secrets: [LiveSecretItem(role: role, item: item)])
+        let connection = Self.exchange(request, port: launch.port) { result in
+            box.set(result)
+            done.signal()
         }
-        return variables
+        guard done.wait(timeout: .now() + timeout) == .success else {
+            connection?.cancel()
+            throw ClientError.failed("The live gateway didn’t hand over \(item) for \(role)")
+        }
+        let answer = try box.get()
+        if let error = answer.error { throw ClientError.failed(error) }
+        guard let body = answer.body, let items = try? JSONDecoder().decode([LiveSecretItem].self, from: body) else { return nil }
+        return items.first { $0.role == role && $0.item == item }?.value
     }
 
     /// What the gateway knows of the run now.
@@ -135,6 +161,13 @@ public final class LiveGatewayClient: @unchecked Sendable {
         connection.start(queue: .global(qos: .userInitiated))
         return connection
     }
+}
+
+final class SecretBox: @unchecked Sendable {
+    private let lock = NSLock()
+    private var result: Result<LiveGatewayResponse, Error> = .failure(LiveGatewayClient.ClientError.failed("no answer"))
+    func set(_ value: Result<LiveGatewayResponse, Error>) { lock.withLock { result = value } }
+    func get() throws -> LiveGatewayResponse { try lock.withLock { result }.get() }
 }
 
 /// True the first time only.
