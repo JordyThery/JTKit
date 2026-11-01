@@ -25,7 +25,8 @@ is replaced is deprecated.
   made the same way as for an app that isn’t sandboxed. The app is still launched
   with the folder in its container. Neither file holds a secret: secrets still reach test processes and the app
   only through the gateway, on a request with its token. `LiveGatewayClient(runFolder:gatewayFolder:)` reads them
-  from the runner folder; `JTKitUITestCase.liveGateway()` does so by itself.
+  from the runner folder; `JTKitUITestCase.liveGateway()` does so by itself. Its `runFolder` is now the folder the
+  runner can read (with the ledger copy); the folder the app is launched with is the new `appRunFolder`.
 
 ### Deprecated
 - `AppAppearance` (its `apply()` does nothing; `saved(in:key:)` only reads what an earlier version saved).

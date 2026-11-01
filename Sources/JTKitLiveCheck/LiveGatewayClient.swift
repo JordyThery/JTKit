@@ -7,7 +7,13 @@ import Network
 /// the test’s own objects. It reads files only and makes outgoing
 /// connections only, both of which a sandboxed UI test runner may.
 public final class LiveGatewayClient: @unchecked Sendable {
+    /// The run’s folder as this process can read it: the runner folder when
+    /// one was given (a sandboxed app’s UI test runner), which holds the
+    /// gateway’s files and a copy of the ledger; the run folder otherwise.
     public let runFolder: URL
+    /// The run folder the app is launched with (`-JTKitLiveCheck`): for a
+    /// sandboxed app the one in its container.
+    public let appRunFolder: URL
     public let launch: LiveLaunchFile
     let token: String
     /// Requests sent on it go through the gateway’s rules.
@@ -32,8 +38,9 @@ public final class LiveGatewayClient: @unchecked Sendable {
     ///     for a UI test runner that can’t read the run folder (a sandboxed
     ///     app’s container; `JTKIT_LIVE_RUNNER_DIR`).
     public init(runFolder: URL, gatewayFolder: URL? = nil) throws {
-        self.runFolder = runFolder
-        let folder = gatewayFolder ?? runFolder
+        self.appRunFolder = runFolder
+        self.runFolder = gatewayFolder ?? runFolder
+        let folder = self.runFolder
         let place = gatewayFolder == nil ? "the run folder" : "the runner folder"
         guard let data = try? Data(contentsOf: folder.appending(path: LiveGateway.launchFileName)),
               let launch = try? JSONDecoder().decode(LiveLaunchFile.self, from: data) else {

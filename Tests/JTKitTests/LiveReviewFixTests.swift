@@ -200,7 +200,8 @@ struct LiveGatewayReviewTests {
 
         // the runner reads the runner folder; the app is still launched with the run folder
         let client = try LiveGatewayClient(runFolder: run.runFolder, gatewayFolder: runner)
-        #expect(client.runFolder == run.runFolder)
+        #expect(client.appRunFolder == run.runFolder, "the app is launched with the folder in its container")
+        #expect(client.runFolder == runner, "the runner reads the runner folder")
         #expect(try await client.status().refusals.isEmpty)
         #expect(try await client.secret(role: "jamf-test-a", item: "client-secret") == "s3cret")
         let state = LiveLaunch.evaluate(arguments: ["/Applications/Example.app", LiveLaunch.argument, run.runFolder.path],
@@ -214,7 +215,7 @@ struct LiveGatewayReviewTests {
         create.setValue(environmentA, forHTTPHeaderField: "X-Environment-Id")
         create.httpBody = try JSONSerialization.data(withJSONObject: ["name": "\(prefix) – made by the app"])
         _ = try await client.session.data(for: create)
-        let mirrored = Ledger(fileURL: runner.appending(path: "ledger.json")).items
+        let mirrored = Ledger(fileURL: client.runFolder.appending(path: "ledger.json")).items
         #expect(mirrored.map(\.id) == ["bp-new"], "\(mirrored)")
         let ledgerMode = try manager.attributesOfItem(atPath: runner.appending(path: "ledger.json").path)[.posixPermissions] as? NSNumber
         #expect(ledgerMode?.intValue == 0o600)
