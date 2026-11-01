@@ -5,6 +5,9 @@ import Security
 /// private key. Backed by the Keychain in the apps (`KeychainSecretStore`) and
 /// by a dictionary in tests (`InMemorySecretStore` in JTKitTestSupport).
 public protocol SecretStore: Sendable {
+    /// The secret, or nil, also when the Keychain refused or is locked: it
+    /// can’t tell "no secret" from "couldn’t read". Kept for stores that only
+    /// have this; to read a secret, use `readSecret(for:)`.
     func secret(for account: String) -> String?
     /// Passing nil deletes the entry. Returns false when the write failed.
     @discardableResult
@@ -113,6 +116,8 @@ public nonisolated struct KeychainSecretStore: SecretStore {
         self.log = log
     }
 
+    /// Nil also when the Keychain refused or is locked.
+    @available(*, deprecated, message: "Use readSecret(for:), which reports a Keychain that can’t be read instead of returning nil.")
     public func secret(for account: String) -> String? {
         try? readSecret(for: account)
     }

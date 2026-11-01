@@ -69,7 +69,7 @@ extension JamfPlatform {
             now: @escaping @Sendable () -> Date = { Date() }
         ) throws {
             guard let base = connection.jamfBaseURL else {
-                throw HTTPError.invalidURL("“\(ConnectionMenuText.name(of: connection))” has no valid server URL.")
+                throw HTTPError.invalidURL(connection.unusableAddressMessage("has no valid server URL."))
             }
             let clientID = connection.clientID.trimmingCharacters(in: .whitespacesAndNewlines)
             let username = connection.username.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -203,7 +203,8 @@ extension JamfPlatform {
 extension Connection {
     /// Where Jamf requests go: the Platform API gateway of the region, or the
     /// host override (scheme and trailing slashes dropped), or the Jamf Pro
-    /// server. Nil for other services and unusable addresses.
+    /// server (`https://` added when it has no scheme). Nil for other
+    /// services and unusable addresses, `http://` ones included.
     public var jamfBaseURL: URL? {
         switch service {
         case .jamfPlatform:
@@ -219,12 +220,25 @@ extension Connection {
             components.host = host
             return components.url
         case .jamfPro:
-            var address = serverURL.trimmingCharacters(in: .whitespacesAndNewlines)
+            // an address saved without a scheme gets https://; http:// is refused
+            var address = Self.normalizedServerAddress(serverURL).trimmingCharacters(in: .whitespacesAndNewlines)
             while address.hasSuffix("/") { address.removeLast() }
             guard Self.isWebAddress(address) else { return nil }
             return URL(string: address)
         case .jamfSchool, .intune, .appleBusinessManager, .appleSchoolManager:
             return nil
         }
+    }
+}
+
+extension Connection {
+    /// Why requests can’t go to this connection: `http://` named as such,
+    /// anything else as `fallback` after the connection’s name.
+    func unusableAddressMessage(_ fallback: String) -> String {
+        let name = "“\(ConnectionMenuText.name(of: self))”"
+        if service == .jamfPro, Self.addressProblem(serverURL) == Self.httpAddressProblem {
+            return "\(name) has an http:// address. \(Self.httpAddressProblem)"
+        }
+        return "\(name) \(fallback)"
     }
 }

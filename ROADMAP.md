@@ -685,6 +685,29 @@ Exception (decided by Jordy on 2026-11-01): a patch release that only fixes regr
 - **Weekly vendor-update report:** a run outside Xcode that checks Jamf, Microsoft and Apple for API and product changes that affect the apps, and writes a short report.
 - A "new JTKit app" skill for Xcode’s Claude (in `ClaudeAgentConfig/skills/`): creates a new app in `~/Developer` set up to the standards (About, Settings, updater, connections, activity log, demo mode, release check, CLAUDE.md, LICENSE, .gitignore, build-number script) and adds it to `Apps.xcworkspace`.
 
+### 1.1.0 (decided by Jordy on 2026-11-01)
+A minor release: new features and fixes, nothing that breaks an app on 1.0 (anything replaced stays, marked deprecated with its replacement named). The details behind each item are in `_release-gate/jtkit-1.1.0-plan.md` and `_release-gate/regression/` (SUMMARY.md, J1–J14). Apps move to 1.1.0 one at a time afterwards, each in its next release. Each part is marked done here as it lands.
+
+- **Part A: regression fixes** (J1–J14), done on the branch (2026-11-01): A1–A13 with JTKit tests (`RegressionFixTests` and the suites they touch), all 898 JTKit tests pass, all eight apps build against the branch. Not tagged. Still open from Part A: A13’s live confirmation on jamf-test-a (in Part B’s checks); the apps’ side (using `readSecret`/`requiredSecret`/`copySecret`, `RequestWaits` in their status, `recordsBodies` and a larger log where wanted), each in its next release. Two app unit tests check the 1.0 behavior and change with that app: Profile2Blueprint’s longest wait (120 → 60 s) and Checkpoint’s message for an http:// address.
+  - A1 Keychain errors aren’t "no secret": a failed read is reported as such; `secret(for:)` stays, deprecated in favor of `readSecret`; connection conversions retry at the next launch instead of finishing without the secret.
+  - A2 Changing a Jamf Platform API connection’s region keeps the stored client secret usable (Test Connection, Load Environments).
+  - A3 The editor says, next to the field and before Save, when a change of service or sign-in method will remove the stored secret.
+  - A4 Server addresses: a saved address without a scheme gets `https://` when read; `http://` is refused with "Use an https:// address"; changing only the scheme keeps the secret.
+  - A5 Closing Settings with unsaved edits in Connections asks Save / Discard / Cancel.
+  - A6 Adding or importing a connection makes it the one in use when none is.
+  - A7 Retry waits shown in the app’s status ("Jamf asked to wait 40 s") and ended at once by cancel; default longest wait 60 s.
+  - A8 Activity log: "Copy Log" and "Copy Log, Devices Masked"; an app can choose a larger capacity and mark requests whose bodies may be recorded (non-secret ones only).
+  - A9 Apple private key: paste it, or import any text file (.pem, .p8, .txt).
+  - A10 An identifier with other characters is "not found", not an error.
+  - A11 Jamf Pro computers: a 404 on `v4` falls back to `v1` once per connection, said in the activity log.
+  - A12 The editor says "isn’t a UUID" under the Environment ID field.
+  - A13 Blueprint deploy: if `lastDeployment` is missing, the deploy state is read from the Blueprint’s own state; confirmed once live on jamf-test-a in Part B’s checks.
+  - A14 (J14) release notes only, nothing in JTKit.
+- **Part B: live tests of the real app (the launch switch).** B1 `-JTKitLiveCheck <run folder>` (Debug builds only, only while a release check holds its lock, only with the allow-list; guarded network, the release check’s connections, no demo mode or update check; anything reaching a saved connection or the real Keychain items fails the run). B2 access levels on the allow-list: disposable (jamf-test-a, jamf-test-b), read (any allow-listed tenant, production included, reads only), commands (Blank Push and Update Inventory to listed test devices, at most 3 per run), interruptive (the same devices, only after a run-time dialog asking for the serial), Apple (reads only), customers (never; refused). B3 cross-tenant runs (read anywhere, write to jamf-test-a/b; the ledger records the tenant of each write). B4 `JTKitUITestSupport` for live runs (`launchLive(roles:)`, waiting for network work, a check that every object a run made is gone). B5 Jamf Deployer’s old suites rebuilt on B1 in its own next release. The test devices for commands are decided later, with Checkpoint.
+- **Part C: what the apps asked JTKit for.** Connections (Platform Test Connection; tenant check and group lookup; delete disabled while in use, typed name for a connection with objects), Jamf (address cleanup, public HTTP client, HTTPMethod and icon upload, record links, Classic profile helpers, device groups for Jamf Migrator, Jamf School raw check-in time, location batch size), Microsoft (MSAL tenant from the sign-in result, compare tenants by the token’s `tid`), shared (backup store, unreadable-copy helper, GitHub latest-release fetch, status badge colors and the system warning look), Demo Mode ("blocked, wait", a tooltip per app). Before building, each app’s CLAUDE.md and 1.0 release reports are re-read and anything no longer needed is dropped.
+- **Order and checks:** Part A, then B, then C, on one branch `1.1.0`, with JTKit tests for every rule (each refusal of B1/B2 tested in JTKit). Every app builds against the branch (`--local-jtkit`); Jamf Deployer and Checkpoint run their release check against it. Then an independent review of the JTKit changes (Fable), fixes, Jordy’s approval, and the 1.1.0 tag.
+- **Decided:** longest retry wait 60 s (A7); the B2 test devices wait until Checkpoint.
+
 ## Not shared
 
 Each app’s own engine (migration, deployment, rule building) and whole Settings screens; only the sections above are shared. Out of scope entirely: IntuneOnboard (with OnboardCore), Device Assist and its customer variants, and Replicator (fork).

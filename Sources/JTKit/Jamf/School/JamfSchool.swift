@@ -392,7 +392,9 @@ extension JamfSchool {
             random: @escaping @Sendable () -> Double = { Double.random(in: 0...1) }
         ) throws {
             guard let baseURL = JamfSchool.baseURL(address) else {
-                throw JamfSchool.APIError(.incomplete("Enter the server URL, e.g. https://yourschool.jamfcloud.com."))
+                let isHTTP = address.trimmingCharacters(in: .whitespacesAndNewlines).lowercased().hasPrefix("http://")
+                throw JamfSchool.APIError(.incomplete(isHTTP ? Connection.httpAddressProblem
+                                                             : "Enter the server URL, e.g. https://yourschool.jamfcloud.com."))
             }
             let id = networkID.trimmingCharacters(in: .whitespacesAndNewlines)
             let key = apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -448,7 +450,8 @@ extension JamfSchool {
         /// the one asked for (ignoring case). Jamf School’s "DeviceNotFound"
         /// answer is `.none`, as in `device(udid:)`.
         public func device(serial: String) async throws -> DeviceMatch<Device> {
-            let safe = try Self.validated(serial)
+            // other characters: no device has that serial; nothing is sent
+            guard let safe = try? Self.validated(serial) else { return .none }
             let listed: [Device]
             do {
                 listed = try await deviceList([URLQueryItem(name: "serialnumber", value: safe)])
@@ -466,7 +469,7 @@ extension JamfSchool {
         /// One device’s details (`devices/{udid}`), with the instance’s time
         /// zone and the passcode state. Nil when Jamf School has no such device.
         public func device(udid: String) async throws -> Device? {
-            let safe = try Self.validated(udid)
+            guard let safe = try? Self.validated(udid) else { return nil }
             let data: Data
             do {
                 data = try await send(HTTPRequest(path: "api/devices/\(safe)", recordsBodies: recordsDeviceAnswers))

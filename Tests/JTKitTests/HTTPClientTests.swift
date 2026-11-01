@@ -101,13 +101,13 @@ struct HTTPClientTests {
         #expect(RetryRules.retryAfter(nil, now: now) == nil)
     }
 
-    @Test("A long Retry-After is capped at 120 s")
+    @Test("A long Retry-After is capped at 60 s")
     func longestWait() async throws {
         let calls = Counter()
         let server = MockServer { _ in calls.next() == 1 ? .json(429, "{}", headers: ["Retry-After": "600"]) : .json(200, "{}") }
         let sleeps = SleepLog()
         _ = try await makeClient(server, sleeps: sleeps).send(HTTPRequest(path: "x"))
-        #expect(sleeps.recorded == [.seconds(120)])
+        #expect(sleeps.recorded == [.seconds(60)])
     }
 
     @Test("Without Retry-After the wait doubles, with a little randomness, up to 4 attempts")
@@ -119,7 +119,8 @@ struct HTTPClientTests {
         }
         #expect(server.requests.count == 4)
         #expect(sleeps.recorded == [.seconds(1.5), .seconds(2.5), .seconds(4.5)])
-        #expect(RetryRules.standard.backoff(afterAttempt: 10, random: 1) == 120)
+        #expect(RetryRules.standard.backoff(afterAttempt: 10, random: 1) == 60)
+        #expect(RetryRules(longestWait: 120).backoff(afterAttempt: 10, random: 1) == 120, "an app can still choose longer")
     }
 
     @Test("Server errors are retried for reads and edits marked safe, never for other edits")

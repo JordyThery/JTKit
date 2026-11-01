@@ -147,11 +147,17 @@ public nonisolated struct ActivityRequestDetails: Hashable, Sendable {
 @Observable
 public final class ActivityLog {
     public private(set) var entries: [ActivityLogEntry] = []
-    @ObservationIgnored private let capacity: Int
+    /// How many entries are kept; the oldest go beyond this.
+    @ObservationIgnored public let capacity: Int
+
+    /// What most apps keep.
+    public static let standardCapacity = 1000
 
     /// - Parameter capacity: the oldest entries are dropped beyond this many.
-    public init(capacity: Int = 1000) {
-        self.capacity = capacity
+    ///   An app whose runs make many requests can keep more, e.g. 10,000
+    ///   (still in memory only).
+    public init(capacity: Int = ActivityLog.standardCapacity) {
+        self.capacity = max(capacity, 1)
     }
 
     /// Adds the entry with its texts redacted (`ActivityLogEntry.redacted`),

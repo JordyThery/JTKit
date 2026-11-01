@@ -3,7 +3,8 @@ import UniformTypeIdentifiers
 
 /// The private key of an Apple Business or Apple School Manager API account: the
 /// .pem file Apple offers once, when the account is created. The editor
-/// imports it from that file and never shows its text.
+/// takes it pasted or from any text file (.pem, .p8, .txt), and never shows
+/// its text.
 nonisolated enum ApplePrivateKey {
 
     /// Why a file can’t be used, in plain language.
@@ -11,6 +12,8 @@ nonisolated enum ApplePrivateKey {
         case empty
         case tooLarge
         case notText
+        /// Nothing (or no text) on the clipboard.
+        case nothingPasted
         case encrypted
         case notPrivateKey
         case unreadable
@@ -22,20 +25,25 @@ nonisolated enum ApplePrivateKey {
             case .tooLarge:
                 "The file is too large to be a private key."
             case .notText:
-                "The file isn’t a .pem private key."
+                "The file isn’t a text file with a private key."
+            case .nothingPasted:
+                "The clipboard holds no text. Copy the whole private key, then click Paste Key."
             case .encrypted:
-                "The private key is protected with a password. Use the .pem file as Apple downloaded it."
+                "The private key is protected with a password. Use the key as Apple downloaded it."
             case .notPrivateKey:
-                "The file doesn’t contain a private key. Choose the .pem file downloaded when the API account was created."
+                "That isn’t a private key. Use the whole key downloaded when the API account was created."
             case .unreadable:
                 "The file couldn’t be read."
             }
         }
     }
 
-    /// The file types the importer offers.
+    /// The file types the importer offers: .pem, .p8 and any text file. The
+    /// contents decide, not the name.
     public static var contentTypes: [UTType] {
-        [UTType(filenameExtension: "pem") ?? .data]
+        var types = ["pem", "p8"].compactMap { UTType(filenameExtension: $0) }
+        types += [.plainText, .text]
+        return types
     }
 
     /// A key file is a few hundred bytes; this leaves plenty of room.
@@ -56,6 +64,12 @@ nonisolated enum ApplePrivateKey {
         }
         guard hasKey else { throw .notPrivateKey }
         return pem
+    }
+
+    /// A key pasted from the clipboard; nil is nothing pasted.
+    public static func read(pasted text: String?) throws(ImportError) -> String {
+        guard let text, !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { throw .nothingPasted }
+        return try read(Data(text.utf8))
     }
 
     /// Reads a file the person chose, inside or outside the app’s sandbox.

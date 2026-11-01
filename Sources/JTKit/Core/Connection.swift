@@ -210,7 +210,7 @@ public nonisolated struct Connection: Identifiable, Codable, Hashable, Sendable 
         let place: String
         switch service {
         case .jamfPlatform: place = trimmed(hostOverride).isEmpty ? region.rawValue.uppercased() : trimmed(hostOverride)
-        case .jamfPro, .jamfSchool: place = URL(string: trimmed(serverURL))?.host() ?? ""
+        case .jamfPro, .jamfSchool: place = URL(string: trimmed(Self.normalizedServerAddress(serverURL)))?.host() ?? ""
         case .intune: place = trimmed(tenantID)
         case .appleBusinessManager, .appleSchoolManager: place = ""
         }
@@ -228,8 +228,8 @@ public nonisolated struct Connection: Identifiable, Codable, Hashable, Sendable 
                 issues.append(JamfPlatform.APIError.environmentIDNotUUID)
             }
         case .jamfPro, .jamfSchool:
-            if !Self.isWebAddress(trimmed(serverURL)) {
-                issues.append("Enter the server URL, starting with https://.")
+            if let problem = Self.addressProblem(serverURL) {
+                issues.append(problem)
             }
         case .intune:
             let client = trimmed(clientID)
@@ -243,6 +243,42 @@ public nonisolated struct Connection: Identifiable, Codable, Hashable, Sendable 
             issues.append("Enter the Protect URL, starting with https://.")
         }
         return issues
+    }
+
+    /// The sentence for an `http://` address, which is never used.
+    public static let httpAddressProblem = "Use an https:// address."
+
+    /// A server address as JTKit uses it: `https://` added when it has no
+    /// scheme (`myorg.jamfcloud.com` → `https://myorg.jamfcloud.com`).
+    /// Anything else is returned as it is; an `http://` address stays
+    /// `http://` and is refused (`addressProblem`).
+    public static func normalizedServerAddress(_ address: String) -> String {
+        let trimmed = address.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty, !trimmed.contains("://") else { return address }
+        return "https://" + trimmed
+    }
+
+    /// What is wrong with a server address, in one sentence; nil when it can
+    /// be used. An address without a scheme is fine: it gets `https://`.
+    public static func addressProblem(_ address: String) -> String? {
+        let normalized = normalizedServerAddress(address).trimmingCharacters(in: .whitespacesAndNewlines)
+        if normalized.isEmpty { return "Enter the server URL, starting with https://." }
+        if normalized.lowercased().hasPrefix("http://") { return httpAddressProblem }
+        return isWebAddress(normalized) ? nil : "Enter the server URL, starting with https://."
+    }
+
+    /// Two addresses that differ only in the scheme (none, `http://` or
+    /// `https://`), letter case or a trailing slash point to the same server.
+    static func sameServer(_ a: String, _ b: String) -> Bool {
+        func key(_ text: String) -> String {
+            var value = text.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+            for scheme in ["https://", "http://"] where value.hasPrefix(scheme) {
+                value.removeFirst(scheme.count)
+            }
+            while value.hasSuffix("/") { value.removeLast() }
+            return value
+        }
+        return key(a) == key(b)
     }
 
     static func isWebAddress(_ string: String) -> Bool {

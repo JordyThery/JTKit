@@ -81,7 +81,7 @@ extension ABM {
         /// One device; nil when it isn’t in the organization (never enrolled,
         /// or already released).
         public func device(serial: String) async throws -> OrgDevice? {
-            let serial = try checked(serial)
+            guard let serial = Self.lookupSerial(serial) else { return nil }
             guard let data = try await getUnlessNotFound("v1/orgDevices/\(serial)", recordsBodies: true) else { return nil }
             var device = try decode(Single<Attributes<OrgDevice>>.self, from: data).data.attributes
             if device.serialNumber.isEmpty { device.serialNumber = serial }
@@ -90,7 +90,7 @@ extension ABM {
 
         /// A device’s AppleCare coverage; empty when it isn’t in the organization.
         public func appleCareCoverage(serial: String) async throws -> [AppleCareCoverage] {
-            let serial = try checked(serial)
+            guard let serial = Self.lookupSerial(serial) else { return [] }
             guard let data = try await getUnlessNotFound("v1/orgDevices/\(serial)/appleCareCoverage",
                                                          recordsBodies: true) else { return [] }
             struct Fields: Decodable {
@@ -109,7 +109,7 @@ extension ABM {
         /// say: not in it (404), or Apple’s documented server error for a
         /// device in an internal state, which isn’t retried or shown.
         public func activationLock(serial: String) async throws -> ActivationLock? {
-            let serial = try checked(serial)
+            guard let serial = Self.lookupSerial(serial) else { return nil }
             let response = try await sendUnlessNotFound(HTTPRequest(path: "v1/orgDevices/\(serial)/activationLockStatus",
                                                                     recordsBodies: true, serverErrorIsAnAnswer: true))
             guard let response, (200..<300).contains(response.status) else { return nil }
@@ -124,7 +124,7 @@ extension ABM {
         /// The ID of the service a device is assigned to; nil when unassigned
         /// or not in the organization.
         public func assignedServerID(serial: String) async throws -> String? {
-            let serial = try checked(serial)
+            guard let serial = Self.lookupSerial(serial) else { return nil }
             guard let data = try await getUnlessNotFound("v1/orgDevices/\(serial)/relationships/assignedServer",
                                                          recordsBodies: true) else { return nil }
             struct Reference: Decodable { let data: Item?; struct Item: Decodable { let id: String } }
@@ -375,6 +375,13 @@ extension ABM {
         }
 
         // MARK: - Private
+
+        /// A lookup’s serial, or nil for one with other characters than
+        /// letters and digits: Apple has no such device, so the lookup
+        /// answers "not in the organization" without sending anything.
+        private static func lookupSerial(_ serial: String) -> String? {
+            try? ABM.checkedSerial(serial)
+        }
 
         private func checked(_ serial: String) throws -> String {
             do {

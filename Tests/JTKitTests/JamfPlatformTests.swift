@@ -724,6 +724,44 @@ struct JamfPlatformBlueprintTests {
         #expect(server.requests.filter { $0.method == "POST" }.count == 1)
     }
 
+    @Test("Without lastDeployment the Blueprint’s own state decides: DEPLOYED is SUCCEEDED")
+    func watchWithoutLastDeployment() async throws {
+        @Sendable func json(_ state: String) -> String {
+            #"{"id":"\#(blueprintID)","name":"iPad apps","deploymentState":{"state":"\#(state)"},"steps":[]}"#
+        }
+        let gets = Counter()
+        let server = MockServer { request in
+            switch (request.method, request.path) {
+            case ("POST", blueprintPath + "/deploy"): return MockResponse(status: 202, body: Data())
+            case ("GET", blueprintPath + "/report"): return .json(404, "{}")
+            default:
+                // 1: the read before the POST; 2: not deployed yet; 3: deployed
+                return .json(200, json(gets.next() < 3 ? "OUT_OF_DATE" : "DEPLOYED"))
+            }
+        }
+        let api = try blueprints(server)
+        let previous = try await api.startDeployment(id: blueprintID)
+        #expect(previous == nil)
+        let clock = PollClock()
+        let outcome = try await api.watchDeployment(id: blueprintID, previousStart: previous, poller: clock.poller)
+        #expect(outcome.isFinished && outcome.value?.didSucceed == true)
+        #expect(outcome.value?.readFromBlueprintState == true)
+        #expect(outcome.value?.blueprintState == .deployed)
+        #expect(clock.recorded == [.seconds(2)])
+    }
+
+    @Test("Reading one answer: lastDeployment wins when it is there; a failure state is FAILED")
+    func deploymentStatusFromOneAnswer() {
+        typealias Status = JamfPlatform.DeploymentStatus
+        let withJob = JamfPlatform.DeploymentState(state: .deployed, lastDeploymentStarted: "old", lastDeploymentState: "SUCCEEDED")
+        // the previous deployment isn’t this one, even though the Blueprint says DEPLOYED
+        #expect(Status.from(withJob, previousStart: "old", report: nil).jobState == nil)
+        #expect(Status.from(withJob, previousStart: "old", report: nil).readFromBlueprintState == false)
+        #expect(Status.from(.init(state: .other("DEPLOYMENT_FAILED")), previousStart: nil, report: nil).jobState == "FAILED")
+        #expect(Status.from(.init(state: .notDeployed), previousStart: nil, report: nil).jobState == nil)
+        #expect(Status.from(nil, previousStart: nil, report: nil).jobState == nil)
+    }
+
     @Test("The watch gives up after 5 minutes with the last status")
     func watchTimesOut() async throws {
         let server = MockServer { request in

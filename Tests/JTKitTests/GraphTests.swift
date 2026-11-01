@@ -180,7 +180,7 @@ struct GraphClientTests {
         let error = await graphError { _ = try await graphClient(server, sleeps: sleeps, now: now).getRaw("me", version: .v1) }
         #expect(error?.status == 429)
         #expect(server.requests.count == 4)
-        #expect(sleeps.recorded == [.seconds(10), .seconds(120), .seconds(120)])
+        #expect(sleeps.recorded == [.seconds(10), .seconds(60), .seconds(60)])
     }
 
     @Test("Graph’s dates read with or without fractional seconds")

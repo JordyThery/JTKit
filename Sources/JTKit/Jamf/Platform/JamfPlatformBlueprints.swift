@@ -187,14 +187,44 @@ extension JamfPlatform {
         public var blueprintState: BlueprintState?
         public var report: BlueprintReport?
         public var checkedAt: Date
+        /// The Blueprint’s answer had no `lastDeployment`, so `jobState`
+        /// was read from its own state (`DEPLOYED` is `SUCCEEDED`).
+        public var readFromBlueprintState: Bool
 
         public init(jobState: String? = nil, jobStarted: String? = nil, blueprintState: BlueprintState? = nil,
-                    report: BlueprintReport? = nil, checkedAt: Date = Date()) {
+                    report: BlueprintReport? = nil, checkedAt: Date = Date(), readFromBlueprintState: Bool = false) {
             self.jobState = jobState
             self.jobStarted = jobStarted
             self.blueprintState = blueprintState
             self.report = report
             self.checkedAt = checkedAt
+            self.readFromBlueprintState = readFromBlueprintState
+        }
+
+        /// Where a deployment stands from one read of the Blueprint.
+        ///
+        /// The deployment that counts is the one whose `lastDeployment.started`
+        /// differs from `previousStart`. When the answer has no
+        /// `lastDeployment` at all, the Blueprint’s own state stands in:
+        /// `DEPLOYED` is `SUCCEEDED`, a state naming a failure is `FAILED`,
+        /// anything else (not deployed, out of date) is still going.
+        static func from(_ deployment: DeploymentState?, previousStart: String?, report: BlueprintReport?,
+                         checkedAt: Date = Date()) -> DeploymentStatus {
+            let started = deployment?.lastDeploymentStarted
+            if let deployment, started == nil, deployment.lastDeploymentState == nil {
+                let jobState: String?
+                switch deployment.state {
+                case .deployed: jobState = "SUCCEEDED"
+                case .other(let raw) where raw.uppercased().contains("FAIL"): jobState = "FAILED"
+                default: jobState = nil
+                }
+                return DeploymentStatus(jobState: jobState, jobStarted: nil, blueprintState: deployment.state,
+                                        report: report, checkedAt: checkedAt, readFromBlueprintState: true)
+            }
+            let isNew = started != nil && started != previousStart
+            return DeploymentStatus(jobState: isNew ? deployment?.lastDeploymentState : nil,
+                                    jobStarted: isNew ? started : nil,
+                                    blueprintState: deployment?.state, report: report, checkedAt: checkedAt)
         }
 
         public var isFinished: Bool { jobState == "SUCCEEDED" || jobState == "FAILED" }
@@ -306,7 +336,9 @@ extension JamfPlatform {
 
         /// Follows the deployment that replaced `previousStart` until it
         /// succeeds or fails, or the poller’s time limit is reached (5 minutes
-        /// by default). Each check reads the Blueprint and its report.
+        /// by default). Each check reads the Blueprint and its report. When
+        /// Jamf’s answer has no `lastDeployment`, the Blueprint’s own state
+        /// decides (see `DeploymentStatus.readFromBlueprintState`).
         public func watchDeployment(
             id: String,
             previousStart: String?,
@@ -316,15 +348,7 @@ extension JamfPlatform {
             try await poller.poll(
                 check: {
                     let deployment = try await detail(id: id).overview.deploymentState
-                    let started = deployment?.lastDeploymentStarted
-                    let isNew = started != nil && started != previousStart
-                    return DeploymentStatus(
-                        jobState: isNew ? deployment?.lastDeploymentState : nil,
-                        jobStarted: isNew ? started : nil,
-                        blueprintState: deployment?.state,
-                        report: try? await report(id: id),
-                        checkedAt: Date()
-                    )
+                    return DeploymentStatus.from(deployment, previousStart: previousStart, report: try? await report(id: id))
                 },
                 isDone: \.isFinished,
                 progress: progress

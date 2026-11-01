@@ -392,12 +392,13 @@ extension JamfPlatform.Client {
     /// A record counts only when its serial is the one asked for (ignoring
     /// case). Needs “Read Computers”.
     ///
-    /// - Throws: `JamfPlatform.APIError`, `.invalidIdentifier` before anything
-    ///   is sent when the serial has other characters than letters, digits
-    ///   and hyphens.
+    /// A serial or UDID with other characters than letters, digits and
+    /// hyphens is `.none` (no device has one), and nothing is sent.
+    ///
+    /// - Throws: `JamfPlatform.APIError`.
     public func computer(serial: String, sections: [JamfPro.InventorySection] = JamfPro.computerSections,
                          recording: JamfPro.Recording = .errorsOnly) async throws -> DeviceMatch<JamfPro.Computer> {
-        let safe = try JamfPro.validatedIdentifier(serial)
+        guard let safe = try? JamfPro.validatedIdentifier(serial) else { return .none }
         let records: [JamfPro.Computer] = try await inventory(.computers, filter: "\(InventoryList.computers.serialField)==\"\(safe)\"",
                                                               sections: sections, recording: recording)
         return Self.match(records, safe) { $0.serialNumber }
@@ -406,7 +407,7 @@ extension JamfPlatform.Client {
     /// The computer with this UDID. Needs “Read Computers”.
     public func computer(udid: String, sections: [JamfPro.InventorySection] = JamfPro.computerSections,
                          recording: JamfPro.Recording = .errorsOnly) async throws -> DeviceMatch<JamfPro.Computer> {
-        let safe = try JamfPro.validatedIdentifier(udid)
+        guard let safe = try? JamfPro.validatedIdentifier(udid) else { return .none }
         let records: [JamfPro.Computer] = try await inventory(.computers, filter: "udid==\"\(safe)\"",
                                                               sections: sections, recording: recording)
         return Self.match(records, safe) { $0.udid }
@@ -416,7 +417,7 @@ extension JamfPlatform.Client {
     /// Needs “Read Mobile Devices”.
     public func mobileDevice(serial: String, sections: [JamfPro.InventorySection] = JamfPro.mobileDeviceSections,
                              recording: JamfPro.Recording = .errorsOnly) async throws -> DeviceMatch<JamfPro.MobileDevice> {
-        let safe = try JamfPro.validatedIdentifier(serial)
+        guard let safe = try? JamfPro.validatedIdentifier(serial) else { return .none }
         let records: [JamfPro.MobileDevice] = try await inventory(.mobileDevices, filter: "serialNumber==\"\(safe)\"",
                                                                   sections: sections, recording: recording)
         return try await completingGeneral(Self.match(records, safe) { $0.serialNumber }, sections: sections)
@@ -425,7 +426,7 @@ extension JamfPlatform.Client {
     /// The mobile device with this UDID. Needs “Read Mobile Devices”.
     public func mobileDevice(udid: String, sections: [JamfPro.InventorySection] = JamfPro.mobileDeviceSections,
                              recording: JamfPro.Recording = .errorsOnly) async throws -> DeviceMatch<JamfPro.MobileDevice> {
-        let safe = try JamfPro.validatedIdentifier(udid)
+        guard let safe = try? JamfPro.validatedIdentifier(udid) else { return .none }
         let records: [JamfPro.MobileDevice] = try await inventory(.mobileDevices, filter: "udid==\"\(safe)\"",
                                                                   sections: sections, recording: recording)
         return try await completingGeneral(Self.match(records, safe) { $0.udid }, sections: sections)
@@ -492,7 +493,8 @@ extension JamfPlatform.Client {
     /// 4 requests at a time. When Jamf Pro refuses a list filter (HTTP 400),
     /// that group is looked up one serial at a time, unless the first of
     /// those fails too: then the whole group fails. A serial with other
-    /// characters than letters, digits and hyphens fails without being sent.
+    /// characters than letters, digits and hyphens isn’t sent and is not
+    /// found (in neither `records` nor `failures`).
     ///
     /// - Throws: `CancellationError`, or the secret’s own error (e.g. none
     ///   saved); every Jamf error is a failure of the serials concerned.
@@ -607,11 +609,9 @@ extension JamfPlatform.Client {
         for raw in serials {
             let key = raw.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
             guard !key.isEmpty, !wanted.contains(key), result.failures[key] == nil else { continue }
-            do {
-                wanted.append(try JamfPro.validatedIdentifier(key))
-            } catch let error as JamfPlatform.APIError {
-                result.failures[key] = error
-            }
+            // other characters: no device has that serial, so it is simply
+            // not found (in neither `records` nor `failures`), and not sent
+            if let safe = try? JamfPro.validatedIdentifier(key) { wanted.append(safe) }
         }
         let chunks = stride(from: 0, to: wanted.count, by: JamfPro.batchSize).map {
             Array(wanted[$0..<min($0 + JamfPro.batchSize, wanted.count)])

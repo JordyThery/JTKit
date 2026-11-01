@@ -152,6 +152,24 @@ public final class AllConnectionsChoice {
     }
 }
 
+/// Which role a new or imported connection gets: the first role that
+/// accepts it and has no connection in use (none chosen, or one that is no
+/// longer saved), unless it already has a role. So JamfMigrator’s first
+/// tenant becomes the Source, the next the Destination.
+enum ConnectionRoleFilling {
+    @MainActor
+    static func roles<Record: ConnectionRecord>(toGive connection: Connection, among roles: [ConnectionRole],
+                                                store: ConnectionStore<Record>) -> [ConnectionRole] {
+        guard !connection.isDemo,
+              !roles.contains(where: { $0.selection.wrappedValue == connection.id }),
+              let role = roles.first(where: { role in
+                  role.accepts(connection) && role.selection.wrappedValue.flatMap(store.record(id:)) == nil
+              })
+        else { return [] }
+        return [role]
+    }
+}
+
 /// Which services the editor offers for a connection, and which sign-in
 /// methods for a service.
 nonisolated enum ConnectionServiceChoices {
@@ -183,9 +201,12 @@ nonisolated enum ConnectionServiceChoices {
 
     /// Whether the stored secret of a kind still goes with the edited
     /// values: not once the service, the sign-in method or where the secret
-    /// is sent (the server URL, the Platform region or host, the Intune
-    /// tenant, the Jamf Protect URL) differs from the saved connection, so a
-    /// mistyped host never gets the saved secret.
+    /// is sent (the server, the Platform host override, the Intune tenant,
+    /// the Jamf Protect URL) differs from the saved connection, so a
+    /// mistyped host never gets the saved secret. A Jamf Platform API
+    /// client secret belongs to the API client, not the region, so a
+    /// region change keeps it; an address that changes only its scheme
+    /// (none, `http://`, `https://`) is the same server.
     static func storedSecretApplies(_ kind: ConnectionSecretKind, saved: Connection, edited: Connection) -> Bool {
         func same(_ a: String, _ b: String) -> Bool {
             a.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
@@ -195,13 +216,13 @@ nonisolated enum ConnectionServiceChoices {
         switch kind {
         case .main:
             switch edited.service {
-            case .jamfPlatform: return saved.region == edited.region && same(saved.hostOverride, edited.hostOverride)
-            case .jamfPro, .jamfSchool: return same(saved.serverURL, edited.serverURL)
+            case .jamfPlatform: return Connection.sameServer(saved.hostOverride, edited.hostOverride)
+            case .jamfPro, .jamfSchool: return Connection.sameServer(saved.serverURL, edited.serverURL)
             case .intune: return same(saved.tenantID, edited.tenantID)
             case .appleBusinessManager, .appleSchoolManager: return true
             }
         case .protect:
-            return same(saved.protect?.url ?? "", edited.protect?.url ?? "")
+            return Connection.sameServer(saved.protect?.url ?? "", edited.protect?.url ?? "")
         }
     }
 
@@ -209,6 +230,24 @@ nonisolated enum ConnectionServiceChoices {
     /// secret is for one service and one sign-in method.
     static func savingClearsStoredSecrets(saved: Connection, edited: Connection) -> Bool {
         saved.service != edited.service || saved.signIn != edited.signIn
+    }
+
+    /// What the editor says before Save when saving will delete stored
+    /// secrets (a new service or sign-in method), e.g. "Saving removes the
+    /// stored client secret from the Keychain: it was for the “API client”
+    /// sign-in. Revert to keep it." Nil when
+    /// nothing stored is removed.
+    /// - Parameter stored: the kinds stored (or unreadable) for the saved connection.
+    static func secretRemovalNotice(saved: Connection, edited: Connection, stored: Set<ConnectionSecretKind>) -> String? {
+        guard savingClearsStoredSecrets(saved: saved, edited: edited), !stored.isEmpty else { return nil }
+        var names = [String]()
+        if stored.contains(.main) { names.append((saved.signIn.secretName ?? "secret").lowercased()) }
+        if stored.contains(.protect) { names.append("Jamf Protect client secret") }
+        let what = names.count == 1 ? "the stored \(names[0])" : "the stored \(names.joined(separator: " and the "))"
+        let why = saved.service != edited.service
+            ? "it was for \(saved.service.displayName)"
+            : "it was for the “\(saved.signIn.displayName)” sign-in"
+        return "Saving removes \(what) from the Keychain: \(why). Revert to keep it."
     }
 
     /// The sign-in methods the app accepts for a service, the usual one first.
@@ -625,6 +664,7 @@ public struct ConnectionsSettingsTab<Record: ConnectionRecord, AppSection: View>
         do {
             try store.save(record)
             listError = nil
+            useIfNoneInUse(record)
             editingID = record.id
         } catch {
             listError = error.localizedDescription
@@ -636,6 +676,7 @@ public struct ConnectionsSettingsTab<Record: ConnectionRecord, AppSection: View>
         do {
             let record = try importer.importRecord(from: url, into: store)
             listError = nil
+            useIfNoneInUse(record)
             // like clicking the row: unsaved changes to another connection ask first
             if editorHasChanges {
                 pendingSelection = .some(record.id)
@@ -644,6 +685,13 @@ public struct ConnectionsSettingsTab<Record: ConnectionRecord, AppSection: View>
             }
         } catch {
             listError = error.localizedDescription
+        }
+    }
+
+    /// A new or imported connection becomes the one in use where none is.
+    private func useIfNoneInUse(_ record: Record) {
+        for role in ConnectionRoleFilling.roles(toGive: record.connection, among: roles, store: store) {
+            role.selection.wrappedValue = record.id
         }
     }
 
@@ -824,6 +872,12 @@ private struct ConnectionEditor<Record: ConnectionRecord, AppSection: View>: Vie
     @State private var importedKeyName: String?
     @State private var keyImportError: String?
     @State private var environmentState = EnvironmentListState.idle
+    /// Closes the Settings window, once the person chose Save or Discard.
+    @State private var pendingClose: PendingClose?
+
+    private struct PendingClose {
+        let close: @MainActor () -> Void
+    }
 
     init(store: ConnectionStore<Record>, saved: Record, services: [ConnectionService],
          signInMethods: [ConnectionService: [SignInMethod]], optionalFields: Set<ConnectionOptionalField>,
@@ -919,6 +973,30 @@ private struct ConnectionEditor<Record: ConnectionRecord, AppSection: View>: Vie
             }
         }
         .formStyle(.grouped)
+        // closing Settings with unsaved changes asks first
+        .background(WindowCloseGuard(isActive: isChanged) { close in pendingClose = PendingClose(close: close) })
+        .confirmationDialog(
+            "Save the changes to “\(ConnectionMenuText.name(of: current))”?",
+            isPresented: Binding(get: { pendingClose != nil }, set: { if !$0 { pendingClose = nil } }),
+            titleVisibility: .visible
+        ) {
+            Button("Save") {
+                let close = pendingClose?.close
+                pendingClose = nil
+                if save() { close?() }
+            }
+            .disabled(!canSave)
+            Button("Discard Changes", role: .destructive) {
+                let close = pendingClose?.close
+                pendingClose = nil
+                revert()
+                close?()
+            }
+            Button("Cancel", role: .cancel) { pendingClose = nil }
+        } message: {
+            Text(canSave ? "The changes to this connection haven’t been saved."
+                         : "The changes to this connection haven’t been saved, and can’t be until the problems shown are fixed.")
+        }
         .fileImporter(isPresented: $showingKeyImporter, allowedContentTypes: ApplePrivateKey.contentTypes,
                       onCompletion: importPrivateKey)
         .onAppear(perform: loadSecrets)
@@ -952,6 +1030,7 @@ private struct ConnectionEditor<Record: ConnectionRecord, AppSection: View>: Vie
                     TextField("Host Override", text: connection.hostOverride, prompt: Text("Leave empty for the region’s gateway"))
                 }
                 textField(.environmentID, "Environment ID", text: connection.environmentID, prompt: "From Jamf Account")
+                fieldIssue(environmentIDIssue)
                 if environments != nil && !readOnlyFields.contains(.environmentID) {
                     environmentRows
                 }
@@ -964,6 +1043,7 @@ private struct ConnectionEditor<Record: ConnectionRecord, AppSection: View>: Vie
             case .jamfPro:
                 textField(.serverURL, "Server URL", text: connection.serverURL, prompt: "https://yourorg.jamfcloud.com")
                     .textContentType(.URL)
+                fieldIssue(serverURLIssue)
                 if current.signIn == .usernamePassword {
                     textField(.username, "Username", text: connection.username)
                         .textContentType(.username)
@@ -974,6 +1054,7 @@ private struct ConnectionEditor<Record: ConnectionRecord, AppSection: View>: Vie
             case .jamfSchool:
                 textField(.serverURL, "Server URL", text: connection.serverURL, prompt: "https://yourschool.jamfcloud.com")
                     .textContentType(.URL)
+                fieldIssue(serverURLIssue)
                 TextField("Network ID", text: connection.clientID)
                 secretField(.main)
             case .intune:
@@ -991,8 +1072,46 @@ private struct ConnectionEditor<Record: ConnectionRecord, AppSection: View>: Vie
                 TextField("Key ID", text: connection.keyID)
                 secretField(.main)
             }
+            if let notice = secretRemovalNotice {
+                Label(notice, systemImage: "exclamationmark.triangle.fill")
+                    .symbolRenderingMode(.multicolor)
+                    .font(.callout)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
         } footer: {
-            issuesFooter(current.issues.filter { !$0.contains("Jamf Protect") })
+            issuesFooter(current.issues.filter { !$0.contains("Jamf Protect") && $0 != environmentIDIssue && $0 != serverURLIssue })
+        }
+    }
+
+    /// The Environment ID’s problem, shown under the field.
+    private var environmentIDIssue: String? {
+        current.service == .jamfPlatform && !readOnlyFields.contains(.environmentID)
+            ? current.issues.first { $0 == JamfPlatform.APIError.environmentIDNotUUID } : nil
+    }
+
+    /// The server address’s problem, shown under the field once something is typed.
+    private var serverURLIssue: String? {
+        guard [.jamfPro, .jamfSchool].contains(current.service), !readOnlyFields.contains(.serverURL),
+              !current.serverURL.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return nil }
+        return Connection.addressProblem(current.serverURL)
+    }
+
+    /// Before Save: which stored secrets the change of service or sign-in removes.
+    private var secretRemovalNotice: String? {
+        ConnectionServiceChoices.secretRemovalNotice(saved: saved.connection, edited: current,
+                                                     stored: hasStoredSecret.union(unreadableSecrets))
+    }
+
+    /// A problem with the field above, in the same warning look as the footer.
+    @ViewBuilder
+    private func fieldIssue(_ issue: String?) -> some View {
+        if let issue {
+            Label(issue, systemImage: "exclamationmark.triangle.fill")
+                .symbolRenderingMode(.multicolor)
+                .font(.caption)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .fixedSize(horizontal: false, vertical: true)
         }
     }
 
@@ -1130,14 +1249,19 @@ private struct ConnectionEditor<Record: ConnectionRecord, AppSection: View>: Vie
         return storedSecretApplies(kind) ? "Stored in the Keychain · type to replace" : "Required after this change"
     }
 
-    /// The Apple private key is imported from its .pem file and never shown:
-    /// a status line and a button, no text.
+    /// The Apple private key is pasted or imported from a text file (.pem,
+    /// .p8, .txt) and never shown: a status line and two buttons, no text.
     private func privateKeyField(_ title: String) -> some View {
         let imported = !(secrets[.main] ?? "").isEmpty
         let hasKey = imported || storedSecretApplies(.main)
         return LabeledContent(title) {
             VStack(alignment: .leading, spacing: 4) {
-                Button(hasKey ? "Replace Private Key…" : "Import .pem File…") { showingKeyImporter = true }
+                HStack(spacing: 8) {
+                    Button(hasKey ? "Replace with Key File…" : "Import Key File…") { showingKeyImporter = true }
+                        .help("A .pem, .p8 or text file with the private key")
+                    Button("Paste Key") { pastePrivateKey() }
+                        .help("Paste the private key copied from a password manager or a text file")
+                }
                 Text(privateKeyStatus(imported: imported))
                     .font(.caption)
                     .foregroundStyle(.secondary)
@@ -1153,11 +1277,21 @@ private struct ConnectionEditor<Record: ConnectionRecord, AppSection: View>: Vie
 
     private func privateKeyStatus(imported: Bool) -> String {
         if imported {
-            return "\(importedKeyName ?? "Private key") imported · Save to keep it"
+            return "\(importedKeyName ?? "Private key") added · Save to keep it"
         }
         if storedSecretApplies(.main) { return "Stored in the Keychain" }
-        if hasStoredSecret.contains(.main) { return "Required after this change: the .pem file downloaded from Apple" }
-        return "Required: the .pem file downloaded from Apple"
+        if hasStoredSecret.contains(.main) { return "Required after this change: the private key downloaded from Apple" }
+        return "Required: the private key downloaded from Apple (a .pem file)"
+    }
+
+    private func pastePrivateKey() {
+        do {
+            secrets[.main] = try ApplePrivateKey.read(pasted: NSPasteboard.general.string(forType: .string))
+            importedKeyName = "Pasted key"
+            keyImportError = nil
+        } catch {
+            keyImportError = error.localizedDescription
+        }
     }
 
     private func importPrivateKey(_ result: Result<URL, any Error>) {

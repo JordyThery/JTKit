@@ -77,7 +77,8 @@ extension JamfPlatform.Client {
     /// - Throws: `JamfPlatform.DeviceMismatch` when devices came back but
     ///   none has the serial; `JamfPlatform.APIError`.
     public func device(serial: String) async throws -> JamfPlatform.Device? {
-        let safe = try JamfPro.validatedIdentifier(serial)
+        // other characters: no device has that serial; nothing is sent
+        guard let safe = try? JamfPro.validatedIdentifier(serial) else { return nil }
         struct Page: Decodable { let results: [Tolerant<JamfPlatform.Device>]? }
         let response: HTTPResponse
         do {

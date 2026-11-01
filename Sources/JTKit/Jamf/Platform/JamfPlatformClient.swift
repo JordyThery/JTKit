@@ -73,7 +73,7 @@ extension JamfPlatform {
         ) throws {
             let server: JamfPlatform.Server = connection.service == .jamfPro ? .jamfPro : .platformAPI
             guard [.jamfPlatform, .jamfPro].contains(connection.service), let baseURL = connection.jamfBaseURL else {
-                throw JamfPlatform.APIError(.invalidResponse("“\(ConnectionMenuText.name(of: connection))” isn’t a Jamf Platform API or Jamf Pro connection with a valid address."))
+                throw JamfPlatform.APIError(.invalidResponse(connection.unusableAddressMessage("isn’t a Jamf Platform API or Jamf Pro connection with a valid address.")))
             }
             let tokens: JamfPlatform.TokenProvider
             do {
@@ -147,12 +147,49 @@ extension JamfPlatform {
         public func send(_ request: HTTPRequest, privileges: [JamfPro.Privilege]) async throws -> HTTPResponse {
             observePrivileges?(request.path, request.method, privileges)
             do {
-                return try await http.send(request)
+                return try await sendFallingBack(request)
             } catch let error as HTTPError {
                 var error = JamfPlatform.APIError(error)
                 error.privileges = privileges
                 throw failure(error)
             }
+        }
+
+        /// Sends the request; a computer request to `v4` goes to `v1` on a
+        /// Jamf Pro server too old for `v4` (see `ComputersAPIVersion`).
+        private func sendFallingBack(_ request: HTTPRequest) async throws -> HTTPResponse {
+            guard let older = ComputersAPIVersion.v1(of: request) else { return try await http.send(request) }
+            let server = baseURL.absoluteString
+            switch ComputersAPIVersion.shared.known(for: server) {
+            case .v1: return try await http.send(older)
+            case .v4: return try await http.send(request)
+            case nil: break
+            }
+            do {
+                let response = try await http.send(request)
+                ComputersAPIVersion.shared.set(.v4, for: server)
+                return response
+            } catch let error as HTTPError where error.status == 404 {
+                // a missing record answers 404 too: v1 decides
+                do {
+                    let response = try await http.send(older)
+                    await usesV1(from: request, server: server)
+                    return response
+                } catch let olderError as HTTPError where olderError.status != 404 {
+                    // v1 is there and answered: this server has no v4
+                    await usesV1(from: request, server: server)
+                    throw olderError
+                } catch let olderError as HTTPError where olderError.status == 404 {
+                    throw error
+                }
+            }
+        }
+
+        private func usesV1(from request: HTTPRequest, server: String) async {
+            ComputersAPIVersion.shared.set(.v1, for: server)
+            await http.recorder.note(request.method, request.path,
+                                     note: "HTTP 404: this Jamf Pro has no v4 computer API, so computer requests to it use v1 from now on.",
+                                     category: "API", isWarning: true)
         }
 
         /// A GET, read as lossless JSON.
@@ -205,5 +242,47 @@ extension JamfPlatform {
         public func forgetToken() async {
             await tokens.forgetToken()
         }
+    }
+}
+
+/// Which computer API a Jamf Pro server has, learned once per server (its
+/// address) for as long as the app runs: `v4/computers-inventory…`, or
+/// only `v1` on an older Jamf Pro. A `v4` computer request that gets 404 is
+/// sent once more to `v1`; when `v1` is there, every later computer request
+/// to that server goes to `v1`, written once to the activity log. A `v4`
+/// answer settles it the other way, so a current server is never asked twice.
+nonisolated final class ComputersAPIVersion: @unchecked Sendable {
+    enum Version { case v1, v4 }
+
+    static let shared = ComputersAPIVersion()
+
+    private let lock = NSLock()
+    private var known: [String: Version] = [:]
+
+    func known(for server: String) -> Version? {
+        lock.withLock { known[server] }
+    }
+
+    func set(_ version: Version, for server: String) {
+        lock.withLock { known[server] = version }
+    }
+
+    /// Tests only: forgets what was learned.
+    func reset() {
+        lock.withLock { known.removeAll() }
+    }
+
+    private static let v4 = "pro/v4/computers-inventory"
+    private static let v1 = "pro/v1/computers-inventory"
+
+    /// The same request to `v1`; nil when it isn’t a `v4` computer request
+    /// (`computers-inventory`, `…-detail` and what is under them).
+    static func v1(of request: HTTPRequest) -> HTTPRequest? {
+        var path = Substring(request.path)
+        while path.hasPrefix("/") { path.removeFirst() }
+        guard path.hasPrefix(v4) else { return nil }
+        var older = request
+        older.path = v1 + path.dropFirst(v4.count)
+        return older
     }
 }

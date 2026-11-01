@@ -352,7 +352,7 @@ struct ABMSignInTests {
         let error = await appleError { _ = try await rig.client.mdmServers() }
         guard case .unreadableKey = error?.kind else { Issue.record("not unreadableKey"); return }
         let message = error?.message() ?? ""
-        #expect(message.hasPrefix("The file doesn’t contain a private key. Choose the .pem file downloaded when the API account was created."))
+        #expect(message.hasPrefix("That isn’t a private key. Use the whole key downloaded when the API account was created."))
         #expect(!message.contains("MIGHAgEA"))
         #expect(rig.server.requests.isEmpty)
     }
@@ -510,8 +510,11 @@ struct ABMReadTests {
         #expect(device.migrationDeadline == ABM.date("2026-11-02T10:00:00Z"))
         #expect(rig.api.first?.header("Accept") == "application/json")
         #expect(try await rig.client.device(serial: "UNKNOWN1") == nil)
-        let refused = await appleError { _ = try await rig.client.device(serial: "C02/../X") }
-        #expect(refused?.message() == "“C02/../X” isn’t a serial number: it may hold only letters and digits.")
+        // other characters: not in the organization, and nothing is sent
+        #expect(try await rig.client.device(serial: "C02/../X") == nil)
+        #expect(try await rig.client.appleCareCoverage(serial: "C02/../X").isEmpty)
+        #expect(try await rig.client.activationLock(serial: "C02 X") == nil)
+        #expect(try await rig.client.assignedServerID(serial: "C02\"X") == nil)
         #expect(rig.api.count == 2)
         // a device lookup’s answer is recorded
         #expect(rig.log.entries.contains { $0.request?.responseBody?.contains("MacBook Air") == true })

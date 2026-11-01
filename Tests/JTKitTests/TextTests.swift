@@ -17,7 +17,11 @@ struct TextTests {
 
     @Test("Typed-in values: the server URL and the Protect URL by their field names; the client ID in the Entra wording")
     func connectionIssues() {
-        #expect(Connection(name: "A", service: .jamfPro, serverURL: "example.com").issues
+        #expect(Connection(name: "A", service: .jamfPro, serverURL: "example.com").issues.isEmpty, "gets https://")
+        #expect(Connection(name: "A", service: .jamfPro, serverURL: "").issues
+                == ["Enter the server URL, starting with https://."])
+        #expect(Connection(name: "A", service: .jamfPro, serverURL: "http://example.com").issues == ["Use an https:// address."])
+        #expect(Connection(name: "A", service: .jamfSchool, serverURL: "https://").issues
                 == ["Enter the server URL, starting with https://."])
         #expect(Connection(name: "A", service: .intune, clientID: "app").issues
                 == ["The client ID isn’t a UUID. Copy the Application (client) ID from Entra."])

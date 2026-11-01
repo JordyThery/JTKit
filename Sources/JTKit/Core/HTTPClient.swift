@@ -203,7 +203,7 @@ extension BearerTokenSource {
 /// and short network drops only for reads and for edits marked safe to
 /// repeat. `Retry-After` is read as seconds or as an HTTP date; otherwise
 /// the wait doubles from 1 s, with up to 0.5 s of randomness. No wait is
-/// longer than 120 s. A 401 gets a new token and one more try (part of the 4).
+/// longer than 60 s. A 401 gets a new token and one more try (part of the 4).
 public nonisolated struct RetryRules: Sendable, Hashable {
     public let maxAttempts: Int
     public let firstWait: TimeInterval
@@ -225,7 +225,11 @@ public nonisolated struct RetryRules: Sendable, Hashable {
     /// while and a short retry only spends another request.
     public static let appleBusiness = RetryRules(fixedWaits: [5, 15, 45], everyNetworkErrorIsADrop: true)
 
-    public init(maxAttempts: Int = 4, firstWait: TimeInterval = 1, randomness: TimeInterval = 0.5, longestWait: TimeInterval = 120,
+    /// The longest wait by default, also when `Retry-After` asks for more.
+    public static let defaultLongestWait: TimeInterval = 60
+
+    public init(maxAttempts: Int = 4, firstWait: TimeInterval = 1, randomness: TimeInterval = 0.5,
+                longestWait: TimeInterval = RetryRules.defaultLongestWait,
                 fixedWaits: [TimeInterval]? = nil, everyNetworkErrorIsADrop: Bool = false) {
         self.maxAttempts = maxAttempts
         self.firstWait = firstWait
@@ -461,8 +465,9 @@ actor HTTPClient {
             let data: Data
             let http: HTTPURLResponse
             do {
+                let recordsBodies = request.recordsBodies || (recorder.recordsBodies?(request.method.uppercased(), request.path) ?? false)
                 (data, http) = try await recorder.send(urlRequest, attempt: attempt, of: rules.maxAttempts,
-                                                       recordsBodies: request.recordsBodies, recordedJSON: request.recordedJSON,
+                                                       recordsBodies: recordsBodies, recordedJSON: request.recordedJSON,
                                                        redirects: redirects, withholdsContents: request.withholdsContents,
                                                        knownSecrets: knownSecrets)
             } catch let error as URLError {
@@ -470,7 +475,7 @@ actor HTTPClient {
                 if isDrop && repeatable && attempt < rules.maxAttempts {
                     mayHaveBeenDone = true
                     try await wait(rules.backoff(afterAttempt: attempt, random: random()),
-                                   reason: "Network error", request: request, nextAttempt: attempt + 1)
+                                   reason: "Network error", kind: .networkError, request: request, nextAttempt: attempt + 1)
                     continue
                 }
                 throw HTTPError.transport(method: request.method, path: request.path, code: error.code,
@@ -504,9 +509,11 @@ actor HTTPClient {
             case 429 where attempt < rules.maxAttempts,
                  500..<600 where repeatable && attempt < rules.maxAttempts:
                 if http.statusCode != 429 { mayHaveBeenDone = true }
-                let delay = RetryRules.retryAfter(response.header("Retry-After"), now: now())
-                    ?? rules.backoff(afterAttempt: attempt, random: random())
-                try await wait(delay, reason: "HTTP \(http.statusCode)", request: request, nextAttempt: attempt + 1)
+                let askedFor = RetryRules.retryAfter(response.header("Retry-After"), now: now())
+                let delay = askedFor ?? rules.backoff(afterAttempt: attempt, random: random())
+                let kind: WaitReason = askedFor != nil ? .askedToWait
+                    : http.statusCode == 429 ? .tooManyRequests : .serverError(http.statusCode)
+                try await wait(delay, reason: "HTTP \(http.statusCode)", kind: kind, request: request, nextAttempt: attempt + 1)
             default:
                 throw HTTPError.status(response, method: request.method, path: request.path, duringSignIn: false)
             }
@@ -568,7 +575,7 @@ actor HTTPClient {
                                 note: "\(rateLimit.explanation): waiting \(Int(delay.rounded(.up))) s.",
                                 category: "Retry", isWarning: true)
             do {
-                try await sleep(.milliseconds(Int((delay * 1000).rounded())))
+                try await recorder.wait(delay, reason: .rateLimit(rateLimit.explanation), now: current, sleep: sleep)
             } catch {
                 await recorder.note(request.method, request.path, note: "Canceled while waiting.", category: "Retry")
                 throw CancellationError()
@@ -583,16 +590,17 @@ actor HTTPClient {
         return cleaned == text ? data : Data(cleaned.utf8)
     }
 
-    /// Waits before the next attempt, written to the log first. Canceling
-    /// the task stops the wait at once.
-    private func wait(_ seconds: TimeInterval, reason: String, request: HTTPRequest, nextAttempt: Int) async throws {
+    /// Waits before the next attempt, written to the log first and shown in
+    /// the recorder’s `waits`. Canceling the task, or the waits, stops the
+    /// wait at once.
+    private func wait(_ seconds: TimeInterval, reason: String, kind: WaitReason, request: HTTPRequest, nextAttempt: Int) async throws {
         let delay = min(max(seconds, 0), rules.longestWait)
         let shown = delay < 10 && delay.rounded() != delay ? String(format: "%.1f", delay) : String(format: "%.0f", delay)
         await recorder.note(request.method, request.path,
                             note: "\(reason): waiting \(shown) s, attempt \(nextAttempt) of \(rules.maxAttempts).",
                             category: "Retry", isWarning: true)
         do {
-            try await sleep(.milliseconds(Int((delay * 1000).rounded())))
+            try await recorder.wait(delay, reason: kind, now: now(), sleep: sleep)
         } catch {
             await recorder.note(request.method, request.path, note: "Canceled while waiting.", category: "Retry")
             throw CancellationError()

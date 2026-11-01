@@ -336,7 +336,7 @@ struct JamfProLookupTests {
 @Suite("Jamf Pro batch lookups")
 @MainActor
 struct JamfProBatchTests {
-    @Test("50 serials per request, quoted in a list filter; duplicates and blanks skipped; bad serials not sent")
+    @Test("50 serials per request, quoted in a list filter; duplicates and blanks skipped; bad serials not sent, not found")
     func batches() async throws {
         let serials = (0..<120).map { String(format: "C02SERIAL%03d", $0) }
         let server = MockServer { request in
@@ -351,7 +351,8 @@ struct JamfProBatchTests {
         #expect(filters.map { $0.components(separatedBy: ",").count }.sorted() == [20, 50, 50])
         #expect(batch.records.count == 3, "the first serial of each group answered")
         #expect(batch.records["C02SERIAL000"]?.id == "C02SERIAL000")
-        #expect(batch.failures.keys.sorted() == ["BAD\"SERIAL"])
+        #expect(batch.failures.isEmpty)
+        #expect(batch.records["BAD\"SERIAL"] == nil)
         #expect(!filters.joined().contains("BAD"))
     }
 
@@ -533,12 +534,15 @@ struct JamfProHintTests {
         #expect(!message.contains("API Roles and Clients"))
     }
 
-    @Test("A bad serial is refused with its own message, before anything is sent")
+    @Test("A serial or UDID with other characters is not found, and nothing is sent")
     func invalidIdentifier() async throws {
         let server = MockServer { _ in .json(200, "{}") }
-        let error = await thrown(JamfPlatform.APIError.self) { _ = try await proClient(server).mobileDevice(udid: "x\" or 1==1") }
+        let client = try proClient(server)
+        #expect(try await client.mobileDevice(udid: "x\" or 1==1") == .none)
+        #expect(try await client.mobileDevice(serial: "C02 X") == .none)
+        #expect(try await client.computer(serial: "C02/X") == .none)
+        #expect(try await client.computer(udid: "") == .none)
         #expect(server.requests.isEmpty)
-        #expect(error?.message().contains("isn’t a serial number or UDID") == true)
     }
 }
 

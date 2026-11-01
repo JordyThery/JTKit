@@ -35,24 +35,41 @@ public nonisolated struct RequestRecorder: Sendable {
     public var service: String?
     /// The connection’s name.
     public var connection: String?
+    /// Where waits before a retry are shown while they last, for the app’s
+    /// status; nil: only in the activity log.
+    public var waits: RequestWaits?
+    /// Requests whose bodies (both, also of a success) may be recorded, as
+    /// if each were marked `recordsBodies`: for an app whose requests go
+    /// through JTKit’s own calls, e.g. AppSettings2Blueprint’s Blueprint
+    /// reads and writes. Gets the method and the path as the client builds
+    /// it (`blueprints/v1/blueprints/…`). Only for requests the app knows
+    /// carry nothing secret. Never applies to sign-ins or to the sensitive
+    /// calls (`SensitiveRequests`), whose contents are never recorded.
+    public var recordsBodies: (@Sendable (_ method: String, _ path: String) -> Bool)?
 
     /// - Parameters:
     ///   - session: what sends the requests: the app’s own session, or a
     ///     demo source’s (`DemoSource.session`). No default, so demo mode’s
     ///     clients can’t end up on the real network by accident.
     ///   - log: where entries go; nil records nothing (previews).
+    ///   - waits: shows waits before a retry while they last (see `RequestWaits`).
+    ///   - recordsBodies: requests whose bodies may be recorded (see the property).
     public init(
         session: URLSession,
         log: ActivityLog?,
         category: String = "API",
         service: String? = nil,
-        connection: String? = nil
+        connection: String? = nil,
+        waits: RequestWaits? = nil,
+        recordsBodies: (@Sendable (_ method: String, _ path: String) -> Bool)? = nil
     ) {
         self.session = session
         self.log = log
         self.category = category
         self.service = service
         self.connection = connection
+        self.waits = waits
+        self.recordsBodies = recordsBodies
     }
 
     /// Sends the request and records it.

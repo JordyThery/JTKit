@@ -334,7 +334,9 @@ struct StoredSecretBindingTests {
         }
     }
 
-    @Test func platformRegionAndHostAndProtectURLCount() {
+    /// A Platform API client secret belongs to the API client, not the
+    /// region (1.1.0): a region change keeps it; another host doesn’t.
+    @Test func platformHostAndProtectURLCountButNotTheRegion() {
         let platform = Connection(name: "P", service: .jamfPlatform, region: .us, protect: JamfProtectSettings(url: "https://a.protect.jamfcloud.com"))
         var region = platform
         region.region = .eu
@@ -342,7 +344,7 @@ struct StoredSecretBindingTests {
         host.hostOverride = "staging.example"
         var protect = platform
         protect.protect?.url = "https://b.protect.jamfcloud.com"
-        #expect(!ConnectionServiceChoices.storedSecretApplies(.main, saved: platform, edited: region))
+        #expect(ConnectionServiceChoices.storedSecretApplies(.main, saved: platform, edited: region))
         #expect(!ConnectionServiceChoices.storedSecretApplies(.main, saved: platform, edited: host))
         #expect(ConnectionServiceChoices.storedSecretApplies(.main, saved: platform, edited: protect))
         #expect(!ConnectionServiceChoices.storedSecretApplies(.protect, saved: platform, edited: protect))
