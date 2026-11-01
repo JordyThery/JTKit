@@ -63,7 +63,7 @@ Follow the release gate in ROADMAP.md: release check passes (including live sand
 
 From 1.0, JTKit follows semantic versioning (patch: fixes, minor: additions, major: breaking changes). A tag is created only after Jordy’s approval; until then the work waits on a branch.
 
-Bump `JTKit.version`, add a CHANGELOG entry, commit, tag `x.y.z` (a breaking API change means a new major version) and push with tags. Before releasing an app, update its JTKit package version so the committed app matches what was built.
+Bump `JTKit.version`, add a CHANGELOG entry (it’s for developers using the package; never say how a problem was found, decided by Jordy on 2026-11-01), commit, tag `x.y.z` (a breaking API change means a new major version) and push with tags. Before releasing an app, update its JTKit package version so the committed app matches what was built.
 
 **Before tagging any JTKit version, build every app that uses it** in `Apps.xcworkspace`, against the local JTKit: AppSettings2Blueprint, Blueprint Managed Preferences Editor, Checkpoint, Intune Deployer, Jamf Deployer, JamfMigrator, Profile2Blueprint, Serial Number Reader. Report any that fail and don’t tag until they all build. JTKit’s own tests can’t catch a change that breaks how an app calls it (0.4.2 broke Serial Number Reader’s Settings preview).
 
