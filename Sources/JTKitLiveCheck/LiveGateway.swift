@@ -19,7 +19,10 @@ import Network
 /// For a sandboxed app the run folder is in the app’s container, which the
 /// UI test runner can’t read: the same two files then also go into the
 /// runner folder (`JTKIT_LIVE_RUNNER_DIR`, the release check’s own run
-/// folder), and are removed from there too.
+/// folder), and are removed from there too. A copy of the run’s ledger
+/// (`ledger.json`: the objects the run made, by name and ID, no secret) is
+/// kept there as well, refreshed before each answer, for a UI test that
+/// reads which objects the app made.
 public final class LiveGateway: @unchecked Sendable {
     public let run: LiveCheckRun
     /// The port on 127.0.0.1.
@@ -141,6 +144,20 @@ public final class LiveGateway: @unchecked Sendable {
             stop()
             throw error
         }
+        mirrorLedger()
+    }
+
+    /// Copies the run’s ledger into the runner folder (a sandboxed app’s
+    /// UI test runner can’t read the one in its container). Atomic, mode 600.
+    func mirrorLedger() {
+        guard let runnerFolder else { return }
+        let copy = runnerFolder.appending(path: run.ledger.fileURL.lastPathComponent)
+        guard let data = try? Data(contentsOf: run.ledger.fileURL) else {
+            try? FileManager.default.removeItem(at: copy)
+            return
+        }
+        try? data.write(to: copy, options: .atomic)
+        try? FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: copy.path)
     }
 
     deinit { listener.cancel() }
@@ -165,6 +182,7 @@ public final class LiveGateway: @unchecked Sendable {
     /// from the runner folder), so the run folder can’t start another app.
     public func stop() {
         listener.cancel()
+        mirrorLedger()
         for folder in [run.runFolder] + (runnerFolder.map { [$0] } ?? []) {
             try? FileManager.default.removeItem(at: folder.appending(path: Self.launchFileName))
             try? FileManager.default.removeItem(at: folder.appending(path: Self.tokenFileName))
@@ -271,6 +289,8 @@ public final class LiveGateway: @unchecked Sendable {
 
     private func answer(_ payload: Data, on connection: NWConnection) {
         func reply(_ response: LiveGatewayResponse) {
+            // what the request changed in the ledger, before the caller reads it
+            self.mirrorLedger()
             let data = (try? JSONEncoder().encode(response)) ?? Data()
             var length = UInt32(data.count).bigEndian
             connection.send(content: Data(bytes: &length, count: 4) + data, completion: .contentProcessed { _ in

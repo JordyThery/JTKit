@@ -20,7 +20,9 @@ is replaced is deprecated.
   now closes as soon as the sheet is gone). Discard Changes closes it the same way.
 - Live UI tests of a sandboxed app (`TEST_HOST_CONTAINER`): the live gateway now also writes its launch file and
   token to the run folder’s `live/` (`JTKIT_LIVE_RUNNER_DIR`, mode 700, files 600, removed when the gateway
-  stops), where the UI test runner can read them; it can’t read the app’s container. The app is still launched
+  stops), where the UI test runner can read them; it can’t read the app’s container. It also keeps a copy of the
+  run’s ledger there (`ledger.json`, refreshed before each answer), so a UI test can read which objects the app
+  made the same way as for an app that isn’t sandboxed. The app is still launched
   with the folder in its container. Neither file holds a secret: secrets still reach test processes and the app
   only through the gateway, on a request with its token. `LiveGatewayClient(runFolder:gatewayFolder:)` reads them
   from the runner folder; `JTKitUITestCase.liveGateway()` does so by itself.

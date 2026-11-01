@@ -177,7 +177,9 @@ struct LiveGatewayReviewTests {
 
     @Test("1.2.0: a UI test runner that can’t read a sandboxed app’s container finds the gateway in the runner folder")
     func theRunnerFolderHoldsTheLaunchFileAndToken() async throws {
-        let (run, owner, listURL) = try makeRun(upstream: MockServer { _ in .json(200, #"{"results":[]}"#) })
+        let (run, owner, listURL) = try makeRun(upstream: MockServer { request in
+            request.method == "POST" ? .json(201, #"{"id":"bp-new"}"#) : .json(200, #"{"results":[]}"#)
+        })
         let runner = folder().appending(path: "live", directoryHint: .isDirectory)
         let gateway = try LiveGateway(run: run, lockOwnerURL: owner, runnerFolder: runner)
         let manager = FileManager.default
@@ -205,6 +207,17 @@ struct LiveGatewayReviewTests {
                                         environment: client.appEnvironment(roles: ["jamf-test-a"]), isDebugBuild: true,
                                         lockOwnerURL: owner, allowListURL: listURL)
         guard case .active = state else { Issue.record("not on: \(state)"); gateway.stop(); return }
+
+        // what the app made is in the runner folder's copy of the ledger once the answer arrives
+        var create = URLRequest(url: URL(string: "https://eu.api.jamfcloud.com/blueprints/v1/blueprints")!)
+        create.httpMethod = "POST"
+        create.setValue(environmentA, forHTTPHeaderField: "X-Environment-Id")
+        create.httpBody = try JSONSerialization.data(withJSONObject: ["name": "\(prefix) – made by the app"])
+        _ = try await client.session.data(for: create)
+        let mirrored = Ledger(fileURL: runner.appending(path: "ledger.json")).items
+        #expect(mirrored.map(\.id) == ["bp-new"], "\(mirrored)")
+        let ledgerMode = try manager.attributesOfItem(atPath: runner.appending(path: "ledger.json").path)[.posixPermissions] as? NSNumber
+        #expect(ledgerMode?.intValue == 0o600)
 
         // once stopped, neither folder starts anything
         gateway.stop()
