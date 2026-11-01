@@ -23,6 +23,10 @@ Bump `JTKit.version`, add a CHANGELOG entry, commit, tag the version (`0.2.0`, â
 
 All eight apps use JTKit for their updates, About and Settings windows, saved connections, activity log and demo mode, and for their connections to Jamf, Intune and Apple Business. See [ROADMAP.md](ROADMAP.md) for the plan and [CHANGELOG.md](CHANGELOG.md) for what changed in each version.
 
+## Disclaimer
+
+This package is provided as-is, without warranty of any kind. Use it at your own risk. This is a personal project. It is not affiliated with or endorsed by my employer, Jamf, Apple or Microsoft. Issues and pull requests are appreciated. Support is best-effort.
+
 ## License
 
 MIT
