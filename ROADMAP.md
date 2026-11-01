@@ -686,7 +686,9 @@ Exception (decided by Jordy on 2026-11-01): a patch release that only fixes regr
 - **Weekly vendor-update report:** a run outside Xcode that checks Jamf, Microsoft and Apple for API and product changes that affect the apps, and writes a short report.
 - A "new JTKit app" skill for Xcode’s Claude (in `ClaudeAgentConfig/skills/`): creates a new app in `~/Developer` set up to the standards (About, Settings, updater, connections, activity log, demo mode, release check, CLAUDE.md, LICENSE, .gitignore, build-number script) and adds it to `Apps.xcworkspace`.
 
-### 1.1.0 (decided by Jordy on 2026-11-01; amended after the vendor check the same day)
+### 1.1.0 (decided by Jordy on 2026-11-01; amended after the vendor check the same day), done
+**Released 2026-11-01** (tag `1.1.0`, approved by Jordy): Parts A, B and C and the review fixes. Apps move to 1.1.0 one at a time, each in its next release (see the CHANGELOG’s “Moving an app to 1.1.0”); B5 waits for Jamf Deployer’s.
+
 A minor release: new features and fixes, nothing that breaks an app on 1.0 (anything replaced stays, marked deprecated with its replacement named). The details behind each item are in `_release-gate/jtkit-1.1.0-plan.md` and `_release-gate/regression/` (SUMMARY.md, J1–J14). Apps move to 1.1.0 one at a time afterwards, each in its next release. Each part is marked done here as it lands.
 
 - **Part A: regression fixes** (J1–J14, A15), done on the branch (2026-11-01): A1–A13 and A15 with JTKit tests (`RegressionFixTests` and the suites they touch; A11 and A12 redone to the amended text), all 904 JTKit tests pass, all eight apps build against the branch. Not tagged. Still open from Part A: A13’s live confirmation on jamf-test-a (in Part B’s checks); the apps’ side (using `readSecret`/`requiredSecret`/`copySecret`, `RequestWaits` in their status, `recordsBodies` and a larger log where wanted), each in its next release. Two app unit tests check the 1.0 behavior and change with that app: Profile2Blueprint’s longest wait (120 → 60 s) and Checkpoint’s message for an http:// address.
