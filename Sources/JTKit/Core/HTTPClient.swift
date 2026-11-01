@@ -330,7 +330,11 @@ nonisolated enum RequestPath {
 /// checks every request before it leaves, and retries by `RetryRules`.
 /// Every attempt, wait and refusal is written to the activity log by the
 /// `RequestRecorder` underneath.
-actor HTTPClient {
+///
+/// Public from 1.1.0, for an app’s own service that no JTKit client covers
+/// (a GitHub or Azure request, a file download): the same checks, retries,
+/// rate limits and activity log as JTKit’s own clients.
+public actor HTTPClient {
     public nonisolated let baseURL: URL
     public nonisolated let recorder: RequestRecorder
     private let tokens: (any BearerTokenSource)?
@@ -370,11 +374,32 @@ actor HTTPClient {
     ///   - sleep, random, now: injectable for tests.
     public init(
         baseURL: URL,
+        tokens: (any BearerTokenSource)? = nil,
+        recorder: RequestRecorder,
+        headers: [String: String] = [:],
+        permits: @escaping @Sendable (HTTPRequest) -> Bool = { _ in true },
+        redirects: RedirectRule = .sameHostHTTPSOnly,
+        writeSpacing: Duration = .zero,
+        maxConcurrent: Int? = nil,
+        rateLimit: RateLimit? = nil,
+        rules: RetryRules = .standard,
+        sleep: @escaping @Sendable (Duration) async throws -> Void = { try await Task.sleep(for: $0) },
+        random: @escaping @Sendable () -> Double = { Double.random(in: 0...1) },
+        now: @escaping @Sendable () -> Date = { Date() }
+    ) {
+        self.init(baseURL: baseURL, tokens: tokens, recorder: recorder, headers: headers, permits: permits,
+                  pathMapping: .none, redirects: redirects, writeSpacing: writeSpacing, maxConcurrent: maxConcurrent,
+                  rateLimit: rateLimit, rules: rules, sleep: sleep, random: random, now: now)
+    }
+
+    /// As the public init, with a path mapping (`.jamfProDirect`).
+    init(
+        baseURL: URL,
         tokens: (any BearerTokenSource)?,
         recorder: RequestRecorder,
         headers: [String: String] = [:],
         permits: @escaping @Sendable (HTTPRequest) -> Bool = { _ in true },
-        pathMapping: PathMapping = .none,
+        pathMapping: PathMapping,
         redirects: RedirectRule = .sameHostHTTPSOnly,
         writeSpacing: Duration = .zero,
         maxConcurrent: Int? = nil,

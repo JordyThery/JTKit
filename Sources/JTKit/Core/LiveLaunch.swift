@@ -106,6 +106,27 @@ public nonisolated enum LiveLaunch {
         return false
     }
 
+    /// Where the app keeps its own files (backups, exports, journals,
+    /// reports) under the switch, instead of their usual place: `app-files/<name>`
+    /// in the run’s folder, or, when the switch was refused, a new folder in
+    /// the temporary directory. Nil for an ordinary launch: the usual place.
+    /// - Parameter name: e.g. "Backups"; `/` becomes `_`.
+    public static func appFilesFolder(_ name: String) -> URL? {
+        var safe = name.replacingOccurrences(of: "/", with: "_").trimmingCharacters(in: .whitespacesAndNewlines)
+        if safe.isEmpty || safe == "." || safe == ".." { safe = "_" + safe }
+        switch state {
+        case .off:
+            return nil
+        case .active(let active):
+            return active.runFolder.appending(path: "app-files", directoryHint: .isDirectory)
+                .appending(path: safe, directoryHint: .isDirectory)
+        case .refused:
+            return FileManager.default.temporaryDirectory
+                .appending(path: "jtkit-live-refused-\(UUID().uuidString)", directoryHint: .isDirectory)
+                .appending(path: safe, directoryHint: .isDirectory)
+        }
+    }
+
     /// The release check’s connections, in the order the gateway listed them.
     public static var connections: [Connection] {
         guard case .active(let active) = state else { return [] }

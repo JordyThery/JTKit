@@ -22,11 +22,18 @@ public struct MicrosoftToken: Sendable {
     /// The permissions granted on this token.
     public let scopes: [String]
     public let account: MicrosoftAccount
+    /// The tenant this token was issued for, lowercased: MSAL’s tenant
+    /// profile, else the token’s `tid` claim. Unlike the account’s
+    /// `homeTenantID`, a guest account gets the tenant signed in to.
+    /// Compare tenants with this (`EntraTenant.isSame`), not as typed.
+    public let tenantID: String?
 
-    public init(accessToken: String, scopes: [String], account: MicrosoftAccount) {
+    public init(accessToken: String, scopes: [String], account: MicrosoftAccount, tenantID: String? = nil) {
         self.accessToken = accessToken
         self.scopes = scopes
         self.account = account
+        let given = tenantID?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        self.tenantID = (given?.isEmpty == false ? given : nil) ?? EntraToken.tenantID(ofAccessToken: accessToken)
     }
 }
 

@@ -281,7 +281,24 @@ public nonisolated struct Connection: Identifiable, Codable, Hashable, Sendable 
         return key(a) == key(b)
     }
 
-    static func isWebAddress(_ string: String) -> Bool {
+    /// A server’s origin, as Jamf Deployer, Profile2Blueprint, Serial
+    /// Number Reader and Checkpoint each worked it out: the address as
+    /// pasted (with or without `https://`, a path, `/api`, a query or
+    /// trailing slashes), reduced to `https://host[:port]`. Nil without a
+    /// host, and for `http://` (`addressProblem` says why).
+    public static func serverOrigin(_ address: String) -> URL? {
+        let normalized = normalizedServerAddress(address).trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let parsed = URLComponents(string: normalized), parsed.scheme?.lowercased() == "https",
+              let host = parsed.host, !host.isEmpty, parsed.user == nil else { return nil }
+        var origin = URLComponents()
+        origin.scheme = "https"
+        origin.host = host.lowercased()
+        origin.port = parsed.port
+        return origin.url
+    }
+
+    /// An `https://` address with a host.
+    public static func isWebAddress(_ string: String) -> Bool {
         guard let url = URL(string: string), url.scheme?.lowercased() == "https" else { return false }
         return !(url.host() ?? "").isEmpty
     }

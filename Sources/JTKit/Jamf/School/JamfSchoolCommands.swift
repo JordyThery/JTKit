@@ -20,8 +20,10 @@ extension JamfSchool {
         public var unmoved: [String] { notFound + failed }
     }
 
-    /// Jamf School takes at most twenty devices per move.
-    static let moveBatchSize = 20
+    /// Jamf School takes at most twenty devices per move; `move(udids:toLocation:)`
+    /// sends them in batches of this size. Public for an app that sends its
+    /// own batches, to say per batch what moved (Checkpoint).
+    public static let moveBatchSize = 20
 }
 
 extension JamfSchool.Client {

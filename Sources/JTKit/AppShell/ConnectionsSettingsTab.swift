@@ -387,6 +387,9 @@ public struct ConnectionsSettingsTab<Record: ConnectionRecord, AppSection: View>
     let importer: ConnectionImport<Record>?
     let delete: ((Record) async throws -> Void)?
     let deleteMessage: String?
+    let deleteMessages: (Record) -> String?
+    let deleteRefusal: (Record) -> String?
+    let deleteTypedName: (Record) -> Bool
     let didDelete: (Record) -> Void
     let test: ConnectionTest<Record>?
     let environments: ConnectionEnvironmentLoader<Record>?
@@ -398,6 +401,8 @@ public struct ConnectionsSettingsTab<Record: ConnectionRecord, AppSection: View>
     @State private var editorHasChanges = false
     @State private var pendingSelection: UUID??
     @State private var pendingDeletion: Record?
+    /// A deletion that asks for the connection’s name (`deleteTypedName`).
+    @State private var typedDeletion: Record?
     @State private var isDeleting = false
     @State private var listError: String?
     @State private var showingImporter = false
@@ -427,6 +432,13 @@ public struct ConnectionsSettingsTab<Record: ConnectionRecord, AppSection: View>
     ///     error is shown below the list.
     ///   - deleteMessage: the delete confirmation’s text, when the app’s
     ///     `delete` does more than remove the connection and its secrets.
+    ///   - deleteMessages: the confirmation’s text for one connection, e.g.
+    ///     when only some take more with them; nil uses `deleteMessage`.
+    ///   - deleteRefusal: why a connection can’t be deleted now, e.g. while
+    ///     it is in use; the − button is then disabled and the reason shown
+    ///     below the list. Nil allows it.
+    ///   - deleteTypedName: whether deleting a connection asks for its name
+    ///     to be typed, for a deletion that loses more than the connection.
     ///   - didDelete: called after a connection and its secrets were deleted,
     ///     e.g. to clear choices the app stored for it.
     ///   - test: tests the editor’s values; without it there is no Test Connection button.
@@ -450,6 +462,9 @@ public struct ConnectionsSettingsTab<Record: ConnectionRecord, AppSection: View>
         importer: ConnectionImport<Record>? = nil,
         delete: ((Record) async throws -> Void)? = nil,
         deleteMessage: String? = nil,
+        deleteMessages: @escaping (Record) -> String? = { _ in nil },
+        deleteRefusal: @escaping (Record) -> String? = { _ in nil },
+        deleteTypedName: @escaping (Record) -> Bool = { _ in false },
         didDelete: @escaping (Record) -> Void = { _ in },
         test: ConnectionTest<Record>? = nil,
         environments: ConnectionEnvironmentLoader<Record>? = nil,
@@ -471,6 +486,9 @@ public struct ConnectionsSettingsTab<Record: ConnectionRecord, AppSection: View>
         self.importer = importer
         self.delete = delete
         self.deleteMessage = deleteMessage
+        self.deleteMessages = deleteMessages
+        self.deleteRefusal = deleteRefusal
+        self.deleteTypedName = deleteTypedName
         self.didDelete = didDelete
         self.test = test
         self.environments = environments
@@ -480,8 +498,7 @@ public struct ConnectionsSettingsTab<Record: ConnectionRecord, AppSection: View>
     public var body: some View {
         VStack(spacing: 0) {
             if let problem = store.problem {
-                Label(problem.localizedDescription, systemImage: "exclamationmark.triangle.fill")
-                    .symbolRenderingMode(.multicolor)
+                WarningLabel(problem.localizedDescription)
                     .font(.callout)
                     .textSelection(.enabled)
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -528,7 +545,16 @@ public struct ConnectionsSettingsTab<Record: ConnectionRecord, AppSection: View>
             Button("Delete", role: .destructive) { deletePending() }
             Button("Cancel", role: .cancel) { pendingDeletion = nil }
         } message: {
-            Text(deleteMessage ?? "The connection and its Keychain secrets are removed.")
+            Text(pendingDeletion.map(confirmationText) ?? "")
+        }
+        .sheet(item: $typedDeletion) { record in
+            TypedNameDeletionSheet(name: record.connection.name, message: confirmationText(for: record)) {
+                typedDeletion = nil
+                pendingDeletion = record
+                deletePending()
+            } cancel: {
+                typedDeletion = nil
+            }
         }
         .tabItem { Label("Connections", systemImage: "network") }
         .settingsTabName(SettingsTabName.connections)
@@ -547,7 +573,7 @@ public struct ConnectionsSettingsTab<Record: ConnectionRecord, AppSection: View>
                 }
             }
             .onDeleteCommand {
-                if store.problem == nil { pendingDeletion = editingID.flatMap(store.record(id:)) }
+                if store.problem == nil && !isDeleting { askToDeleteSelection() }
             }
             if isDeleting {
                 HStack(spacing: 6) {
@@ -562,6 +588,15 @@ public struct ConnectionsSettingsTab<Record: ConnectionRecord, AppSection: View>
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .accessibilityElement(children: .combine)
             }
+            if let refusal = selectionRefusal {
+                Text(refusal)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 4)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
             if let listError {
                 Text(listError)
                     .font(.caption)
@@ -574,14 +609,15 @@ public struct ConnectionsSettingsTab<Record: ConnectionRecord, AppSection: View>
             HStack(spacing: 0) {
                 addButton
                 Button {
-                    pendingDeletion = editingID.flatMap(store.record(id:))
+                    askToDeleteSelection()
                 } label: {
                     Image(systemName: "minus")
                         .frame(width: 24, height: 20)
                 }
-                .help("Delete connection and its Keychain secrets")
+                .help(selectionRefusal ?? deleteHelp)
                 .accessibilityLabel("Delete Connection")
-                .disabled(editingID == nil || store.problem != nil || isDeleting)
+                .accessibilityHint(selectionRefusal ?? "")
+                .disabled(editingID == nil || store.problem != nil || isDeleting || selectionRefusal != nil)
                 Spacer()
             }
             .buttonStyle(.borderless)
@@ -695,9 +731,42 @@ public struct ConnectionsSettingsTab<Record: ConnectionRecord, AppSection: View>
         }
     }
 
+    /// Why the selected connection can’t be deleted now; nil when it can.
+    private var selectionRefusal: String? {
+        editingID.flatMap(store.record(id:)).flatMap(deleteRefusal)
+    }
+
+    /// The − button’s tooltip: what deleting removes, unless the app’s
+    /// confirmation says more goes with it.
+    private var deleteHelp: String {
+        let record = editingID.flatMap(store.record(id:))
+        let saysMore = deleteMessage != nil || record.flatMap(deleteMessages) != nil
+        return saysMore ? "Delete connection" : "Delete connection and its Keychain secrets"
+    }
+
+    private func confirmationText(for record: Record) -> String {
+        deleteMessages(record) ?? deleteMessage ?? "The connection and its Keychain secrets are removed."
+    }
+
+    /// The confirmation for the selected connection: the typed-name sheet
+    /// or the dialog. Nothing while it is refused.
+    private func askToDeleteSelection() {
+        guard let record = editingID.flatMap(store.record(id:)), deleteRefusal(record) == nil else { return }
+        if deleteTypedName(record) {
+            typedDeletion = record
+        } else {
+            pendingDeletion = record
+        }
+    }
+
     private func deletePending() {
         guard let record = pendingDeletion else { return }
         pendingDeletion = nil
+        // refused since it was asked (e.g. the connection came into use)
+        if let refusal = deleteRefusal(record) {
+            listError = refusal
+            return
+        }
         guard let delete else {
             do {
                 try store.delete(id: record.id)
@@ -780,6 +849,9 @@ extension ConnectionsSettingsTab where AppSection == EmptyView {
         importer: ConnectionImport<Record>? = nil,
         delete: ((Record) async throws -> Void)? = nil,
         deleteMessage: String? = nil,
+        deleteMessages: @escaping (Record) -> String? = { _ in nil },
+        deleteRefusal: @escaping (Record) -> String? = { _ in nil },
+        deleteTypedName: @escaping (Record) -> Bool = { _ in false },
         didDelete: @escaping (Record) -> Void = { _ in },
         test: ConnectionTest<Record>? = nil,
         environments: ConnectionEnvironmentLoader<Record>? = nil
@@ -789,9 +861,61 @@ extension ConnectionsSettingsTab where AppSection == EmptyView {
                   signInMethods: signInMethods, roles: roles, height: height,
                   footer: footer, readOnlyFields: readOnlyFields, protectServices: protectServices,
                   newRecord: newRecord, add: add, importer: importer, delete: delete, deleteMessage: deleteMessage,
+                  deleteMessages: deleteMessages, deleteRefusal: deleteRefusal, deleteTypedName: deleteTypedName,
                   didDelete: didDelete, test: test, environments: environments) { _ in
             EmptyView()
         }
+    }
+}
+
+// MARK: - Typed-name deletion
+
+/// Whether a typed name confirms deleting a connection: the name exactly,
+/// apart from spaces around it.
+nonisolated enum ConnectionDeletion {
+    static func confirms(typed: String, name: String) -> Bool {
+        let expected = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        return !expected.isEmpty && typed.trimmingCharacters(in: .whitespacesAndNewlines) == expected
+    }
+}
+
+/// Deleting a connection that takes more with it: Delete is enabled once
+/// the connection’s name is typed.
+private struct TypedNameDeletionSheet: View {
+    let name: String
+    let message: String
+    let delete: () -> Void
+    let cancel: () -> Void
+    @State private var typed = ""
+    @FocusState private var fieldIsFocused: Bool
+
+    private var confirmed: Bool { ConnectionDeletion.confirms(typed: typed, name: name) }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Delete “\(name)”?")
+                .font(.headline)
+            Text(message)
+                .fixedSize(horizontal: false, vertical: true)
+            // Return doesn’t delete: only a click on Delete does
+            Text("Type “\(name)” to confirm.")
+                .foregroundStyle(.secondary)
+            TextField("Connection name", text: $typed)
+                .textFieldStyle(.roundedBorder)
+                .autocorrectionDisabled()
+                .focused($fieldIsFocused)
+                .accessibilityHint("Type \(name) to enable Delete")
+                .onAppear { fieldIsFocused = true }
+            HStack {
+                Spacer()
+                Button("Cancel", role: .cancel, action: cancel)
+                    .keyboardShortcut(.cancelAction)
+                Button("Delete", role: .destructive, action: delete)
+                    .disabled(!confirmed)
+            }
+        }
+        .padding(20)
+        .frame(width: 400)
     }
 }
 

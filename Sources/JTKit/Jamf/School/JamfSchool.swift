@@ -39,6 +39,12 @@ public nonisolated enum JamfSchool {
         public var lastCheckIn: Date?
         /// The instance’s time zone, e.g. "Europe/Brussels" (single-device endpoint only).
         public var timeZone: String?
+        /// The last check-in exactly as Jamf School sent it, e.g.
+        /// "2026-10-31 14:05:09": the device list names no time zone, so an
+        /// app that knows the instance’s (`timeZone` of a single-device read)
+        /// reads it with `JamfSchool.date(_:timeZone:)` instead of `lastCheckIn`,
+        /// which takes the Mac’s.
+        public var lastCheckInText: String?
         // single-device endpoint only
         public var hasPasscode: Bool?
         public var passcodeCompliant: Bool?
@@ -51,8 +57,9 @@ public nonisolated enum JamfSchool {
                     isSupervised: Bool? = nil, inTrash: Bool? = nil, locationID: String? = nil, groups: [String] = [],
                     enrollType: String? = nil, depProfile: String? = nil, lastCheckIn: Date? = nil,
                     timeZone: String? = nil, hasPasscode: Bool? = nil, passcodeCompliant: Bool? = nil,
-                    isBootstrapStored: Bool? = nil) {
+                    isBootstrapStored: Bool? = nil, lastCheckInText: String? = nil) {
             self.udid = udid
+            self.lastCheckInText = lastCheckInText
             self.serialNumber = serialNumber
             self.name = name
             self.assetTag = assetTag
@@ -107,9 +114,11 @@ public nonisolated enum JamfSchool {
             depProfile = c.text("depProfile") ?? c.text("deviceDepProfile")
             if let checkIn = try? c.nestedContainer(keyedBy: AnyKey.self, forKey: "lastCheckin") {
                 timeZone = checkIn.text("timezone")
-                lastCheckIn = JamfSchool.date(checkIn.text("date"), timeZone: timeZone.flatMap(TimeZone.init(identifier:)))
+                lastCheckInText = checkIn.text("date")
+                lastCheckIn = JamfSchool.date(lastCheckInText, timeZone: timeZone.flatMap(TimeZone.init(identifier:)))
             } else {
-                lastCheckIn = JamfSchool.date(c.text("lastCheckin"), timeZone: nil)
+                lastCheckInText = c.text("lastCheckin")
+                lastCheckIn = JamfSchool.date(lastCheckInText, timeZone: nil)
             }
             hasPasscode = c.flag("hasPasscode")
             passcodeCompliant = c.flag("passcodeCompliant")

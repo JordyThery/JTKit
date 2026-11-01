@@ -226,3 +226,29 @@ struct UpdateCheckerTests {
         }
     }
 }
+
+extension UpdateCheckerTests {
+    @Test("GitHub’s latest is a tag that isn’t a version: the highest release that is one is offered")
+    func latestTagThatIsNoVersion() async throws {
+        MockURLProtocol.install { request in
+            if request.url.path().hasSuffix("/releases/latest") {
+                return .json(200, #"{"tag_name":"v.0.0.44","name":"Odd","html_url":"https://github.com/JordyThery/TestApp/releases/tag/v.0.0.44"}"#)
+            }
+            #expect(request.url.absoluteString == "https://api.github.com/repos/JordyThery/TestApp/releases?per_page=30")
+            return .json(200, """
+            [\(#"{"tag_name":"v.0.0.44","draft":false,"prerelease":false}"#),
+             \(#"{"tag_name":"v3.0-beta","prerelease":true}"#),
+             \(Self.releaseJSON),
+             \(#"{"tag_name":"v2.4"}"#)]
+            """)
+        }
+        let checker = makeChecker(defaults: try makeDefaults())
+        checker.checkManually()
+        try await waitUntil { checker.status != .checking }
+        guard case let .available(release) = checker.status else {
+            Issue.record("Expected .available, got \(checker.status)"); return
+        }
+        #expect(release.version == "2.5")
+        #expect(release.downloadURL?.lastPathComponent == "TestApp-2.5.zip")
+    }
+}

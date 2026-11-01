@@ -129,6 +129,21 @@ struct LiveLaunchBoundaryTests {
         (try? String(contentsOf: runFolder.appending(path: LiveLaunch.violationsFileName), encoding: .utf8)) ?? ""
     }
 
+    @Test func anAppsOwnFilesGoToTheRunsFolder() {
+        let (state, runFolder) = active()
+        LiveLaunch.$testState.withValue(state) {
+            #expect(LiveLaunch.appFilesFolder("Backups")?.path == runFolder.appending(path: "app-files/Backups").path)
+            #expect(LiveLaunch.appFilesFolder("../x")?.lastPathComponent == ".._x")
+        }
+        LiveLaunch.$testState.withValue(.refused("no lock")) {
+            let folder = LiveLaunch.appFilesFolder("Backups")
+            #expect(folder?.path.hasPrefix(FileManager.default.temporaryDirectory.path) == true)
+        }
+        LiveLaunch.$testState.withValue(.off) {
+            #expect(LiveLaunch.appFilesFolder("Backups") == nil)
+        }
+    }
+
     @Test func aRealKeychainItemIsRefusedAndWrittenDown() {
         let (state, runFolder) = active()
         let store = KeychainSecretStore(service: "JTKit.LiveLaunchTests.\(UUID().uuidString)")

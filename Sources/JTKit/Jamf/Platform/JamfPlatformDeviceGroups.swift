@@ -107,3 +107,53 @@ extension JamfPlatform.Client {
                                   item: JamfPlatform.DeviceGroup.init(json:))
     }
 }
+
+extension JamfPlatform {
+    /// A computer or mobile device group as Jamf Pro’s `/v2/groups` lists
+    /// it, with the platform ID Blueprints and Benchmarks scope to
+    /// (`groupPlatformId`) next to the Jamf Pro ID.
+    public struct PlatformGroup: Identifiable, Hashable, Sendable {
+        /// The platform ID (`groupPlatformId`).
+        public var id: String
+        public var name: String
+        /// The group’s ID in Jamf Pro (`groupJamfProId`).
+        public var jamfProID: String?
+        public var deviceType: DeviceGroup.DeviceType
+        /// Nil when the server leaves it out.
+        public var isSmart: Bool?
+        public var memberCount: Int?
+
+        public init(id: String, name: String, jamfProID: String? = nil, deviceType: DeviceGroup.DeviceType,
+                    isSmart: Bool? = nil, memberCount: Int? = nil) {
+            self.id = id
+            self.name = name
+            self.jamfProID = jamfProID
+            self.deviceType = deviceType
+            self.isSmart = isSmart
+            self.memberCount = memberCount
+        }
+
+        /// Only `groupPlatformId` is required.
+        public init?(json: LosslessJSON) {
+            guard let id = json["groupPlatformId"]?.stringValue, !id.isEmpty else { return nil }
+            self.init(id: id,
+                      name: json["groupName"]?.stringValue ?? "",
+                      jamfProID: json["groupJamfProId"]?.stringValue,
+                      deviceType: DeviceGroup.DeviceType(rawValue: json["groupType"]?.stringValue ?? ""),
+                      isSmart: json["smart"]?.boolValue,
+                      memberCount: json["membershipCount"]?.numberValue?.intValue)
+        }
+    }
+}
+
+extension JamfPlatform.Client {
+    public static let platformGroupsPath = "pro/v2/groups"
+
+    /// Every computer and mobile device group with its platform ID
+    /// (`pro/v2/groups`), through the Platform API or on a Jamf Pro server
+    /// reached directly, following all pages.
+    public func platformGroups(pageSize: Int = 200, maxPages: Int = 1_000) async throws -> [JamfPlatform.PlatformGroup] {
+        try await allPages(Self.platformGroupsPath, pageSize: pageSize, maxPages: maxPages,
+                           item: JamfPlatform.PlatformGroup.init(json:))
+    }
+}

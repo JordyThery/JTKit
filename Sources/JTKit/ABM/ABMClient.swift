@@ -88,6 +88,78 @@ extension ABM {
             return device
         }
 
+        /// Most serials one filtered request asks for (Apple documents no
+        /// maximum; this keeps the address short).
+        public static let serialFilterBatchSize = 50
+
+        /// Several devices at once, by serial number: Apple’s
+        /// `filter[serialNumber]` on `v1/orgDevices`, in batches of
+        /// `serialFilterBatchSize`, each batch’s pages followed by their
+        /// `links.next` as Apple gives them. Keys are the serials uppercased;
+        /// a serial that isn’t in the organization (or has other characters
+        /// than letters and digits) has no entry.
+        ///
+        /// Where Apple refuses the filter (400), or a page holds a device that
+        /// wasn’t asked for (the filter wasn’t applied), the batch is read one
+        /// serial at a time with `device(serial:)` instead, as before.
+        public func devices(serials: [String]) async throws -> [String: OrgDevice] {
+            var wanted = [String]()
+            var seen = Set<String>()
+            for serial in serials {
+                guard let checked = Self.lookupSerial(serial)?.uppercased(), seen.insert(checked).inserted else { continue }
+                wanted.append(checked)
+            }
+            var found = [String: OrgDevice]()
+            var start = 0
+            var filterWorks = true
+            while start < wanted.count {
+                let batch = Array(wanted[start..<min(start + Self.serialFilterBatchSize, wanted.count)])
+                start += batch.count
+                if filterWorks, let devices = try await filteredDevices(batch) {
+                    found.merge(devices) { first, _ in first }
+                    continue
+                }
+                // the filter isn’t supported here: the rest one serial at a time
+                filterWorks = false
+                for serial in batch {
+                    try Task.checkCancellation()
+                    if let device = try await device(serial: serial) { found[serial] = device }
+                }
+            }
+            return found
+        }
+
+        /// One batch through the filter; nil when Apple refuses the filter
+        /// (400) or answers with a device that wasn’t asked for.
+        private func filteredDevices(_ batch: [String]) async throws -> [String: OrgDevice]? {
+            struct FilterIgnored: Error {}
+            let asked = Set(batch)
+            var devices = [String: OrgDevice]()
+            do {
+                try await list("v1/orgDevices", query: [
+                    URLQueryItem(name: "filter[serialNumber]", value: batch.joined(separator: ",")),
+                    URLQueryItem(name: "limit", value: "1000"),
+                    URLQueryItem(name: "fields[orgDevices]", value: OrgDevice.fields.joined(separator: ",")),
+                ], recordsBodies: true, eachPage: { items in
+                    for item in items {
+                        let device = try self.decode(Attributes<OrgDevice>.self, from: item).attributes
+                        let serial = device.serialNumber.uppercased()
+                        guard asked.contains(serial) else { throw FilterIgnored() }
+                        devices[serial] = device
+                    }
+                })
+            } catch is FilterIgnored {
+                await recorder.note("GET", "v1/orgDevices", note: "The serial number filter wasn’t applied; reading the devices one at a time.",
+                                    isWarning: true)
+                return nil
+            } catch let error as ABM.APIError where error.status == 400 {
+                await recorder.note("GET", "v1/orgDevices", note: "Apple doesn’t accept the serial number filter here; reading the devices one at a time.",
+                                    isWarning: true)
+                return nil
+            }
+            return devices
+        }
+
         /// A device’s AppleCare coverage; empty when it isn’t in the organization.
         public func appleCareCoverage(serial: String) async throws -> [AppleCareCoverage] {
             guard let serial = Self.lookupSerial(serial) else { return [] }
@@ -343,8 +415,9 @@ extension ABM {
             return items
         }
 
-        private func list(_ path: String, query: [URLQueryItem], eachPage: ([Data]) throws -> Void) async throws {
-            var request = HTTPRequest(path: path, query: query)
+        private func list(_ path: String, query: [URLQueryItem], recordsBodies: Bool = false,
+                          eachPage: ([Data]) throws -> Void) async throws {
+            var request = HTTPRequest(path: path, query: query, recordsBodies: recordsBodies)
             var pages = 0
             while true {
                 try Task.checkCancellation()
@@ -360,6 +433,7 @@ extension ABM {
                 try eachPage(try elements.map { try JSONSerialization.data(withJSONObject: $0, options: [.fragmentsAllowed]) })
                 guard let next = (page["links"] as? [String: Any])?["next"] as? String, !next.isEmpty else { return }
                 request = try nextPage(next)
+                request.recordsBodies = recordsBodies
             }
         }
 

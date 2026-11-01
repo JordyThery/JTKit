@@ -5,7 +5,7 @@ import SwiftUI
 ///
 /// ```swift
 /// ConnectionPicker(store: connections, selection: selection,
-///                  label: demo.isOn ? .demo : nil, help: demo.isOn ? DemoMode.helpText : nil) {
+///                  label: demo.isOn ? .demo : nil, help: demo.isOn ? demo.help : nil) {
 ///     DemoModeToggle(demo: demo)
 /// }
 /// ```

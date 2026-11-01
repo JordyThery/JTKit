@@ -900,3 +900,96 @@ struct ABMActivityTests {
         #expect(try await rig.client.watch(activityID: nil) == .notFollowed)
     }
 }
+
+// MARK: - Several serials at once (1.1.0, C17)
+
+@Suite("Apple: several serials through filter[serialNumber]")
+@MainActor
+struct ABMSerialFilterTests {
+    @Test("One filtered request per batch; pages follow links.next as given; unknown serials have no entry")
+    func filtered() async throws {
+        let rig = AppleRig(Apple.server { request in
+            guard request.path == "/v1/orgDevices" else { return nil }
+            if request.queryValue("cursor") == "2" {
+                return .json(200, #"{"data":[{"type":"orgDevices","id":"C02B","attributes":\#(Apple.device("C02B"))}],"links":{}}"#)
+            }
+            #expect(request.queryValue("filter[serialNumber]") == "C02A,C02B,C02C")
+            #expect(request.queryValue("limit") == "1000")
+            return .json(200, #"""
+            {"data":[{"type":"orgDevices","id":"C02A","attributes":\#(Apple.device("C02A"))}],
+             "links":{"next":"https://api-business.apple.com/v1/orgDevices?filter%5BserialNumber%5D=C02A,C02B,C02C&limit=1000&cursor=2"}}
+            """#)
+        })
+        let devices = try await rig.client.devices(serials: ["c02a", "C02B", "C02C", "C02A", "bad serial!"])
+        #expect(Set(devices.keys) == ["C02A", "C02B"])
+        #expect(devices["C02A"]?.deviceModel == "MacBook Air")
+        #expect(rig.api.count == 2)
+        #expect(rig.api[1].url.absoluteString.contains("filter%5BserialNumber%5D=C02A,C02B,C02C"), "the next link as given")
+    }
+
+    @Test("Batches of fifty")
+    func batches() async throws {
+        let rig = AppleRig(Apple.server { request in
+            request.path == "/v1/orgDevices" ? .json(200, #"{"data":[],"links":{}}"#) : nil
+        })
+        let serials = (1...120).map { String(format: "SN%04d", $0) }
+        #expect(try await rig.client.devices(serials: serials).isEmpty)
+        let sizes = rig.api.map { ($0.queryValue("filter[serialNumber]") ?? "").split(separator: ",").count }
+        #expect(sizes == [50, 50, 20])
+    }
+
+    @Test("A 400 for the filter: one serial at a time, as before, for this batch and the rest")
+    func unsupported() async throws {
+        let rig = AppleRig(Apple.server { request in
+            switch request.path {
+            case "/v1/orgDevices": return Apple.error(400, code: "PARAMETER_ERROR.INVALID", title: "Invalid filter")
+            case "/v1/orgDevices/C02A": return .json(200, #"{"data":{"type":"orgDevices","id":"C02A","attributes":\#(Apple.device("C02A"))}}"#)
+            default: return nil   // 404: not in the organization
+            }
+        })
+        let serials = ["C02A"] + (1...55).map { String(format: "SN%04d", $0) }
+        let devices = try await rig.client.devices(serials: serials)
+        #expect(Array(devices.keys) == ["C02A"])
+        #expect(rig.api.filter { $0.path == "/v1/orgDevices" }.count == 1, "the filter is tried once")
+        #expect(rig.api.filter { $0.path.hasPrefix("/v1/orgDevices/") }.count == 56)
+        #expect(rig.log.entries.contains { $0.note?.contains("serial number filter") == true })
+    }
+
+    @Test("A filter that isn’t applied (a device not asked for): one serial at a time")
+    func ignored() async throws {
+        let rig = AppleRig(Apple.server { request in
+            switch request.path {
+            case "/v1/orgDevices":
+                return .json(200, #"{"data":[{"type":"orgDevices","id":"OTHER1","attributes":\#(Apple.device("OTHER1"))}],"links":{"next":"https://api-business.apple.com/v1/orgDevices?cursor=2"}}"#)
+            case "/v1/orgDevices/C02A": return .json(200, #"{"data":{"type":"orgDevices","id":"C02A","attributes":\#(Apple.device("C02A"))}}"#)
+            default: return nil
+            }
+        })
+        let devices = try await rig.client.devices(serials: ["C02A"])
+        #expect(Array(devices.keys) == ["C02A"])
+        #expect(rig.api.filter { $0.path == "/v1/orgDevices" }.count == 1, "the whole organization isn’t paged")
+    }
+
+    @Test("Other errors are thrown, not hidden by the fallback")
+    func otherErrors() async throws {
+        let rig = AppleRig(Apple.server { request in
+            request.path == "/v1/orgDevices" ? Apple.error(403, code: "FORBIDDEN", title: "Forbidden") : nil
+        })
+        #expect(await appleError { _ = try await rig.client.devices(serials: ["C02A"]) }?.status == 403)
+    }
+
+    @Test("The demo organization answers the filter, over pages")
+    func demo() async throws {
+        let key = P256.Signing.PrivateKey()
+        let business = DemoAppleBusinessServer(organization: .contoso, pageSize: 2)
+        let network = DemoNetwork(servers: [
+            DemoAppleSignInServer.host: DemoAppleSignInServer(keys: [Connection.demoAppleBusiness.clientID: key.publicKey]),
+            ABM.Service.business.host: business,
+        ])
+        let client = try ABM.Client(connection: .demoAppleBusiness, privateKey: { key.pemRepresentation },
+                                    session: network.session, log: nil)
+        let known = try await client.organizationSnapshot().devices.keys.sorted().prefix(3)
+        let devices = try await client.devices(serials: Array(known) + ["NOTINORG1"])
+        #expect(Set(devices.keys) == Set(known.map { $0.uppercased() }))
+    }
+}

@@ -11,12 +11,27 @@ public struct StatusBadge: View {
         case tinted
         /// Quiet pill for neutral metadata.
         case neutral
-        /// Yellow pill for states that need attention.
+        /// Yellow pill for a caution about the app itself, e.g. a setting
+        /// that limits it. For a record’s state that needs a step, use `attention`.
         case warning
+        /// A pill in a state’s color, e.g. Deployed in green: the text in
+        /// the primary color (readable at caption size in every appearance)
+        /// on a wash of the color, with a hairline of it.
+        case colored(Color)
+
+        /// Done, passed, deployed.
+        public static let success = Style.colored(.green)
+        /// Needs another step, e.g. out of date.
+        public static let attention = Style.colored(.orange)
+        /// Failed or refused.
+        public static let failure = Style.colored(.red)
+        /// Informational, e.g. a state the app doesn’t know.
+        public static let info = Style.colored(.blue)
     }
 
     private let text: String
     private let style: Style
+    @Environment(\.colorSchemeContrast) private var contrast
 
     public init(_ text: String, style: Style = .tinted) {
         self.text = text
@@ -26,9 +41,15 @@ public struct StatusBadge: View {
     public var body: some View {
         Text(text)
             .font(.caption)
+            .lineLimit(1)
             .padding(.horizontal, 6)
             .padding(.vertical, 2)
             .background(background, in: Capsule())
+            .overlay {
+                if case .colored(let color) = style {
+                    Capsule().strokeBorder(color.opacity(contrast == .increased ? 1 : 0.6), lineWidth: 1)
+                }
+            }
     }
 
     private var background: AnyShapeStyle {
@@ -36,6 +57,45 @@ public struct StatusBadge: View {
         case .tinted: AnyShapeStyle(.tint.opacity(0.15))
         case .neutral: AnyShapeStyle(.quaternary)
         case .warning: AnyShapeStyle(.yellow.opacity(0.25))
+        case .colored(let color): AnyShapeStyle(color.opacity(contrast == .increased ? 0.3 : 0.18))
+        }
+    }
+}
+
+extension JamfPlatform.BlueprintState {
+    /// The badge style the Blueprint apps show a state with: Deployed
+    /// green, Out of Date orange, Not Deployed quiet, another state blue.
+    public var badgeStyle: StatusBadge.Style {
+        switch self {
+        case .deployed: .success
+        case .outOfDate: .attention
+        case .notDeployed: .neutral
+        case .other: .info
+        }
+    }
+}
+
+/// A warning in a sentence: the multicolor triangle (yellow with a black
+/// mark, the system’s own warning look) before the text, which carries the
+/// meaning on its own.
+public struct WarningLabel: View {
+    private let text: Text
+
+    public init(_ text: String) {
+        self.text = Text(text)
+    }
+
+    public init(_ text: Text) {
+        self.text = text
+    }
+
+    public var body: some View {
+        Label {
+            text
+        } icon: {
+            Image(systemName: "exclamationmark.triangle.fill")
+                .symbolRenderingMode(.multicolor)
+                .accessibilityHidden(true)
         }
     }
 }

@@ -78,7 +78,7 @@ final class MSALBackend: SignInBackend {
     private nonisolated static func outcome(result: MSALResult?, error: (any Error)?) -> Result<MicrosoftToken, any Error> {
         if let result {
             return .success(MicrosoftToken(accessToken: result.accessToken, scopes: result.scopes,
-                                           account: account(result.account)))
+                                           account: account(result.account), tenantID: result.tenantProfile.tenantId))
         }
         return .failure(error ?? MicrosoftSignInError.noToken)
     }

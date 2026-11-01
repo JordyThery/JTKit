@@ -190,3 +190,21 @@ extension JamfPlatform.Client {
         }
     }
 }
+
+extension JamfPlatform.Client {
+    /// Test Connection as the Blueprint apps each wrote it: signs in, runs
+    /// the read checks, and throws `PermissionProblem` when one isn’t
+    /// allowed. Returns what the settings show: “Connected”, or
+    /// “Connected · summary”.
+    /// - Parameter summary: a short note after a passed check, e.g. the
+    ///   number of Blueprints read; nil for none.
+    public func testConnection(
+        checks: [JamfPlatform.PermissionCheck] = [.blueprintsRead],
+        summary: (@Sendable () async throws -> String?)? = nil
+    ) async throws -> String {
+        try await signIn()
+        if let problem = JamfPlatform.PermissionProblem(await checkPermissions(checks)) { throw problem }
+        guard let note = try await summary?(), !note.isEmpty else { return "Connected" }
+        return "Connected · \(note)"
+    }
+}

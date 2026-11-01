@@ -32,8 +32,13 @@ public final class DemoMode {
 
     /// The switch’s name, the same in every app.
     nonisolated public static let title = "Demo Mode"
-    /// The connection picker’s tooltip while demo mode is on.
+    /// The connection picker’s tooltip while demo mode is on, unless the app
+    /// gives its own (`help`).
     nonisolated public static let helpText = "Sample data. Nothing is sent to a tenant."
+
+    /// This app’s tooltip for the connection picker and the Connection menu
+    /// while demo mode is on, e.g. naming what its demo shows; `helpText` by default.
+    @ObservationIgnored public var help: String
     /// Added to every window’s title while demo mode is on.
     nonisolated public static let titleSuffix = " — Demo"
 
@@ -118,9 +123,12 @@ public final class DemoMode {
     /// - Parameters:
     ///   - key: where the choice is saved, e.g. `"demoMode"`.
     ///   - arguments: the launch arguments; the running app’s by default.
+    ///   - help: the picker’s tooltip in demo mode; `helpText` by default.
     public init(key: String, defaults: UserDefaults = .standard,
-                arguments: [String] = ProcessInfo.processInfo.arguments) {
+                arguments: [String] = ProcessInfo.processInfo.arguments,
+                help: String = DemoMode.helpText) {
         self.key = key
+        self.help = help.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? Self.helpText : help
         self.defaults = defaults
         let launchChoice = Self.bool(after: Self.launchArgument, in: arguments)
         isSandbox = Self.isSandbox(arguments: arguments)
@@ -358,6 +366,11 @@ nonisolated final class DemoServices: Sendable {
             ABM.Service.school.host: appleSchool,
         ]
         for host in DemoIntuneServer.hosts { servers[host] = intune }
+        if scenario == .rateLimited {
+            for (host, server) in servers where host != DemoAppleSignInServer.host {
+                servers[host] = DemoRateLimitedServer(server)
+            }
+        }
         network = DemoNetwork(servers: servers)
     }
 }
