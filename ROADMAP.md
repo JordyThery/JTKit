@@ -675,6 +675,7 @@ Before any app is released or updated, in this order:
 4. **Jordy’s check by hand**, then tag and release.
 5. **Website**: in the same release, the app's card on apps.html and its own page, if it has one, are checked and changed through a pull request on the jordythery.be repo (rules in its CLAUDE.md). Jordy merges, which publishes the site.
 Until step 11 exists, 1 means build, unit tests and the live checks Jordy asks for.
+Exception (decided by Jordy on 2026-11-01): a patch release that only fixes regressions found in an app's regression review goes through 1 (release check) and 4 (Jordy's check by hand); 2 (apple-design review) and 3 (independent code review) are skipped.
 
 ### After 1.0
 - **Release gate per app:** every app goes through the "Release gate for every app" above before each release.
