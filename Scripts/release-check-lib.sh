@@ -61,6 +61,16 @@
 # (a live step fails after creating objects), interrupt-live (stage 4 is killed
 # without cleanup once objects exist; the next run must find and remove them).
 # Apps may add their own cases (APP_FAULTS).
+# --only <test> (JTKit 1.3.0): a partial run while fixing one test. It
+# reuses the last build of the same source (rc_build_key: the app’s commit
+# and uncommitted changes, and with --local-jtkit JTKit’s; else it builds),
+# skips the sign-in step, the unit tests and the demo UI tests, and runs only
+# the named test: a LIVE_TESTS entry (its full selection or its last part,
+# e.g. "tenantA()") as a live step, with the same rules, gateway, ledger and
+# cleanup; the sign-in test as the sign-in; anything else (a smoke test’s
+# name, or a Target/Class/test selection) as a plain test. Its report says
+# "Partial run, not a release check" and never just "passed": the release
+# gate still needs one full run.
 #
 # A check that can’t run (a Python block or a command that fails, an
 # unreadable file) fails the run and is named in the report; only a
@@ -219,6 +229,68 @@ for i in sorted(set(items)): print("keychain " + i)
         [[ -n "$names" ]] && print -r -- "$names" >> "$out.names"
     done
     shasum -a 256 < "$out.names" | cut -c1-16 > "$out" || rc_check_failed "fingerprint: hashing $out.names"
+}
+
+# MARK: Reusing a build (--only)
+
+# What a build was made from: the app’s commit and a hash of its uncommitted
+# changes, and with --local-jtkit the same for JTKit. A partial run reuses
+# the build only when this is unchanged. Fails outside a git work tree.
+rc_build_key() {
+    local repo key="local=$RC_LOCAL" repos=("${${PROJECT:-.}:A:h}")
+    (( RC_LOCAL )) && repos+=("${RC_LIB_DIR:A:h}")
+    for repo in "${repos[@]}"; do
+        local commit changes
+        commit="$(git -C "$repo" rev-parse HEAD 2>/dev/null)" || return 1
+        changes="$({ git -C "$repo" status --porcelain=v1 -uall && git -C "$repo" diff HEAD \
+                     && git -C "$repo" ls-files --others --exclude-standard -z | (cd "$repo" && xargs -0 shasum -a 256); } \
+                   | shasum -a 256 | cut -c1-16)" || return 1
+        key+=" ${repo:t}=$commit+$changes"
+    done
+    print -r -- "$key"
+}
+
+RC_BUILD_MARK_NAME="release-check-build.key"
+
+# Whether the last build in RC_DERIVED was made from this source and its
+# test products are still there.
+rc_build_reusable() {
+    local mark="$RC_DERIVED/$RC_BUILD_MARK_NAME" key
+    [[ -f "$mark" ]] || return 1
+    key="$(rc_build_key)" || return 1
+    [[ "$(cat "$mark")" == "$key" ]] || return 1
+    local runs=("$RC_DERIVED"/Build/Products/*.xctestrun(N))
+    (( ${#runs} ))
+}
+
+# The test --only names: sets RC_ONLY_KIND (live, signin or plain) and
+# RC_ONLY_SELECTION, or prints why not and fails.
+rc_only_resolve() {
+    local name="$1" test matches=()
+    for test in "${LIVE_TESTS[@]}"; do
+        [[ "$test" == "$name" || "$test" == */"$name" ]] && matches+=("$test")
+    done
+    if (( ${#matches} > 1 )); then
+        print -r -- "--only $name matches several live steps (${(j:, :)matches}); name one in full"; return 1
+    elif (( ${#matches} == 1 )); then
+        RC_ONLY_KIND=live RC_ONLY_SELECTION="${matches[1]}"; return 0
+    fi
+    if [[ -n "${CLEANUP_TEST:-}" && ( "$name" == "$CLEANUP_TEST" || "$CLEANUP_TEST" == */"$name" ) ]]; then
+        print -r -- "--only can’t name the cleanup: it runs by itself after a live step"; return 1
+    fi
+    if [[ -n "${SIGNIN_TEST:-}" && ( "$name" == "$SIGNIN_TEST" || "$SIGNIN_TEST" == */"$name" ) ]]; then
+        RC_ONLY_KIND=signin RC_ONLY_SELECTION="$SIGNIN_TEST"; return 0
+    fi
+    if [[ "$name" == */* ]]; then
+        RC_ONLY_KIND=plain RC_ONLY_SELECTION="$name"; return 0
+    fi
+    local smoke=()
+    [[ -f "${SMOKE_FILE:-}" ]] && smoke=($(rc_tests_in "$SMOKE_FILE"))
+    if (( ${smoke[(Ie)$name]} )); then
+        RC_ONLY_KIND=plain RC_ONLY_SELECTION="$UI_TESTS/$SMOKE_CLASS/$name"; return 0
+    fi
+    print -r -- "--only $name: no such test. Name a live step (${(j:, :)LIVE_TESTS}), a smoke test, or a Target/Class/test selection"
+    return 1
 }
 
 # MARK: Running tests
@@ -820,9 +892,11 @@ print("; ".join("%s “%s” (%s)" % (c.get("resource", ""), c.get("name", ""), 
     if [[ -n "$RC_FAULT" && "$result" == "passed" ]]; then
         result="FAILED: the injected fault ($RC_FAULT) didn’t stop the check"
     fi
+    # A partial run never just "passes": it isn’t a release check.
+    [[ -n "${RC_ONLY:-}" && "$result" == passed ]] && result="passed (partial run, not a release check)"
     RC_LIVE_IN_CONTAINER="${TEST_HOST_CONTAINER:-}" RC_ALLOWLIST_COPY="${RC_ALLOWLIST_COPY:-}" \
     RC_READ_ONLY_ROLES="${(j:, :)READ_ONLY_ROLES}" RC_HOST_KEYCHAIN="${RC_HOST_KEYCHAIN:-}" \
-    RC_CHECK_ERRORS_TEXT="${(j:|:)RC_CHECK_ERRORS}" RC_REPORT_ALLOWLIST="${RC_ALLOWLIST:-}" \
+    RC_CHECK_ERRORS_TEXT="${(j:|:)RC_CHECK_ERRORS}" RC_REPORT_ALLOWLIST="${RC_ALLOWLIST:-}" RC_REPORT_ONLY="${RC_ONLY:-}" \
     "$RC_PY" - "$RC_RUN" "$APP_NAME" "$result" "$RC_KIND" "$RC_JTKIT" "${RC_CLEANUP_STATUS:-not needed}" \
         "${(j:|:)RC_STAGE_NAMES}" "${(j:|:)RC_STAGE_STATUS}" <<'EOF'
 import json, os, sys
@@ -842,7 +916,13 @@ ledger = load("live/ledger.json", [])
 refusals = lines_of("live/refusals.jsonl")
 before = open(os.path.join(run, "fingerprint.before")).read().strip() if os.path.exists(os.path.join(run, "fingerprint.before")) else "?"
 after = open(os.path.join(run, "fingerprint.after")).read().strip() if os.path.exists(os.path.join(run, "fingerprint.after")) else "?"
-lines = [f"# Release check: {app}", "", f"- Result: **{status}**", f"- Kind: {kind}", f"- JTKit: {jtkit}", ""]
+only = os.environ.get("RC_REPORT_ONLY")
+if only:
+    lines = [f"# Partial run, not a release check: {app}", "",
+             f"- **Partial run, not a release check** (--only {only}): only this test ran. The release gate needs one full run.",
+             f"- Result: **{status}**", f"- Kind: {kind}", f"- JTKit: {jtkit}", ""]
+else:
+    lines = [f"# Release check: {app}", "", f"- Result: **{status}**", f"- Kind: {kind}", f"- JTKit: {jtkit}", ""]
 lines += ["## Stages", "", "| Stage | Status |", "|---|---|"]
 for n, s in zip(names.split("|") if names else [], statuses.split("|") if statuses else []):
     lines.append(f"| {n} | {s} |")
@@ -942,7 +1022,7 @@ EOF
 # MARK: Main
 
 release_check_main() {
-    RC_LOCAL=0 RC_ALL_TENANTS=0 RC_PRODUCTION=0 RC_STOP_BEFORE_LIVE=0 RC_FAULT=""
+    RC_LOCAL=0 RC_ALL_TENANTS=0 RC_PRODUCTION=0 RC_STOP_BEFORE_LIVE=0 RC_FAULT="" RC_ONLY="" RC_ONLY_KIND="" RC_ONLY_SELECTION=""
     # A fault is only ever on when --fault names it on this command line.
     unset JTKIT_LIVE_FAULT TEST_RUNNER_JTKIT_LIVE_FAULT
     while (( $# )); do
@@ -951,6 +1031,10 @@ release_check_main() {
             --tenants) RC_ALL_TENANTS=1 ;;
             --include-production) RC_PRODUCTION=1 ;;
             --stop-before-live) RC_STOP_BEFORE_LIVE=1 ;;
+            --only)
+                shift
+                [[ -n "${1:-}" ]] || { print -u2 "--only needs a test name"; return 2 }
+                RC_ONLY="$1" ;;
             --fault)
                 shift
                 if [[ "${1:-}" == (break-build|fail-live-step|interrupt-live) ]] || (( ${APP_FAULTS[(Ie)${1:-}]} )); then
@@ -962,6 +1046,11 @@ release_check_main() {
         esac
         shift
     done
+    if [[ -n "$RC_ONLY" ]]; then
+        [[ -z "$RC_FAULT" ]] || { print -u2 "--only and --fault don’t go together"; return 2 }
+        (( ! RC_STOP_BEFORE_LIVE )) || { print -u2 "--only and --stop-before-live don’t go together"; return 2 }
+        rc_only_resolve "$RC_ONLY" >&2 || return 2
+    fi
     RC_LIB_DIR="${${(%):-%x}:A:h}"
     RC_PREFIX="$(print "JTKTEST $APP_CODE $(date +%m%d-%H%M)")"
     RC_RUN="$RC_BASE/runs/$APP_CODE-$(date +%Y%m%d-%H%M%S)"
@@ -989,6 +1078,7 @@ release_check_main() {
         RC_JTKIT="$(rc_jtkit_version)"
     fi
     [[ -n "$RC_FAULT" ]] && RC_KIND="FAULT TEST (--fault $RC_FAULT), not a release check; $RC_KIND"
+    [[ -n "$RC_ONLY" ]] && RC_KIND="PARTIAL RUN (--only $RC_ONLY_SELECTION), not a release check; $RC_KIND"
     rc_log "Release check for $APP_NAME, $RC_KIND"
     rc_log "Run folder: $RC_RUN"
     rc_xcodebuild_base
@@ -1020,14 +1110,27 @@ release_check_main() {
     fi
     rc_live_setup
     rc_fingerprint "$RC_RUN/fingerprint.before"
-    rc_log "Building for testing ($SCHEME)"
-    local build_settings=()
-    # The test target holds `#if JTKIT_FAULT_BREAK_BUILD #error`; only this fault sets it.
-    [[ "$RC_FAULT" == break-build ]] && build_settings=('SWIFT_ACTIVE_COMPILATION_CONDITIONS=$(inherited) JTKIT_FAULT_BREAK_BUILD')
-    if ! "${RC_XB[@]}" build-for-testing "${build_settings[@]}" > "$RC_RUN/logs/build.log" 2>&1; then
-        rc_stage "1 build" "FAILED"
-        grep -E "error:" "$RC_RUN/logs/build.log" | head -20 | tee -a "$RC_RUN/run.log"
-        rc_fail "The build failed (logs/build.log)"
+    local reused=0
+    if [[ -n "$RC_ONLY" ]] && rc_build_reusable; then
+        reused=1
+        rc_log "Reusing the last build of this source (partial run)"
+    else
+        rc_log "Building for testing ($SCHEME)"
+        local build_settings=() build_key=""
+        # The test target holds `#if JTKIT_FAULT_BREAK_BUILD #error`; only this fault sets it.
+        [[ "$RC_FAULT" == break-build ]] && build_settings=('SWIFT_ACTIVE_COMPILATION_CONDITIONS=$(inherited) JTKIT_FAULT_BREAK_BUILD')
+        # The mark goes first and the source is read before the build: a
+        # failed or faulted build, or a source changed meanwhile, is never reused.
+        rm -f "$RC_DERIVED/$RC_BUILD_MARK_NAME"
+        [[ -z "$RC_FAULT" ]] && build_key="$(rc_build_key)"
+        if ! "${RC_XB[@]}" build-for-testing "${build_settings[@]}" > "$RC_RUN/logs/build.log" 2>&1; then
+            rc_stage "1 build" "FAILED"
+            grep -E "error:" "$RC_RUN/logs/build.log" | head -20 | tee -a "$RC_RUN/run.log"
+            rc_fail "The build failed (logs/build.log)"
+        fi
+        if [[ -n "$build_key" && "$(rc_build_key)" == "$build_key" ]]; then
+            print -r -- "$build_key" > "$RC_DERIVED/$RC_BUILD_MARK_NAME"
+        fi
     fi
     RC_BUILT=1
     if [[ -n "${HOST_KEYCHAIN_TEST:-}" ]]; then
@@ -1039,6 +1142,10 @@ release_check_main() {
     fi
     # the gateway is built now, before anything is created on a tenant
     rc_gateway_build || { rc_stage "1 build and sign in" "FAILED"; rc_fail "The live gateway didn’t build (logs/gateway-build.log)"; }
+    if [[ -n "$RC_ONLY" ]]; then
+        rc_only_run $reused
+        return 0
+    fi
     rc_read_credentials
     rc_live_environment 0
     rc_gateway_start --secrets-only || { rc_stage "1 build and sign in" "FAILED"; rc_fail "The live gateway didn’t start (logs/gateway.log)"; }
@@ -1109,6 +1216,57 @@ release_check_main() {
     done
     rc_stage "4 live checks" "passed"
     return 0
+}
+
+# --only: stage 1 has built (or reused the build); runs the one test as its
+# own stage would, then the exit trap cleans up and reports as for a full run.
+rc_only_run() {
+    local built="built"
+    (( $1 )) && built="last build of this source reused"
+    rc_stage "1 build" "passed ($built; sign-in skipped, partial run)"
+    rc_stage "2 unit tests" "skipped (partial run)"
+    rc_stage "3 UI smoke tests" "skipped (partial run)"
+    local test="$RC_ONLY_SELECTION"
+    case "$RC_ONLY_KIND" in
+        live)
+            rc_read_credentials
+            RC_LIVE_STARTED=1
+            rc_live_environment 1
+            rc_log "  live: $test"
+            local mode=(--secrets-only)
+            [[ -n "$UI_TESTS" && "$test" == "$UI_TESTS/"* ]] && mode=()
+            if ! rc_gateway_start "${mode[@]}"; then
+                rc_stage "4 live checks" "FAILED: $test (no live gateway)"
+                rc_fail "Live check failed: $test (the live gateway didn’t start)"
+            fi
+            if ! rc_test "$test" --once --results-line; then
+                rc_gateway_stop
+                rc_stage "4 live checks" "FAILED: $test"
+                rc_fail "Live check failed: $test"
+            fi
+            rc_gateway_stop
+            rc_stage "4 live checks" "passed: $test only" ;;
+        signin)
+            rc_read_credentials
+            rc_live_environment 0
+            rc_gateway_start --secrets-only || { rc_stage "4 sign-in" "FAILED"; rc_fail "The live gateway didn’t start (logs/gateway.log)"; }
+            if ! rc_test "$test"; then
+                rc_gateway_stop
+                rc_stage "4 sign-in" "FAILED"
+                rc_fail "Sign-in failed (logs/${test//\//-}.*.log)"
+            fi
+            rc_gateway_stop
+            rc_live_off
+            rc_forget_credentials
+            rc_stage "4 sign-in" "passed: $test only (${(j:, :)RC_ROLES})" ;;
+        *)
+            rc_log "  test: $test"
+            if ! rc_test "$test"; then
+                rc_stage "4 $test" "FAILED"
+                rc_fail "Test failed: $test (logs/${test//\//-}.*.log)"
+            fi
+            rc_stage "4 $test" "passed" ;;
+    esac
 }
 
 # zsh runs an EXIT trap set inside a function when that function returns, so

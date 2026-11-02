@@ -671,7 +671,7 @@ When every app has adopted steps 1–11, the step 12 findings Jordy chose are fi
 
 ### Release gate for every app (standing rule, decided by Jordy on 2026-10-26)
 Before any app is released or updated, in this order:
-1. Its **release check** (step 11) passes, including the live sandbox checks.
+1. Its **release check** (step 11) passes, including the live sandbox checks. A partial run (`release-check.sh --only <test>`, JTKit 1.3.0, for fixing one test; its report says "Partial run, not a release check") never counts: the release needs one full run that passes, of the commit being released (decided by Jordy on 2026-11-02).
 2. A **full apple-design review** of the whole app. Accessibility findings are fixed; Jordy decides on the rest.
 3. An **independent code review** of the whole app (Claude Fable, run separately), after which Jordy decides what gets fixed.
 4. **Jordy’s check by hand**, then tag and release.
@@ -685,6 +685,12 @@ Exception (decided by Jordy on 2026-11-01): a patch release that only fixes regr
 - **A WATCHLIST.md per app**, done: what the app is waiting for from Apple, Jamf or Microsoft, or must recheck (vendor changes, known exceptions such as a beta’s quirk). CLAUDE.md points to it.
 - **Weekly vendor-update report:** a run outside Xcode that checks Jamf, Microsoft and Apple for API and product changes that affect the apps, and writes a short report.
 - A "new JTKit app" skill for Xcode’s Claude (in `ClaudeAgentConfig/skills/`): creates a new app in `~/Developer` set up to the standards (About, Settings, updater, connections, activity log, demo mode, release check, CLAUDE.md, LICENSE, .gitignore, build-number script) and adds it to `Apps.xcworkspace`.
+
+### 1.3.0 (decided by Jordy on 2026-11-02), done
+- **Test devices on a production entry:** allow-list version 3. An explicit per-entry opt-in (`productionTestDevices`) lets a production entry list test devices for non-interruptive commands only (Blank Push, Update Inventory, check-in), never interruptive ones; without it nothing changes. A test device may be marked `interruptive: false` on any entry.
+- **The Mac the check runs on:** no interruptive command ever goes to it (its serial is compared), on every entry; when its serial can’t be read, no interruptive command goes anywhere.
+- **Quick mode:** `release-check.sh --only <test>` reuses the last build of the same source, skips the demo UI tests and runs only the named test, with the same rules, gateway, ledger and cleanup; its report says "Partial run, not a release check". The release gate still requires one full run.
+- The proposed allow-list is drafted beside the real one as `allowlist.proposed.json` (version 3, test devices for non-interruptive commands only), for Jordy to switch once the app being checked is on 1.3.0.
 
 ### 1.1.0 (decided by Jordy on 2026-11-01; amended after the vendor check the same day), done
 **Released 2026-11-01** (tag `1.1.0`, approved by Jordy): Parts A, B and C and the review fixes. Apps move to 1.1.0 one at a time, each in its next release (see the CHANGELOG’s “Moving an app to 1.1.0”); B5 waits for Jamf Deployer’s.

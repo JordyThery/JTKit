@@ -1,5 +1,35 @@
 # Changelog
 
+## 1.3.0 (2026-11-02)
+A minor release for the release checks: test devices on a production allow-list entry, a hard rule for the Mac the
+check runs on, and a quick mode for fixing one test. Code written for 1.2 compiles unchanged.
+
+### Added
+- Allow-list version 3. `AllowList.Entry.productionTestDevices`: a production entry that sets it may list
+  `testDevices`, and those get non-interruptive commands only (Blank Push with its DDM sync, Update Inventory,
+  check-in), never an interruptive one, also with `--include-production`; reads stay GET only and writes stay
+  refused. Without it a production entry still takes no test devices. `AllowList.TestDevice.interruptive`: `false`
+  means that device never gets an interruptive command, on any entry. A list that uses either key must say
+  `"version": 3`; an older JTKit refuses such a list as a whole instead of reading it without them.
+- `release-check.sh --only <test>`: a partial run while fixing one test. It reuses the last build of the same source
+  (the app’s commit and uncommitted changes, and JTKit’s with `--local-jtkit`; otherwise it builds), skips the
+  sign-in step, the unit tests and the demo UI tests, and runs only the named test: a `LIVE_TESTS` entry (in full or
+  by its last part, e.g. `tenantA()`) as a live step with the same allow-list, rules, gateway, ledger and cleanup;
+  the sign-in test; a smoke test by name; or any `Target/Class/test` selection. Its report is titled "Partial run,
+  not a release check", and its result is never plain "passed". Not combined with `--fault` or
+  `--stop-before-live`.
+
+### Changed
+- No interruptive device command ever goes to the Mac the release check runs on (its serial number, read with
+  IOKit, is compared with the command’s devices), whatever the allow-list says and whatever is typed at the serial
+  prompt. If the Mac’s serial number can’t be read, no interruptive command is sent at all.
+
+### Moving an app to 1.3.0
+- Nothing to change in the app. An app’s release check reads an allow-list of version 3 only once the app is on
+  1.3.0; on an older JTKit it stops at the allow-list.
+- A role in `READ_ONLY_ROLES` still loses its test devices for that app’s run: remove the role from it only if the
+  app should send commands to its devices.
+
 ## 1.2.0 (2026-11-01)
 A minor release: the in-app Appearance choice is removed, plus two fixes. Code written for 1.1 still compiles; what
 is replaced is deprecated.

@@ -79,9 +79,13 @@ public nonisolated enum LiveDecision: Sendable, Equatable {
 ///    users, and every group in a scope is a group this run created.
 /// 7. Device commands (1.1.0): only to the tenant’s listed test devices, at
 ///    most 3 devices a run; interruptive ones only after the serial prompt
-///    (`DeviceCommands`). Without listed devices none are sent.
+///    (`DeviceCommands`). Without listed devices none are sent. Never an
+///    interruptive one to a device listed `interruptive: false`, nor to the
+///    Mac the release check runs on (1.3.0).
 /// 8. Production tenants: reads without `--include-production` when the
-///    allow-list says `productionReads`; never a write.
+///    allow-list says `productionReads`; never a write. An entry with
+///    `productionTestDevices` also takes Blank Push, Update Inventory and
+///    check-in to its listed devices, never an interruptive command (1.3.0).
 public nonisolated final class LiveCheckPolicy: @unchecked Sendable {
     public let entries: [AllowList.Entry]
     public let includeProduction: Bool
@@ -97,6 +101,9 @@ public nonisolated final class LiveCheckPolicy: @unchecked Sendable {
     public let commandsFile: URL?
     /// Asks the serial prompt for an interruptive command; nil: none is ever sent.
     public let confirmer: InterruptiveConfirmer?
+    /// The serial number of the Mac the release check runs on (uppercased):
+    /// no interruptive command goes to it. Nil (unreadable): none goes anywhere.
+    let thisMacSerial: String?
     let devices = DeviceRegistry()
 
     private let lock = NSLock()
@@ -116,9 +123,19 @@ public nonisolated final class LiveCheckPolicy: @unchecked Sendable {
     ///   - productionReads: production tenants are read without `includeProduction`.
     ///   - commandsFile: the run’s `device-commands.jsonl` (`LiveCheckRun` passes it).
     ///   - confirmer: the serial prompt for interruptive commands.
-    public init(allowList: AllowList, roles: Set<String>?, includeProduction: Bool, prefix: String, ledger: Ledger,
-                writesAllowed: Bool = true, productionReads: Bool? = nil, commandsFile: URL? = nil,
-                confirmer: InterruptiveConfirmer? = nil) {
+    public convenience init(allowList: AllowList, roles: Set<String>?, includeProduction: Bool, prefix: String, ledger: Ledger,
+                            writesAllowed: Bool = true, productionReads: Bool? = nil, commandsFile: URL? = nil,
+                            confirmer: InterruptiveConfirmer? = nil) {
+        self.init(allowList: allowList, roles: roles, includeProduction: includeProduction, prefix: prefix, ledger: ledger,
+                  writesAllowed: writesAllowed, productionReads: productionReads, commandsFile: commandsFile,
+                  confirmer: confirmer, thisMacSerial: ThisMac.serialNumber)
+    }
+
+    /// - Parameter thisMacSerial: the Mac the check runs on (tests pass a made-up one).
+    init(allowList: AllowList, roles: Set<String>?, includeProduction: Bool, prefix: String, ledger: Ledger,
+         writesAllowed: Bool = true, productionReads: Bool? = nil, commandsFile: URL? = nil,
+         confirmer: InterruptiveConfirmer? = nil, thisMacSerial: String?) {
+        self.thisMacSerial = thisMacSerial?.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
         entries = allowList.entries(roles: roles)
         self.writesAllowed = writesAllowed
         self.productionReads = productionReads ?? (allowList.productionReads ?? false)
@@ -153,7 +170,10 @@ public nonisolated final class LiveCheckPolicy: @unchecked Sendable {
         case .success(let (entry, target, isSignIn)):
             if entry.production && !includeProduction {
                 let isRead = request.method == "GET" || request.method == "HEAD"
-                guard productionReads && (isSignIn || isRead) else {
+                // an opted-in entry’s device commands: decideCommand decides
+                let isCommand = entry.productionTestDevices == true && !Self.isApple(entry.service)
+                    && Self.isDeviceCommand(path.lowercased(), method: request.method)
+                guard productionReads && (isSignIn || isRead || isCommand) else {
                     return .refuse(productionReads
                                    ? "\(entry.role) is a production tenant: \(request.method) refused, it’s only read"
                                    : "\(entry.role) is a production tenant; it’s only read with --include-production")
@@ -309,8 +329,11 @@ public nonisolated final class LiveCheckPolicy: @unchecked Sendable {
     // MARK: Device commands
 
     private func decideCommand(_ request: LiveRequest, entry: AllowList.Entry, target: String) -> LiveDecision {
-        // production is only read, also with --include-production
-        guard !entry.production else { return .refuse("\(entry.role) is a production tenant: device commands are never sent") }
+        // production is only read, also with --include-production, unless the
+        // entry opts in to non-interruptive commands to its test devices
+        guard !entry.production || entry.productionTestDevices == true else {
+            return .refuse("\(entry.role) is a production tenant: device commands are never sent")
+        }
         let listed = entry.testDeviceSerials
         guard !listed.isEmpty else { return .refuse("Device commands are never sent in a live check") }
         guard writesAllowed else {
@@ -328,6 +351,9 @@ public nonisolated final class LiveCheckPolicy: @unchecked Sendable {
             }
             serials.insert(device.serial)
         }
+        if command.level == .interruptive, let refusal = interruptiveRefusal(command, entry: entry, serials: serials) {
+            return .refuse(refusal)
+        }
         // checked and claimed in one step: two commands at once can’t both
         // take the last device
         let withinLimit = commandLock.withLock {
@@ -342,6 +368,25 @@ public nonisolated final class LiveCheckPolicy: @unchecked Sendable {
         }
         return .allow(.init(kind: .command(name: command.name, level: command.level, serials: serials.sorted()),
                             role: entry.role, target: target, resource: nil, id: nil))
+    }
+
+    /// Why an interruptive command can’t go to these devices, whatever the
+    /// serial prompt would answer; nil when it may be asked. No serial in
+    /// the reason (it goes to the report).
+    private func interruptiveRefusal(_ command: DeviceCommandRequest, entry: AllowList.Entry, serials: Set<String>) -> String? {
+        if entry.production {
+            return "\(entry.role) is a production tenant: its test devices get Blank Push, Update Inventory and check-in only; \(command.name) is refused"
+        }
+        if serials.contains(where: { entry.testDevice(serial: $0)?.interruptive == false }) {
+            return "\(command.name) is refused: that test device of \(entry.role) takes non-interruptive commands only"
+        }
+        guard let thisMacSerial else {
+            return "\(command.name) is refused: this Mac’s serial number can’t be read, so no interruptive command is sent"
+        }
+        if serials.contains(thisMacSerial) {
+            return "\(command.name) is refused: no interruptive command ever goes to the Mac this release check runs on"
+        }
+        return nil
     }
 
     /// The prompts an interruptive command needs, one per device.

@@ -611,3 +611,142 @@ struct ReleaseCheckScriptTests {
         #expect(result.output.contains(Self.base(home).appending(path: "allowlist.json").path))
     }
 }
+
+// MARK: - 1.3.0: --only, a partial run while fixing one test
+
+extension ReleaseCheckScriptTests {
+    private static let onlyApp = """
+        UNIT_TESTS="AppTests" UI_TESTS="AppUITests" SMOKE_CLASS="DemoSmokeUITests"
+        SIGNIN_TEST="AppTests/LiveSignInTests" CLEANUP_TEST="AppTests/LiveCleanupTests"
+        LIVE_TESTS=("AppTests/LiveTests/tenantA()" "AppUITests/LiveUITests/testEdit" "AppTests/OtherLiveTests/testEdit")
+        """
+
+    private static func resolve(_ name: String, home: URL, smokeFile: URL? = nil) throws -> (status: Int32, output: String) {
+        try Self.zsh("""
+            \(onlyApp)
+            SMOKE_FILE="\(smokeFile?.path ?? "/nonexistent")"
+            rc_only_resolve '\(name)' && print -r -- "kind=$RC_ONLY_KIND selection=$RC_ONLY_SELECTION"
+            """, home: home)
+    }
+
+    @Test("--only names a live step by its selection or its last part, the sign-in, a smoke test or any selection")
+    func onlyResolvesTheNamedTest() throws {
+        let home = try Self.makeHome()
+        defer { try? FileManager.default.removeItem(at: home) }
+        let smoke = home.appending(path: "DemoSmokeUITests.swift")
+        try Self.write("final class DemoSmokeUITests { func test1Launch() {} func test2Settings() {} }", to: smoke)
+
+        #expect(try Self.resolve("tenantA()", home: home).output.contains("kind=live selection=AppTests/LiveTests/tenantA()"))
+        #expect(try Self.resolve("AppUITests/LiveUITests/testEdit", home: home).output
+                    .contains("kind=live selection=AppUITests/LiveUITests/testEdit"))
+        #expect(try Self.resolve("LiveSignInTests", home: home).output.contains("kind=signin selection=AppTests/LiveSignInTests"))
+        #expect(try Self.resolve("test2Settings", home: home, smokeFile: smoke).output
+                    .contains("kind=plain selection=AppUITests/DemoSmokeUITests/test2Settings"))
+        #expect(try Self.resolve("AppTests/ParserTests/readsDates()", home: home).output
+                    .contains("kind=plain selection=AppTests/ParserTests/readsDates()"))
+
+        let ambiguous = try Self.resolve("testEdit", home: home)
+        #expect(ambiguous.status != 0 && ambiguous.output.contains("matches several live steps"), "\(ambiguous.output)")
+        let cleanup = try Self.resolve("LiveCleanupTests", home: home)
+        #expect(cleanup.status != 0 && cleanup.output.contains("can’t name the cleanup"), "\(cleanup.output)")
+        let unknown = try Self.resolve("noSuchTest", home: home)
+        #expect(unknown.status != 0 && unknown.output.contains("no such test"), "\(unknown.output)")
+    }
+
+    @Test("--only refuses --fault and --stop-before-live, and an unknown test, before it takes the lock")
+    func onlyRefusesOtherModes() throws {
+        let home = try Self.makeHome()
+        defer { try? FileManager.default.removeItem(at: home) }
+        for arguments in ["--only 'tenantA()' --fault break-build", "--stop-before-live --only 'tenantA()'", "--only noSuchTest", "--only"] {
+            let result = try Self.zsh("""
+                \(Self.onlyApp)
+                release_check_main \(arguments); print "code=$?"
+                """, home: home)
+            #expect(result.output.contains("code=2"), "\(arguments): \(result.output)")
+        }
+        #expect(!FileManager.default.fileExists(atPath: Self.base(home).appending(path: "state/release-check.lock").path))
+    }
+
+    @Test("A partial run reuses only a build of the same commit and the same uncommitted changes")
+    func onlyReusesTheBuildOfTheSameSource() throws {
+        let home = try Self.makeHome()
+        defer { try? FileManager.default.removeItem(at: home) }
+        let app = home.appending(path: "App", directoryHint: .isDirectory)
+        try Self.write("one\n", to: app.appending(path: "Source.swift"))
+        let git = { (arguments: String) throws -> Void in
+            _ = try ReleaseCheckTemplateTests.run("/bin/zsh", ["-c", "cd '\(app.path)' && git \(arguments)"],
+                                                  environment: ["PATH": "/usr/bin:/bin", "HOME": home.path])
+        }
+        try git("init -q && git -c user.email=t@example.com -c user.name=T add -A && git -c user.email=t@example.com -c user.name=T commit -qm one")
+        let derived = home.appending(path: "Derived", directoryHint: .isDirectory)
+        try Self.write("", to: derived.appending(path: "Build/Products/App_macosx.xctestrun"))
+        let check = """
+            PROJECT="\(app.path)/App.xcodeproj" RC_LOCAL=0 RC_DERIVED="\(derived.path)"
+            if rc_build_reusable; then print reuse=yes; else print reuse=no; fi
+            """
+        let mark = "rc_build_key > \"$RC_DERIVED/$RC_BUILD_MARK_NAME\""
+
+        // no mark yet: build
+        #expect(try Self.zsh(check, home: home).output.contains("reuse=no"))
+        // a mark of this source: reuse
+        _ = try Self.zsh(check + "\n" + mark, home: home)
+        #expect(try Self.zsh(check, home: home).output.contains("reuse=yes"))
+        // an uncommitted change, a new untracked file or a new commit: build again
+        try Self.write("two\n", to: app.appending(path: "Source.swift"))
+        #expect(try Self.zsh(check, home: home).output.contains("reuse=no"))
+        _ = try Self.zsh(check + "\n" + mark, home: home)
+        try Self.write("new\n", to: app.appending(path: "New.swift"))
+        #expect(try Self.zsh(check, home: home).output.contains("reuse=no"))
+        try git("-c user.email=t@example.com -c user.name=T commit -qam two")
+        #expect(try Self.zsh(check, home: home).output.contains("reuse=no"))
+        // the same source but its test products gone: build
+        _ = try Self.zsh(check + "\n" + mark, home: home)
+        try FileManager.default.removeItem(at: derived.appending(path: "Build"))
+        #expect(try Self.zsh(check, home: home).output.contains("reuse=no"))
+    }
+
+    @Test("A partial run’s report says “Partial run, not a release check” and never just passed")
+    func onlyReportIsMarkedPartial() throws {
+        let home = try Self.makeHome()
+        defer { try? FileManager.default.removeItem(at: home) }
+        let run = home.appending(path: "run", directoryHint: .isDirectory)
+        try Self.write("same", to: run.appending(path: "fingerprint.before"))
+        try Self.write("same", to: run.appending(path: "fingerprint.after"))
+        let report = { (only: String) throws -> String in
+            try Self.zsh("""
+                RC_RUN="\(run.path)"; RC_PY=/usr/bin/python3; RC_KIND=test; RC_JTKIT=local; RC_ONLY="\(only)" RC_FAULT=""
+                RC_STAGE_NAMES=() RC_STAGE_STATUS=() RC_CHECK_ERRORS=() READ_ONLY_ROLES=()
+                rc_report > /dev/null; cat "$RC_RUN/report.md"
+                """, home: home).output
+        }
+        let partial = try report("tenantA()")
+        #expect(partial.hasPrefix("# Partial run, not a release check: Test App"), "\(partial)")
+        #expect(partial.contains("- **Partial run, not a release check** (--only tenantA()): only this test ran. The release gate needs one full run."))
+        #expect(partial.contains("- Result: **passed (partial run, not a release check)**"))
+        #expect(!partial.contains("- Result: **passed**"))
+        let full = try report("")
+        #expect(full.hasPrefix("# Release check: Test App") && full.contains("- Result: **passed**"), "\(full)")
+    }
+
+    @Test("A partial run keeps the lock, fingerprint, gateway, ledger and cleanup; a full run always builds")
+    func onlyKeepsTheRules() throws {
+        let source = try String(contentsOf: Self.template, encoding: .utf8)
+        let main = String(source[try #require(source.range(of: "release_check_main() {")).lowerBound...])
+        func position(_ text: String) throws -> String.Index { try #require(main.range(of: text)).lowerBound }
+        // the partial run branches off after the lock, the allow-list, the
+        // earlier ledgers, the fingerprint and the gateway build, and before
+        // the sign-in and stages 2 and 3
+        let branch = try position("rc_only_run $reused")
+        for before in ["rc_lock", "rc_check_allowlist", "rc_live_setup", #"rc_fingerprint "$RC_RUN/fingerprint.before""#, "rc_gateway_build ||"] {
+            #expect(try position(before) < branch, "\(before)")
+        }
+        #expect(branch < (try position(#"rc_test "$SIGNIN_TEST""#)))
+        // only a partial run reuses a build
+        #expect(main.contains(#"if [[ -n "$RC_ONLY" ]] && rc_build_reusable; then"#))
+        // its live step: once, with its results line, and the cleanup after it
+        let run = String(source[try #require(source.range(of: "rc_only_run() {")).lowerBound...])
+        let live = String(run[try #require(run.range(of: "        live)")).lowerBound..<(try #require(run.range(of: "        signin)")).lowerBound)])
+        #expect(live.contains("RC_LIVE_STARTED=1") && live.contains("rc_live_environment 1"))
+        #expect(live.contains(#"rc_test "$test" --once --results-line"#) && live.contains("rc_gateway_start"))
+    }
+}
