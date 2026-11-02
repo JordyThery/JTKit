@@ -28,6 +28,12 @@
 #     MSAL’s cache in its own access group). Run after the build ("before")
 #     and after cleanup ("after"), also when stage 4 didn’t run; only hashes of
 #     the item names are written, and the two must be equal.
+#   HOST_CREDENTIALS_TEST="<selection>"   optional (1.3.1): a test in the
+#     app’s test host that reads the app’s own saved connections for the
+#     run’s roles and hands their credentials to the live gateway
+#     (`LiveGatewayClient.provide`), over its token, never through a file.
+#     Run after the gateway starts for each live UI test, before the app is
+#     launched. Never in place of a credential the release check read itself.
 #   LEGACY_PREFIXES is ignored: the one-time sweep of older test prefixes is over.
 #
 # Apple Business or Apple School Manager: every request to an organization,
@@ -489,6 +495,15 @@ rc_gateway_start() {
     rc_log "  the live gateway didn’t start (logs/gateway.log)"
     rc_gateway_stop
     return 1
+}
+
+# Before a live UI test: the app’s test host hands the gateway the
+# credentials of its saved connections (HOST_CREDENTIALS_TEST, 1.3.1).
+# Nothing to do without one.
+rc_provide_host_credentials() {
+    [[ -n "${HOST_CREDENTIALS_TEST:-}" ]] || return 0
+    rc_log "  credentials from the app’s saved connections, for: $1"
+    rc_test "$HOST_CREDENTIALS_TEST" --label "for-${${1##*/}//[^A-Za-z0-9]/_}"
 }
 
 rc_gateway_stop() {
@@ -1207,6 +1222,11 @@ release_check_main() {
             rc_stage "4 live checks" "FAILED: $test (no live gateway)"
             rc_fail "Live check failed: $test (the live gateway didn’t start)"
         fi
+        if (( ! ${#mode} )) && ! rc_provide_host_credentials "$test"; then
+            rc_gateway_stop
+            rc_stage "4 live checks" "FAILED: $test (the app’s saved credentials)"
+            rc_fail "Live check failed: $test (HOST_CREDENTIALS_TEST, logs/${HOST_CREDENTIALS_TEST//\//-}.*.log)"
+        fi
         if ! rc_test "$test" --once --results-line; then
             rc_gateway_stop
             rc_stage "4 live checks" "FAILED: $test"
@@ -1238,6 +1258,11 @@ rc_only_run() {
             if ! rc_gateway_start "${mode[@]}"; then
                 rc_stage "4 live checks" "FAILED: $test (no live gateway)"
                 rc_fail "Live check failed: $test (the live gateway didn’t start)"
+            fi
+            if (( ! ${#mode} )) && ! rc_provide_host_credentials "$test"; then
+                rc_gateway_stop
+                rc_stage "4 live checks" "FAILED: $test (the app’s saved credentials)"
+                rc_fail "Live check failed: $test (HOST_CREDENTIALS_TEST, logs/${HOST_CREDENTIALS_TEST//\//-}.*.log)"
             fi
             if ! rc_test "$test" --once --results-line; then
                 rc_gateway_stop

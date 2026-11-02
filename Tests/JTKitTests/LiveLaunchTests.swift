@@ -322,6 +322,68 @@ struct LiveGatewayTests {
         #expect(upstream.requests.isEmpty)
     }
 
+    /// A run with a second role whose credentials the release check doesn’t read.
+    private func makeRunWithSchool() throws -> (LiveCheckRun, URL) {
+        let runFolder = folder()
+        let list = AllowList(tenants: [
+            .init(role: "jamf-test-a", service: .jamfPlatform, region: "eu", environmentID: environmentA, access: .full),
+            .init(role: "jamfschool-readonly", service: .jamfSchool, host: "school.example.com", access: .readOnly),
+        ])
+        let listURL = folder().appending(path: "allowlist.json")
+        try JSONEncoder().encode(list).write(to: listURL)
+        try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: listURL.path)
+        let run = try LiveCheckRun(environment: [
+            "JTKIT_LIVE": "1", "JTKIT_LIVE_PREFIX": prefix, "JTKIT_LIVE_RUN_DIR": runFolder.path,
+            "JTKIT_LIVE_ROLES": "jamf-test-a,jamfschool-readonly",
+            "JTKIT_LIVE_JAMF_TEST_A_CLIENT_ID": "client-a", "JTKIT_LIVE_JAMF_TEST_A_CLIENT_SECRET": "s3cret",
+        ], upstream: MockServer { _ in .json(200, "{}") }.session, readBack: ReadBack(attempts: 1, interval: 0),
+           allowListURL: listURL)
+        let owner = folder().appending(path: "release-check.lock.owner")
+        try Data("\(getpid()) Example App".utf8).write(to: owner)
+        return (run, owner)
+    }
+
+    @Test func credentialsHandedOverFillTheLaunchFileButNeverReplaceTheRunsOwn() async throws {
+        let (run, owner) = try makeRunWithSchool()
+        let gateway = try LiveGateway(run: run, lockOwnerURL: owner)
+        defer { gateway.stop() }
+        let client = try LiveGatewayClient(runFolder: run.runFolder)
+        #expect(client.launch.connections.first { $0.role == "jamfschool-readonly" }?.connection.clientID == "")
+
+        let taken = try await client.provide([
+            LiveSecretItem(role: "jamfschool-readonly", item: "network-id", value: "999001"),
+            LiveSecretItem(role: "jamfschool-readonly", item: "api-key", value: "school-key"),
+            LiveSecretItem(role: "jamf-test-a", item: "client-secret", value: "other"),
+        ])
+        #expect(taken.sorted() == ["jamfschool-readonly|api-key", "jamfschool-readonly|network-id"],
+                "the release check’s own secret is never replaced")
+        let again = try LiveGatewayClient(runFolder: run.runFolder)
+        #expect(again.launch.port == gateway.port)
+        #expect(again.launch.connections.first { $0.role == "jamfschool-readonly" }?.connection.clientID == "999001")
+        #expect(try await again.secret(role: "jamfschool-readonly", item: "api-key") == "school-key")
+        #expect(try await again.secret(role: "jamf-test-a", item: "client-secret") == "s3cret")
+        // handed over once: a second value doesn’t replace the first
+        #expect(try await client.provide([LiveSecretItem(role: "jamfschool-readonly", item: "api-key", value: "x")]).isEmpty)
+        #expect(try await again.secret(role: "jamfschool-readonly", item: "api-key") == "school-key")
+    }
+
+    @Test func handingOverIsLimitedToTheRunsRolesAndKnownItems() async throws {
+        let (run, owner) = try makeRunWithSchool()
+        let gateway = try LiveGateway(run: run, lockOwnerURL: owner)
+        defer { gateway.stop() }
+        let client = try LiveGatewayClient(runFolder: run.runFolder)
+        await #expect(throws: LiveGatewayClient.ClientError.self) {
+            try await client.provide([LiveSecretItem(role: "jamfpro-production", item: "password", value: "p")])
+        }
+        await #expect(throws: LiveGatewayClient.ClientError.self) {
+            try await client.provide([LiveSecretItem(role: "jamfschool-readonly", item: "token", value: "t")])
+        }
+        await #expect(throws: LiveGatewayClient.ClientError.self) {
+            try await client.provide([LiveSecretItem(role: "jamfschool-readonly", item: "api-key", value: "")])
+        }
+        #expect(try await client.secret(role: "jamfschool-readonly", item: "api-key") == nil)
+    }
+
     @Test func aUITestTalksToTheGatewayAsAClient() async throws {
         let upstream = MockServer { _ in .json(200, #"{"results":[]}"#) }
         let (run, owner, _) = try makeRun(upstream: upstream)
