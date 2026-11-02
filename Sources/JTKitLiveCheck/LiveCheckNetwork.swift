@@ -271,7 +271,12 @@ public nonisolated final class LiveCheckNetwork: @unchecked Sendable {
                 recordUnrecorded(.init(resource: resource, name: name, status: status, reason: "\(error)"))
             }
         case .read where (200..<300).contains(status):
-            policy.learnDevices(from: body, target: allowed.target, role: allowed.role, path: request.url.path(percentEncoded: false))
+            let path = request.url.path(percentEncoded: false)
+            policy.learnDevices(from: body, target: allowed.target, role: allowed.role, path: path)
+            policy.learnStorageUpload(from: body, target: allowed.target, role: allowed.role, path: path)
+        case .change where (200..<300).contains(status):
+            policy.learnStorageUpload(from: body, target: allowed.target, role: allowed.role,
+                                      path: request.url.path(percentEncoded: false))
         case .signIn where request.url.host() == "account.apple.com" && (200..<300).contains(status):
             if let token = (try? JSONSerialization.jsonObject(with: body) as? [String: Any])?["access_token"] as? String,
                let clientID = LiveCheckPolicy.formValue("client_id", in: request.body) {

@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.3.3 (2026-11-02)
+A patch release for the release checks: a live check can upload an Intune app package. Code written for 1.3.2
+compiles unchanged.
+
+### Added
+- Live checks (`JTKitLiveCheck`), rule 9: the guarded network allows uploads (PUT) to Azure Storage only at the exact
+  address (host and path) Graph handed out in a content file of an app the run created
+  (`…/mobileApps/{id}/…/contentVersions/{v}/files/{f}`, `azureStorageUri`). Every other Azure Storage request is
+  refused, and so is any upload for a read-only or production tenant or while writes are off. An upload counts as
+  a change to that app in `writes.jsonl`.
+
 ## 1.3.2 (2026-11-02)
 A patch release: a command stopped during a wait keeps what it sent. Code written for 1.3.1 compiles unchanged,
 unless it switches over `MDMCommand.SkipReason` (none of the eight apps does): add `.stopped`.

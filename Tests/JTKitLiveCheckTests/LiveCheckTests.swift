@@ -552,6 +552,48 @@ struct GraphWriteRuleTests {
     }
 }
 
+// MARK: Rule 9: Azure Storage (Intune app uploads)
+
+@Suite("Live check: rule 9, Azure Storage only for the run's app uploads")
+struct StorageUploadRuleTests {
+    private let target = "intune:\(entraTest)"
+    private let app = "12121212-2222-4333-8444-555555555555"
+    private let other = "34343434-2222-4333-8444-555555555555"
+    private let blob = "https://mmm.blob.core.windows.net/abc-de/file.bin"
+
+    private func filePath(_ app: String) -> String {
+        "/beta/deviceAppManagement/mobileApps/\(app)/microsoft.graph.macOSPkgApp/contentVersions/1/files/f1"
+    }
+
+    private func answer(_ address: String) -> Data {
+        (try? JSONSerialization.data(withJSONObject: ["id": "f1", "azureStorageUri": address])) ?? Data()
+    }
+
+    @Test("A PUT to the address Graph gave for the run's app is allowed; nothing else")
+    func onlyTheLearnedAddress() throws {
+        let policy = makePolicy()
+        try policy.ledger.add(.init(target: target, resource: "mobileApps", id: app, name: "\(prefix) – App"), testPrefixes: [prefix])
+        #expect(!policy.decide(request("PUT", blob + "?sv=1&comp=block&blockid=AA")).isAllowed, "not learned yet")
+
+        // Not the run's app, not a content file, not Azure Storage: nothing learned.
+        policy.learnStorageUpload(from: answer(blob), target: target, role: "intune-test", path: filePath(other))
+        policy.learnStorageUpload(from: answer(blob), target: target, role: "intune-test",
+                                  path: "/beta/deviceAppManagement/mobileApps/\(app)")
+        policy.learnStorageUpload(from: answer("https://evil.example/abc-de/file.bin"), target: target, role: "intune-test",
+                                  path: filePath(app))
+        #expect(!policy.decide(request("PUT", blob + "?sv=1&comp=block&blockid=AA")).isAllowed)
+
+        policy.learnStorageUpload(from: answer(blob + "?sv=1&sig=x"), target: target, role: "intune-test", path: filePath(app))
+        let block = policy.decide(request("PUT", blob + "?sv=2&sig=y&comp=block&blockid=AA"))
+        #expect(block.kind == .change)
+        #expect(policy.decide(request("PUT", blob + "?comp=blocklist")).kind == .change)
+        #expect(!policy.decide(request("GET", blob)).isAllowed)
+        #expect(!policy.decide(request("DELETE", blob)).isAllowed)
+        #expect(!policy.decide(request("PUT", "https://mmm.blob.core.windows.net/abc-de/other.bin")).isAllowed)
+        #expect(!policy.decide(request("PUT", "https://nnn.blob.core.windows.net/abc-de/file.bin")).isAllowed)
+    }
+}
+
 // MARK: Rule 4: Graph token tenant
 
 @Suite("Live check: rule 4, Graph token tenant")
