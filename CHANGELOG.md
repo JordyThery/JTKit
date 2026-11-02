@@ -13,6 +13,10 @@ unless it switches over `MDMCommand.SkipReason` (none of the eight apps does): a
 - `JamfWebLink`: a Jamf Pro address keeps its path (an on-premises server under `/jamf`), without a trailing `/api`;
   before, the link went to the origin only and such a server answered 404.
 
+- `JTKitUITestCase`: a live UI test (`launchesLive`) attaches no failure screenshot and prints no element dump: it
+  shows a real tenant. An app also sets `systemAttachmentLifetime = "keepNever"` on its release-check scheme’s test
+  action so XCTest keeps no automatic screenshots.
+
 ### Added
 - `MDMCommand.SkipReason.stopped`; `MDMCommand.Result.stopped` and `wasStopped`.
 - Live checks: the launch file marks the connections whose role lists test devices for the run
