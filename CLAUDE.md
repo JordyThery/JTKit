@@ -55,6 +55,10 @@ Live checks (decided by Jordy on 2026-10-27):
 - Jamf Deployer’s live check keeps OpenTofu’s state and its store in a temporary folder and never pushes in Team Mode.
 - New UI test targets are added with Xcode’s own new-target tool, never by editing `project.pbxproj`.
 
+## Working on JTKit and an app together
+
+Open `~/Developer/Apps.xcworkspace`. Because JTKit is in that workspace as a local package, every app in it builds against the local copy instead of the GitHub version.
+
 ## Releasing an app
 
 Follow the release gate in ROADMAP.md: release check passes (including live sandbox checks), a full apple-design review of the app, an independent code review of the app, then Jordy’s check by hand. Only then tag and release. Build the release from the app’s own project, so it uses the published JTKit version.
@@ -63,7 +67,9 @@ Follow the release gate in ROADMAP.md: release check passes (including live sand
 
 From 1.0, JTKit follows semantic versioning (patch: fixes, minor: additions, major: breaking changes). A tag is created only after Jordy’s approval; until then the work waits on a branch.
 
-Bump `JTKit.version`, add a CHANGELOG entry (it’s for developers using the package; never say how a problem was found, decided by Jordy on 2026-11-01), commit, tag `x.y.z` (a breaking API change means a new major version) and push with tags. Before releasing an app, update its JTKit package version so the committed app matches what was built.
+Bump `JTKit.version`, add a CHANGELOG entry (it’s for developers using the package; never say how a problem was found, decided by Jordy on 2026-11-01), commit, tag `x.y.z` (a breaking API change means a new major version) and push with tags. Then update the package in each app (**File › Packages › Update to Latest Package Versions**) before releasing that app, so the committed app matches what was built.
+
+The README is public and describes the package to other developers. When a change makes a statement in it untrue (products, areas, principles, requirements), update it in the same commit.
 
 **Before tagging any JTKit version, build every app that uses it** in `Apps.xcworkspace`, against the local JTKit: AppSettings2Blueprint, Blueprint Managed Preferences Editor, Checkpoint, Intune Deployer, Jamf Deployer, JamfMigrator, Profile2Blueprint, Serial Number Reader. Report any that fail and don’t tag until they all build. JTKit’s own tests can’t catch a change that breaks how an app calls it (0.4.2 broke Serial Number Reader’s Settings preview).
 
