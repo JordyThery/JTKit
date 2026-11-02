@@ -53,6 +53,14 @@ public final class LiveGateway: @unchecked Sendable {
     private let lock = NSLock()
     private var inFlight = 0
     private var handled = 0
+    /// Credentials a test process handed over (`provideCommand`), by
+    /// "role|item": an app’s saved connection, read in its own test host.
+    /// Never one the release check read itself; in memory only.
+    private var provided: [String: String] = [:]
+    /// The roles the launch file lists, in order, and the lock’s owner, to
+    /// write the launch file again once credentials are handed over.
+    private var launchRoles: [String] = []
+    private var lockOwner = ""
 
     public enum GatewayError: Error, CustomStringConvertible, Equatable {
         case notLocked
@@ -94,14 +102,14 @@ public final class LiveGateway: @unchecked Sendable {
         // a lock file a killed release check left behind
         guard Self.ownerIsAlive(owner) else { throw GatewayError.ownerGone(owner) }
 
-        var described: [LiveConnectionDescription] = []
-        for role in roles ?? run.roles.sorted() {
-            let entries = run.allowList.tenants.filter { $0.role == role }
-            guard run.roles.contains(role), !entries.isEmpty else { throw GatewayError.unknownRole(role) }
-            for entry in entries {
-                described.append(LiveConnectionDescription(entry: entry, run: run, sharesRole: entries.count > 1))
-            }
+        let launchRoles = roles ?? run.roles.sorted()
+        for role in launchRoles where !run.roles.contains(role) || !run.allowList.tenants.contains(where: { $0.role == role }) {
+            throw GatewayError.unknownRole(role)
         }
+        self.launchRoles = launchRoles
+        self.lockOwner = owner
+        // nothing handed over yet: the release check’s own credentials
+        let described = Self.describe(roles: launchRoles, run: run) { run.environmentCredential($0, $1) }
         connections = described
         environment = ["JTKIT_LIVE_GATEWAY_TOKEN": token]
         ledgerAtStart = Set(run.ledger.items.map(Self.ledgerKey))
@@ -162,6 +170,82 @@ public final class LiveGateway: @unchecked Sendable {
 
     deinit { listener.cancel() }
 
+    /// The launch file’s connections, from the allow-list and the
+    /// credentials known now (the release check’s, then those handed over).
+    private func describeConnections() -> [LiveConnectionDescription] {
+        Self.describe(roles: launchRoles, run: run) { [self] in credential($0, $1) }
+    }
+
+    private static func describe(roles: [String], run: LiveCheckRun,
+                                 credential: @escaping (String, String) -> String?) -> [LiveConnectionDescription] {
+        roles.flatMap { role in
+            let entries = run.allowList.tenants.filter { $0.role == role }
+            return entries.map { entry in
+                LiveConnectionDescription(entry: entry, run: run, sharesRole: entries.count > 1) {
+                    credential(entry.role, $0) ?? ""
+                }
+            }
+        }
+    }
+
+    /// A credential of the run: the release check’s own, else one handed over.
+    func credential(_ role: String, _ item: String) -> String? {
+        if let own = run.environmentCredential(role, item) { return own }
+        return lock.withLock { provided["\(role)|\(item)"] }
+    }
+
+    /// The items a test process may hand over: a sign-in’s non-secret IDs
+    /// and secrets, by the names the release check uses.
+    public static let providableItems: Set<String> = [
+        "client-id", "client-secret", "username", "password", "network-id", "api-key", "key-id", "private-key",
+        "jamfpro-client-id", "jamfpro-client-secret", "jamfpro-username", "jamfpro-password",
+    ]
+
+    /// Takes credentials a test process read from its app’s saved
+    /// connections (1.3.1): only for roles of this run, only the items
+    /// above, never in place of one the release check read itself or one
+    /// already handed over. Then the launch file is written again, so an app
+    /// launched afterwards gets the connections with their IDs.
+    /// - Returns: the items taken, "role|item".
+    func provide(_ items: [LiveSecretItem]) throws -> [String] {
+        for item in items {
+            guard run.roles.contains(item.role) else { throw GatewayError.unknownRole(item.role) }
+            guard Self.providableItems.contains(item.item) else { throw ProvideError.unknownItem(item.item) }
+            guard !item.value.isEmpty, item.value.utf8.count <= 16 * 1024 else { throw ProvideError.badValue(item.item) }
+        }
+        var taken: [String] = []
+        lock.withLock {
+            for item in items where run.environmentCredential(item.role, item.item) == nil {
+                let key = "\(item.role)|\(item.item)"
+                guard provided[key] == nil else { continue }
+                provided[key] = item.value
+                taken.append(key)
+            }
+        }
+        guard !taken.isEmpty else { return [] }
+        let described = describeConnections()
+        lock.withLock { connections = described }
+        let launch = LiveLaunchFile(port: port, lockOwner: lockOwner,
+                                    connections: described.map { .init(role: $0.role, connection: $0, secretItem: $0.secretItem) })
+        let data = try JSONEncoder().encode(launch)
+        for folder in [run.runFolder] + (runnerFolder.map { [$0] } ?? []) {
+            try Self.writeLaunchFiles(launch: data, token: token, to: folder)
+        }
+        return taken
+    }
+
+    public enum ProvideError: Error, CustomStringConvertible, Equatable {
+        case unknownItem(String)
+        case badValue(String)
+
+        public var description: String {
+            switch self {
+            case .unknownItem(let item): "\(item) isn’t a credential the live gateway takes"
+            case .badValue(let item): "The value handed over for \(item) is empty or too long"
+            }
+        }
+    }
+
     /// The launch file and the token (mode 600 both), in a folder only this
     /// user can read (700). The token is written first, so a reader that finds
     /// the launch file also finds the token.
@@ -198,6 +282,11 @@ public final class LiveGateway: @unchecked Sendable {
     public static let recordCommand = "record"
     /// The run’s secrets for the items asked (`LiveGatewayRequest.secrets`).
     public static let secretsCommand = "secrets"
+    /// Credentials handed over from an app’s saved connections (`LiveGatewayRequest.secrets`, with values).
+    public static let provideCommand = "provide"
+    /// The allow-list’s test devices of a role of this run (`LiveGatewayRequest.step.step` names the role),
+    /// for a UI test runner that can’t read the allow-list.
+    public static let testDevicesCommand = "testDevices"
     /// The app waits before trying a request again (`LiveGatewayRequest.waitSeconds`).
     public static let waitCommand = "wait"
 
@@ -306,6 +395,19 @@ public final class LiveGateway: @unchecked Sendable {
         switch request.command {
         case Self.secretsCommand?:
             return reply(LiveGatewayResponse(status: 200, body: try? JSONEncoder().encode(secrets(for: request.secrets ?? []))))
+        case Self.provideCommand?:
+            do {
+                let taken = try provide(request.secrets ?? [])
+                return reply(LiveGatewayResponse(status: 200, body: try? JSONEncoder().encode(taken)))
+            } catch {
+                return reply(LiveGatewayResponse(error: "\(error)"))
+            }
+        case Self.testDevicesCommand?:
+            guard let role = request.step?.step, run.roles.contains(role) else {
+                return reply(LiveGatewayResponse(error: "No role of this run to list test devices for."))
+            }
+            let devices = run.allowList.tenants.filter { $0.role == role }.flatMap { $0.testDevices ?? [] }
+            return reply(LiveGatewayResponse(status: 200, body: try? JSONEncoder().encode(devices)))
         case Self.waitCommand?:
             // the retry itself arrives a moment after the wait
             let seconds = min(max(request.waitSeconds ?? 0, 0), 600) + 2
@@ -365,7 +467,7 @@ public final class LiveGateway: @unchecked Sendable {
     /// The run’s secrets the caller asked for, of the run’s roles only.
     func secrets(for items: [LiveSecretItem]) -> [LiveSecretItem] {
         items.compactMap { item in
-            guard run.roles.contains(item.role), let value = run.environmentCredential(item.role, item.item) else { return nil }
+            guard run.roles.contains(item.role), let value = credential(item.role, item.item) else { return nil }
             return LiveSecretItem(role: item.role, item: item.item, value: value)
         }
     }
@@ -436,8 +538,9 @@ public struct LiveConnectionDescription: Codable, Equatable, Sendable {
     /// its Jamf Pro sign-in under `jamfpro-username` / `jamfpro-password`
     /// (or `jamfpro-client-id` / `jamfpro-client-secret`), as the apps’
     /// `CREDENTIALS` name them; a role with one entry uses the plain names.
-    init(entry: AllowList.Entry, run: LiveCheckRun, sharesRole: Bool = false) {
-        func credential(_ item: String) -> String { (try? run.credential(entry.role, item)) ?? "" }
+    init(entry: AllowList.Entry, run: LiveCheckRun, sharesRole: Bool = false,
+         credential lookup: ((String) -> String)? = nil) {
+        func credential(_ item: String) -> String { lookup?(item) ?? (try? run.credential(entry.role, item)) ?? "" }
         let name = sharesRole ? "\(entry.role) (\(Self.serviceName(entry.service)))" : entry.role
         let id = Self.stableID(role: entry.role, service: sharesRole ? entry.service.rawValue : nil)
         var item: String?

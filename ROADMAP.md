@@ -686,6 +686,9 @@ Exception (decided by Jordy on 2026-11-01): a patch release that only fixes regr
 - **Weekly vendor-update report:** a run outside Xcode that checks Jamf, Microsoft and Apple for API and product changes that affect the apps, and writes a short report.
 - A "new JTKit app" skill for Xcode’s Claude (in `ClaudeAgentConfig/skills/`): creates a new app in `~/Developer` set up to the standards (About, Settings, updater, connections, activity log, demo mode, release check, CLAUDE.md, LICENSE, .gitignore, build-number script) and adds it to `Apps.xcworkspace`.
 
+### 1.3.1 (decided by Jordy on 2026-11-02, for Checkpoint 2.10.0)
+- **Live UI tests on an app’s saved connections:** the gateway takes credentials a test process hands over with its token (`LiveGatewayClient.provide`), for the run’s roles only, never in place of its own; `HOST_CREDENTIALS_TEST` runs the app’s test-host step before each live UI test. Checkpoint reads its saved Jamf Pro, Jamf School, Intune and Apple connections there, as its unit live checks do; the allow-list’s entries stay as they are (they are shared by the apps). Waits for Jordy’s approval before the tag.
+
 ### 1.3.0 (decided by Jordy on 2026-11-02), done
 - **Test devices on a production entry:** allow-list version 3. An explicit per-entry opt-in (`productionTestDevices`) lets a production entry list test devices for non-interruptive commands only (Blank Push, Update Inventory, check-in), never interruptive ones; without it nothing changes. A test device may be marked `interruptive: false` on any entry.
 - **The Mac the check runs on:** no interruptive command ever goes to it (its serial is compared), on every entry; when its serial can’t be read, no interruptive command goes anywhere.

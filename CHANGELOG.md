@@ -1,5 +1,26 @@
 # Changelog
 
+## 1.3.1 (2026-11-02)
+A patch release for the release checks: live UI tests can use an app’s own saved connections. Code written for
+1.3.0 compiles unchanged.
+
+### Changed
+- The live gateway takes credentials handed over by a test process (`LiveGatewayClient.provide(_:)`, the gateway’s
+  `provide` command, with its token): for roles of the run only, only the release check’s item names (client ID
+  and secret, username and password, Network ID and API key, key ID and private key, and the `jamfpro-` ones),
+  never in place of a credential the release check read itself or one already handed over. They are kept in
+  memory; the launch file is written again so an app launched afterwards gets its connections with their IDs.
+- `LiveGatewayClient.testDevices(role:)`: the allow-list’s test devices of a role of the run, for a UI test runner
+  that can’t read the allow-list (a sandboxed app’s runner).
+- `Scripts/release-check-lib.sh`: `HOST_CREDENTIALS_TEST`, optional. A test in the app’s test host that reads the
+  app’s saved connections for the run’s roles and hands them to the gateway, run after the gateway starts for each
+  live UI test (also with `--only`), before the app is launched.
+
+### Moving an app to 1.3.1
+- Nothing to change. An app whose live UI tests need its own saved connections (Checkpoint keeps one Keychain item
+  per connection and its IDs in its settings) sets `HOST_CREDENTIALS_TEST` and hands the items over from its test
+  host.
+
 ## 1.3.0 (2026-11-02)
 A minor release for the release checks: test devices on a production allow-list entry, a hard rule for the Mac the
 check runs on, and a quick mode for fixing one test. Code written for 1.2 compiles unchanged.

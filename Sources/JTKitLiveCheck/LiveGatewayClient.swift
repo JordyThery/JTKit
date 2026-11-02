@@ -100,6 +100,31 @@ public final class LiveGatewayClient: @unchecked Sendable {
         return items.first { $0.role == role && $0.item == item }?.value
     }
 
+    /// Hands the gateway credentials read from the app’s own saved
+    /// connections (1.3.1), for roles whose credentials the release check
+    /// doesn’t read itself. Never printed or written to a file; the gateway
+    /// keeps them in memory and never takes one in place of its own.
+    /// - Returns: the items it took, "role|item".
+    @discardableResult
+    public func provide(_ items: [LiveSecretItem]) async throws -> [String] {
+        let request = LiveGatewayRequest(token: token, command: LiveGateway.provideCommand, secrets: items)
+        let answer = try await Self.exchange(request, port: launch.port)
+        if let error = answer.error { throw ClientError.failed(error) }
+        guard let body = answer.body, let taken = try? JSONDecoder().decode([String].self, from: body) else { return [] }
+        return taken
+    }
+
+    /// The allow-list’s test devices of a role of this run, for a UI test
+    /// runner that can’t read the allow-list (a sandboxed runner).
+    public func testDevices(role: String) async throws -> [AllowList.TestDevice] {
+        let request = LiveGatewayRequest(token: token, command: LiveGateway.testDevicesCommand,
+                                         step: LiveCheckRun.StepResult(step: role, passed: true, note: nil))
+        let answer = try await Self.exchange(request, port: launch.port)
+        if let error = answer.error { throw ClientError.failed(error) }
+        guard let body = answer.body else { return [] }
+        return (try? JSONDecoder().decode([AllowList.TestDevice].self, from: body)) ?? []
+    }
+
     /// What the gateway knows of the run now.
     public func status() async throws -> LiveGatewayStatus {
         let answer = try await Self.exchange(LiveGatewayRequest(token: token, command: LiveGateway.statusCommand), port: launch.port)
