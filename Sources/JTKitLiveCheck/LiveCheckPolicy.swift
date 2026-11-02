@@ -86,6 +86,9 @@ public nonisolated enum LiveDecision: Sendable, Equatable {
 ///    allow-list says `productionReads`; never a write. An entry with
 ///    `productionTestDevices` also takes Blank Push, Update Inventory and
 ///    check-in to its listed devices, never an interruptive command (1.3.0).
+/// 9. Azure Storage (Intune app uploads, 1.3.3): only PUTs to the exact address
+///    (host and path) Graph gave in a content file of an app this run
+///    created; every other Azure Storage request is refused.
 public nonisolated final class LiveCheckPolicy: @unchecked Sendable {
     public let entries: [AllowList.Entry]
     public let includeProduction: Bool
@@ -113,6 +116,9 @@ public nonisolated final class LiveCheckPolicy: @unchecked Sendable {
     private var purgeable: [String: Set<String>] = [:]
     /// Apple’s access tokens, which carry no organization, by the client they were issued to.
     private var appleTokens: [String: String] = [:]
+    /// Azure Storage addresses ("host/path", lowercased, no SAS query) Graph
+    /// gave for content files of apps this run created (rule 9).
+    private var storageUploads: [String: (role: String, target: String, appID: String)] = [:]
     /// Devices claimed by commands decided but maybe not yet recorded (`decideCommand`).
     private let commandLock = NSLock()
     private var reservedDevices: [String: Set<String>] = [:]
@@ -164,6 +170,9 @@ public nonisolated final class LiveCheckPolicy: @unchecked Sendable {
             return .refuse("Only https requests to allow-listed tenants are sent")
         }
         let path = request.url.path(percentEncoded: false)
+        if Self.isAzureStorage(host) {
+            return decideStorageUpload(request, host: host, path: path)
+        }
         switch identify(request, host: host, path: path) {
         case .failure(let refusal):
             return .refuse(refusal.reason)
@@ -426,6 +435,42 @@ public nonisolated final class LiveCheckPolicy: @unchecked Sendable {
     func learnDevices(from body: Data, target: String, role: String, path: String = "") {
         guard let entry = entries.first(where: { $0.role == role }) else { return }
         devices.learn(from: body, target: target, listed: entry.testDeviceSerials, family: DeviceRegistry.family(of: path))
+    }
+
+    // MARK: Azure Storage (rule 9)
+
+    static func isAzureStorage(_ host: String) -> Bool {
+        host.hasSuffix(".blob.core.windows.net")
+    }
+
+    /// Learns the Azure Storage address of an app content file from Graph's
+    /// answer (`…/mobileApps/{id}/…/contentVersions/{v}/files/{f}`), only
+    /// for an app in the ledger and only an https Azure Storage address.
+    func learnStorageUpload(from body: Data, target: String, role: String, path: String) {
+        guard target.hasPrefix("intune:") else { return }
+        let segments = path.lowercased().split(separator: "/").map(String.init)
+        guard let apps = segments.firstIndex(of: "mobileapps"), apps + 1 < segments.count,
+              segments.contains("contentversions"), segments.contains("files") else { return }
+        let appID = segments[apps + 1]
+        guard ledger.contains(target: target, resource: "mobileApps", id: appID),
+              let object = try? JSONSerialization.jsonObject(with: body) as? [String: Any],
+              let address = object["azureStorageUri"] as? String, let url = URL(string: address),
+              url.scheme?.lowercased() == "https", let host = url.host()?.lowercased(), Self.isAzureStorage(host) else { return }
+        let key = host + url.path(percentEncoded: false).lowercased()
+        lock.withLock { storageUploads[key] = (role, target, appID) }
+    }
+
+    /// An upload block or block list to an address learned for this run's app.
+    private func decideStorageUpload(_ request: LiveRequest, host: String, path: String) -> LiveDecision {
+        guard let upload = lock.withLock({ storageUploads[host + path.lowercased()] }) else {
+            return .refuse("Azure Storage: only an upload to an address Graph gave for an app this run created is sent")
+        }
+        guard request.method == "PUT" else { return .refuse("Azure Storage: only uploads (PUT) are sent") }
+        guard let entry = entries.first(where: { $0.role == upload.role }), !entry.production, entry.access != .readOnly else {
+            return .refuse("Azure Storage: \(upload.role) takes no writes")
+        }
+        guard writesAllowed else { return .refuse("Writes are off in this stage of the release check: PUT refused") }
+        return .allow(.init(kind: .change, role: upload.role, target: upload.target, resource: "mobileApps", id: upload.appID))
     }
 
     // MARK: Graph
