@@ -723,6 +723,10 @@ A minor release: new features and fixes, nothing that breaks an app on 1.0 (anyt
 - **Order and checks:** Part A, then B, then C, on one branch `1.1.0`, with JTKit tests for every rule (each refusal of B1/B2 tested in JTKit). Every app builds against the branch (`--local-jtkit`); Jamf Deployer and Checkpoint run their release check against it. Then an independent review of the JTKit changes (Fable), fixes, Jordy’s approval, and the 1.1.0 tag.
 - **Decided:** longest retry wait 60 s (A7); the B2 test devices wait until Checkpoint.
 
+- **Open for JTKit’s next version** (found in Jamf Deployer 1.2.0’s release check, 2026-11-02; no change yet):
+  - The failure screenshot crashes the UI test runner: `JTKitUITestCase.record(_:)` takes `XCUIElement.screenshot()` of the app’s window, and on Jordy’s Mac (macOS 27.2, Xcode 27.2) the runner stops at `Assertion failed: (did_initialize), function CGS_REQUIRE_INIT`. The test’s failure message is lost with it, and the release check reports “Executed 0 tests”. Jamf Deployer prints each failure before calling `super.record` as a workaround.
+  - `systemAttachmentLifetime = "keepNever"` on a release-check scheme (asked for by 1.3.2’s “Moving an app to 1.3.2”) made XCTest count two runtime warnings Jamf Deployer’s app prints a few seconds after launch (`[Security] … Performance Diagnostics: This method should not be called on the main thread`) as test failures; without the setting the same tests pass with the same warnings. Jamf Deployer leaves the setting out. Their source wasn’t found: no main-thread Keychain or code-signing call shows under lldb outside XCTest, and Jamf Migrator’s app doesn’t print them.
+
 ## Not shared
 
 Each app’s own engine (migration, deployment, rule building) and whole Settings screens; only the sections above are shared. Out of scope entirely: IntuneOnboard (with OnboardCore), Device Assist and its customer variants, and Replicator (fork).
