@@ -3,8 +3,9 @@ import Foundation
 /// Links to a record’s page in the Jamf Pro or Jamf School web interface,
 /// as Checkpoint, Serial Number Reader and Profile2Blueprint each built them.
 /// Jamf Pro pages open read-only (`o=r`), so a click never starts an edit.
-/// `base` is the server’s web address, in any form a person pastes
-/// (`Connection.serverOrigin` reduces it); nil when it has no host or is `http://`.
+/// `base` is the server’s web address, in any form a person pastes; nil when
+/// it has no host or is `http://`. A Jamf Pro address keeps its path (an
+/// on-premises server under `/jamf`), without a trailing `/api` (1.3.2).
 public nonisolated enum JamfWebLink {
     /// `computers.html?id=…&o=r`
     public static func computer(id: String, base: String) -> URL? {
@@ -24,8 +25,8 @@ public nonisolated enum JamfWebLink {
 
     /// A Blueprint: `view/mfe/blueprints/{id}` on the Jamf Pro web address.
     public static func blueprint(id: String, base: String) -> URL? {
-        guard let origin = Connection.serverOrigin(base), let segment = pathSegment(id) else { return nil }
-        return URL(string: "\(origin.absoluteString)/view/mfe/blueprints/\(segment)")
+        guard let root = jamfProRoot(base), let segment = pathSegment(id) else { return nil }
+        return URL(string: "\(root.absoluteString)/view/mfe/blueprints/\(segment)")
     }
 
     /// A Jamf School device: `devices/details/{udid}`.
@@ -34,8 +35,19 @@ public nonisolated enum JamfWebLink {
         return URL(string: "\(origin.absoluteString)/devices/details/\(segment)")
     }
 
-    private static func page(_ base: String, _ name: String, id: String) -> URL? {
+    /// The Jamf Pro web root: the origin plus the address’s path, without a
+    /// trailing `/api` or slash.
+    static func jamfProRoot(_ base: String) -> URL? {
         guard let origin = Connection.serverOrigin(base) else { return nil }
+        let trimmed = base.trimmingCharacters(in: .whitespacesAndNewlines)
+        let withScheme = trimmed.contains("://") ? trimmed : "https://" + trimmed
+        var segments = (URLComponents(string: withScheme)?.path ?? "").split(separator: "/").map(String.init)
+        if segments.last?.lowercased() == "api" { segments.removeLast() }
+        return segments.reduce(origin) { $0.appending(path: $1) }
+    }
+
+    private static func page(_ base: String, _ name: String, id: String) -> URL? {
+        guard let origin = jamfProRoot(base) else { return nil }
         let trimmed = id.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return nil }
         var components = URLComponents(url: origin.appending(path: name), resolvingAgainstBaseURL: false)

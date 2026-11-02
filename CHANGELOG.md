@@ -10,6 +10,9 @@ unless it switches over `MDMCommand.SkipReason` (none of the eight apps does): a
   `.skipped(.stopped)` (“not sent, stopped.”) and throws no `CancellationError`. Before, the whole result was thrown
   away and an app could report devices that had received the command as failed.
 
+- `JamfWebLink`: a Jamf Pro address keeps its path (an on-premises server under `/jamf`), without a trailing `/api`;
+  before, the link went to the origin only and such a server answered 404.
+
 ### Added
 - `MDMCommand.SkipReason.stopped`; `MDMCommand.Result.stopped` and `wasStopped`.
 - Live checks: the launch file marks the connections whose role lists test devices for the run

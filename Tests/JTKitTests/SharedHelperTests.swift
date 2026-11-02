@@ -50,6 +50,18 @@ struct JamfWebLinkTests {
                 == "https://school.example.com/devices/details/00008030-001A2B3C4D5E802E")
     }
 
+    @Test("A Jamf Pro address keeps its path (on-premises under /jamf), without a trailing /api (1.3.2)")
+    func keepsThePath() {
+        #expect(JamfWebLink.computer(id: "12", base: "https://jss.example.com:8443/jamf")?.absoluteString
+                == "https://jss.example.com:8443/jamf/computers.html?id=12&o=r")
+        #expect(JamfWebLink.mobileDevice(id: "7", base: "jss.example.com/jamf/api/")?.absoluteString
+                == "https://jss.example.com/jamf/mobileDevices.html?id=7&o=r")
+        #expect(JamfWebLink.blueprint(id: "b1", base: "https://jss.example.com/jamf/")?.absoluteString
+                == "https://jss.example.com/jamf/view/mfe/blueprints/b1")
+        #expect(JamfWebLink.computer(id: "12", base: "https://pro.example.com")?.absoluteString
+                == "https://pro.example.com/computers.html?id=12&o=r")
+    }
+
     @Test("No link without a usable address or ID; an ID can’t reach another page")
     func refuses() {
         #expect(JamfWebLink.computer(id: "1", base: "http://pro.example.com") == nil)
