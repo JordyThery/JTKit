@@ -114,6 +114,17 @@ public final class LiveGatewayClient: @unchecked Sendable {
         return taken
     }
 
+    /// The allow-list’s test devices of a role of this run, for a UI test
+    /// runner that can’t read the allow-list (a sandboxed runner).
+    public func testDevices(role: String) async throws -> [AllowList.TestDevice] {
+        let request = LiveGatewayRequest(token: token, command: LiveGateway.testDevicesCommand,
+                                         step: LiveCheckRun.StepResult(step: role, passed: true, note: nil))
+        let answer = try await Self.exchange(request, port: launch.port)
+        if let error = answer.error { throw ClientError.failed(error) }
+        guard let body = answer.body else { return [] }
+        return (try? JSONDecoder().decode([AllowList.TestDevice].self, from: body)) ?? []
+    }
+
     /// What the gateway knows of the run now.
     public func status() async throws -> LiveGatewayStatus {
         let answer = try await Self.exchange(LiveGatewayRequest(token: token, command: LiveGateway.statusCommand), port: launch.port)

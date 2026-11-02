@@ -325,9 +325,10 @@ struct LiveGatewayTests {
     /// A run with a second role whose credentials the release check doesn’t read.
     private func makeRunWithSchool() throws -> (LiveCheckRun, URL) {
         let runFolder = folder()
-        let list = AllowList(tenants: [
+        let list = AllowList(version: 3, tenants: [
             .init(role: "jamf-test-a", service: .jamfPlatform, region: "eu", environmentID: environmentA, access: .full),
-            .init(role: "jamfschool-readonly", service: .jamfSchool, host: "school.example.com", access: .readOnly),
+            .init(role: "jamfschool-readonly", service: .jamfSchool, host: "school.example.com", access: .readOnly,
+                  testDevices: [.init(serial: "JTKTESTSERIAL1", name: "Test iPad", interruptive: false)]),
         ])
         let listURL = folder().appending(path: "allowlist.json")
         try JSONEncoder().encode(list).write(to: listURL)
@@ -365,6 +366,16 @@ struct LiveGatewayTests {
         // handed over once: a second value doesn’t replace the first
         #expect(try await client.provide([LiveSecretItem(role: "jamfschool-readonly", item: "api-key", value: "x")]).isEmpty)
         #expect(try await again.secret(role: "jamfschool-readonly", item: "api-key") == "school-key")
+    }
+
+    @Test func aUITestRunnerAsksForARolesTestDevices() async throws {
+        let (run, owner) = try makeRunWithSchool()
+        let gateway = try LiveGateway(run: run, lockOwnerURL: owner)
+        defer { gateway.stop() }
+        let client = try LiveGatewayClient(runFolder: run.runFolder)
+        #expect(try await client.testDevices(role: "jamfschool-readonly").map(\.serial) == ["JTKTESTSERIAL1"])
+        #expect(try await client.testDevices(role: "jamf-test-a").isEmpty)
+        await #expect(throws: LiveGatewayClient.ClientError.self) { _ = try await client.testDevices(role: "jamfpro-production") }
     }
 
     @Test func handingOverIsLimitedToTheRunsRolesAndKnownItems() async throws {

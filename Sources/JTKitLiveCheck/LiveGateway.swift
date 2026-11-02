@@ -284,6 +284,9 @@ public final class LiveGateway: @unchecked Sendable {
     public static let secretsCommand = "secrets"
     /// Credentials handed over from an app’s saved connections (`LiveGatewayRequest.secrets`, with values).
     public static let provideCommand = "provide"
+    /// The allow-list’s test devices of a role of this run (`LiveGatewayRequest.step.step` names the role),
+    /// for a UI test runner that can’t read the allow-list.
+    public static let testDevicesCommand = "testDevices"
     /// The app waits before trying a request again (`LiveGatewayRequest.waitSeconds`).
     public static let waitCommand = "wait"
 
@@ -399,6 +402,12 @@ public final class LiveGateway: @unchecked Sendable {
             } catch {
                 return reply(LiveGatewayResponse(error: "\(error)"))
             }
+        case Self.testDevicesCommand?:
+            guard let role = request.step?.step, run.roles.contains(role) else {
+                return reply(LiveGatewayResponse(error: "No role of this run to list test devices for."))
+            }
+            let devices = run.allowList.tenants.filter { $0.role == role }.flatMap { $0.testDevices ?? [] }
+            return reply(LiveGatewayResponse(status: 200, body: try? JSONEncoder().encode(devices)))
         case Self.waitCommand?:
             // the retry itself arrives a moment after the wait
             let seconds = min(max(request.waitSeconds ?? 0, 0), 600) + 2

@@ -10,6 +10,8 @@ A patch release for the release checks: live UI tests can use an app’s own sav
   and secret, username and password, Network ID and API key, key ID and private key, and the `jamfpro-` ones),
   never in place of a credential the release check read itself or one already handed over. They are kept in
   memory; the launch file is written again so an app launched afterwards gets its connections with their IDs.
+- `LiveGatewayClient.testDevices(role:)`: the allow-list’s test devices of a role of the run, for a UI test runner
+  that can’t read the allow-list (a sandboxed app’s runner).
 - `Scripts/release-check-lib.sh`: `HOST_CREDENTIALS_TEST`, optional. A test in the app’s test host that reads the
   app’s saved connections for the run’s roles and hands them to the gateway, run after the gateway starts for each
   live UI test (also with `--only`), before the app is launched.
