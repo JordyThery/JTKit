@@ -12,6 +12,9 @@ unless it switches over `MDMCommand.SkipReason` (none of the eight apps does): a
 
 ### Added
 - `MDMCommand.SkipReason.stopped`; `MDMCommand.Result.stopped` and `wasStopped`.
+- Live checks: the launch file marks the connections whose role lists test devices for the run
+  (`receivesCommands`, after `READ_ONLY_ROLES`), and `LiveLaunch.receivesCommands(_:)` tells an app under the
+  switch, so it can let a device command through those connections only. The gateway still decides every command.
 - The Action entry of a stopped command reads “<Command> stopped: n sent, m not sent”, names each device not sent
   to, and is a warning, not a failure.
 

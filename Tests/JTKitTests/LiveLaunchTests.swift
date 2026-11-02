@@ -376,6 +376,19 @@ struct LiveGatewayTests {
         #expect(try await client.testDevices(role: "jamfschool-readonly").map(\.serial) == ["JTKTESTSERIAL1"])
         #expect(try await client.testDevices(role: "jamf-test-a").isEmpty)
         await #expect(throws: LiveGatewayClient.ClientError.self) { _ = try await client.testDevices(role: "jamfpro-production") }
+        // only the role with test devices may receive a command (1.3.2)
+        let byRole = Dictionary(uniqueKeysWithValues: client.launch.connections.map { ($0.role, $0.receivesCommands) })
+        #expect(byRole["jamfschool-readonly"] == true)
+        #expect(byRole["jamf-test-a"] == false)
+        let read = try JSONDecoder().decode(LiveLaunch.LaunchFile.self, from: JSONEncoder().encode(client.launch))
+        let school = try #require(read.connections.first { $0.role == "jamfschool-readonly" })
+        let state = LiveLaunch.State.active(.init(runFolder: run.runFolder, port: gateway.port, token: "t",
+                                                  connections: read.connections, secrets: [:]))
+        LiveLaunch.$testState.withValue(state) {
+            #expect(LiveLaunch.receivesCommands(school.connection.id))
+            #expect(!LiveLaunch.receivesCommands(read.connections.first { $0.role == "jamf-test-a" }!.connection.id))
+        }
+        #expect(!LiveLaunch.receivesCommands(school.connection.id), "never without the switch")
     }
 
     @Test func handingOverIsLimitedToTheRunsRolesAndKnownItems() async throws {
