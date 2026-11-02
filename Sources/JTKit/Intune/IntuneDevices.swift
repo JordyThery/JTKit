@@ -231,7 +231,14 @@ extension Graph.Client {
         }
         let title = command.title(on: .intune)
         var outcomes = [MDMCommand.DeviceOutcome]()
+        var stopped = false
         for target in targets {
+            // stopped during a wait: what was sent stays sent, the rest isn’t sent
+            if stopped {
+                outcomes.append(.init(target: target, outcome: command.applies(to: target.kind, on: .intune)
+                                      ? .skipped(.stopped) : .skipped(.notApplicable(target.kind))))
+                continue
+            }
             guard command.applies(to: target.kind, on: .intune) else {
                 outcomes.append(.init(target: target, outcome: .skipped(.notApplicable(target.kind))))
                 continue
@@ -240,7 +247,8 @@ extension Graph.Client {
                 try await performCommand(command, intuneDeviceID: target.recordID)
                 outcomes.append(.init(target: target, outcome: .sent))
             } catch is CancellationError {
-                throw CancellationError()
+                stopped = true
+                outcomes.append(.init(target: target, outcome: .skipped(.stopped)))
             } catch {
                 outcomes.append(.init(target: target, outcome: .failed(error.localizedDescription)))
             }

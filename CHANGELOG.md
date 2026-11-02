@@ -1,5 +1,23 @@
 # Changelog
 
+## 1.3.2 (2026-11-02)
+A patch release: a command stopped during a wait keeps what it sent. Code written for 1.3.1 compiles unchanged,
+unless it switches over `MDMCommand.SkipReason` (none of the eight apps does): add `.stopped`.
+
+### Fixed
+- Jamf Pro, Jamf School and Intune commands sent one request at a time: when a wait before a retry is stopped
+  (`RequestWaits.cancelAll()`) or the task is canceled, `send` returns what it already sent, marks the other devices
+  `.skipped(.stopped)` (“not sent, stopped.”) and throws no `CancellationError`. Before, the whole result was thrown
+  away and an app could report devices that had received the command as failed.
+
+### Added
+- `MDMCommand.SkipReason.stopped`; `MDMCommand.Result.stopped` and `wasStopped`.
+- The Action entry of a stopped command reads “<Command> stopped: n sent, m not sent”, names each device not sent
+  to, and is a warning, not a failure.
+
+### Moving an app to 1.3.2
+- Show a stopped result as such (`wasStopped`): its `sent` devices received the command, never report them failed.
+
 ## 1.3.1 (2026-11-02)
 A patch release for the release checks: live UI tests can use an app’s own saved connections. Code written for
 1.3.0 compiles unchanged.

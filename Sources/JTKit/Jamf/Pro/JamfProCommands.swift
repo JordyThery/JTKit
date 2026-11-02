@@ -26,7 +26,8 @@ extension JamfPlatform.Client {
     /// - Returns: what became of the command on each device, in the order given.
     /// - Throws: `MDMCommand.Refusal` when nothing is sent at all (no or
     ///   another approval, not over the Platform API, no PIN, no device with
-    ///   what the address needs); `CancellationError`.
+    ///   what the address needs). Stopped during a wait, it returns what was
+    ///   sent, the rest `.skipped(.stopped)` (1.3.2).
     public func send(_ command: MDMCommand, to targets: [MDMCommand.Target],
                      approval: MDMCommand.Confirmation.Approval?) async throws -> MDMCommand.Result {
         let receiving = command.plan(for: targets, on: .jamfPro, overPlatformAPI: server == .platformAPI).receiving
@@ -53,8 +54,19 @@ extension JamfPlatform.Client {
 
         var run = CommandRun(targets: targets, command: command.title)
         for skip in plan.skipped { run.set(skip.target, .skipped(skip.reason)) }
-        let receiving = plan.receiving
 
+        // Stopped during a wait: what was sent stays sent, the rest is
+        // "not sent, stopped", never thrown away as a whole.
+        do {
+            try await sendEach(command, plan.receiving, pin: pin, overPlatformAPI: overPlatformAPI, &run)
+        } catch is CancellationError {
+            run.stopRemaining()
+        }
+        return run.result
+    }
+
+    private func sendEach(_ command: MDMCommand, _ receiving: [MDMCommand.Target], pin: String?,
+                          overPlatformAPI: Bool, _ run: inout CommandRun) async throws {
         switch command {
         case .deleteRecord:
             // not a Jamf Pro command: every device was skipped above
@@ -116,7 +128,6 @@ extension JamfPlatform.Client {
                 }
             }
         }
-        return run.result
     }
 
     /// Deletes a computer’s record (`v4/computers-inventory/{id}`). Can’t be
@@ -290,7 +301,14 @@ nonisolated struct CommandRun {
         }
     }
 
+    /// Stopped: every device still without an outcome wasn’t sent to.
+    mutating func stopRemaining() {
+        for index in outcomes.indices where outcomes[index] == nil { outcomes[index] = .skipped(.stopped) }
+    }
+
     /// Runs one device’s request; a failure becomes that device’s outcome.
+    /// A cancellation goes up to the sender, which keeps what was sent
+    /// (`stopRemaining`).
     mutating func each(_ target: MDMCommand.Target, _ body: () async throws -> MDMCommand.Outcome) async throws {
         do {
             set(target, try await body())
