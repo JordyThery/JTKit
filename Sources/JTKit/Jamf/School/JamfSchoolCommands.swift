@@ -37,7 +37,8 @@ extension JamfSchool.Client {
     ///   MDM Profile (`needsApproval(on:)`), and then for exactly this
     ///   command on Jamf School and the devices that receive it.
     /// - Throws: `MDMCommand.Refusal` for a command Jamf School doesn’t have,
-    ///   and for no or another approval; `CancellationError`.
+    ///   and for no or another approval. Stopped during a wait, it returns
+    ///   what was sent, the rest `.skipped(.stopped)` (1.3.2).
     public func send(_ command: MDMCommand, to targets: [MDMCommand.Target],
                      approval: MDMCommand.Confirmation.Approval?) async throws -> MDMCommand.Result {
         try command.check(approval, on: .jamfSchool, receiving: command.plan(for: targets, on: .jamfSchool).receiving.count)
@@ -57,14 +58,19 @@ extension JamfSchool.Client {
         let plan = command.plan(for: targets, on: .jamfSchool)
         var run = CommandRun(targets: targets, command: command.title)
         for skip in plan.skipped { run.set(skip.target, .skipped(skip.reason)) }
-        for target in plan.receiving {
-            try await run.each(target) {
-                let udid = try Self.validatedUDID(target.recordID)
-                _ = try await send(HTTPRequest(method: "POST", path: "api/devices/\(udid)/\(action)",
-                                               body: form.map { Data($0.utf8) },
-                                               contentType: form == nil ? nil : "application/x-www-form-urlencoded; charset=utf-8"))
-                return .sent
+        do {
+            for target in plan.receiving {
+                try await run.each(target) {
+                    let udid = try Self.validatedUDID(target.recordID)
+                    _ = try await send(HTTPRequest(method: "POST", path: "api/devices/\(udid)/\(action)",
+                                                   body: form.map { Data($0.utf8) },
+                                                   contentType: form == nil ? nil : "application/x-www-form-urlencoded; charset=utf-8"))
+                    return .sent
+                }
             }
+        } catch is CancellationError {
+            // stopped during a wait: what was sent stays sent
+            run.stopRemaining()
         }
         return run.result
     }

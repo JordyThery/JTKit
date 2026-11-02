@@ -142,7 +142,7 @@ public final class LiveGateway: @unchecked Sendable {
         self.port = port
 
         let launch = LiveLaunchFile(port: port, lockOwner: owner,
-                                    connections: described.map { .init(role: $0.role, connection: $0, secretItem: $0.secretItem) })
+                                    connections: described.map { Self.launchEntry($0, run: run) })
         let data = try JSONEncoder().encode(launch)
         do {
             for folder in [run.runFolder] + (self.runnerFolder.map { [$0] } ?? []) {
@@ -169,6 +169,14 @@ public final class LiveGateway: @unchecked Sendable {
     }
 
     deinit { listener.cancel() }
+
+    /// A connection as the launch file lists it, with whether its role
+    /// lists test devices in this run (after `READ_ONLY_ROLES`).
+    private static func launchEntry(_ connection: LiveConnectionDescription, run: LiveCheckRun) -> LiveLaunchFile.Entry {
+        let devices = run.allowList.tenants.filter { $0.role == connection.role }.flatMap { $0.testDevices ?? [] }
+        return .init(role: connection.role, connection: connection, secretItem: connection.secretItem,
+                     receivesCommands: !devices.isEmpty)
+    }
 
     /// The launch file’s connections, from the allow-list and the
     /// credentials known now (the release check’s, then those handed over).
@@ -226,7 +234,7 @@ public final class LiveGateway: @unchecked Sendable {
         let described = describeConnections()
         lock.withLock { connections = described }
         let launch = LiveLaunchFile(port: port, lockOwner: lockOwner,
-                                    connections: described.map { .init(role: $0.role, connection: $0, secretItem: $0.secretItem) })
+                                    connections: described.map { Self.launchEntry($0, run: run) })
         let data = try JSONEncoder().encode(launch)
         for folder in [run.runFolder] + (runnerFolder.map { [$0] } ?? []) {
             try Self.writeLaunchFiles(launch: data, token: token, to: folder)
@@ -632,9 +640,14 @@ public struct LiveLaunchFile: Codable, Equatable, Sendable {
         public var connection: LiveConnectionDescription
         /// Which of the run’s items holds this connection’s secret.
         public var secretItem: String?
+        /// The role lists test devices for this run (1.3.2): the only
+        /// connections an app may send a device command through.
+        public var receivesCommands: Bool?
 
-        public init(role: String, connection: LiveConnectionDescription, secretItem: String? = nil) {
+        public init(role: String, connection: LiveConnectionDescription, secretItem: String? = nil,
+                    receivesCommands: Bool? = nil) {
             self.role = role
+            self.receivesCommands = receivesCommands
             var connection = connection
             connection.role = role
             if let secretItem { connection.secretItem = secretItem }
@@ -646,7 +659,8 @@ public struct LiveLaunchFile: Codable, Equatable, Sendable {
             let container = try decoder.container(keyedBy: CodingKeys.self)
             let role = try container.decode(String.self, forKey: .role)
             let connection = try container.decode(LiveConnectionDescription.self, forKey: .connection)
-            self.init(role: role, connection: connection, secretItem: try container.decodeIfPresent(String.self, forKey: .secretItem))
+            self.init(role: role, connection: connection, secretItem: try container.decodeIfPresent(String.self, forKey: .secretItem),
+                      receivesCommands: try container.decodeIfPresent(Bool.self, forKey: .receivesCommands))
         }
     }
 

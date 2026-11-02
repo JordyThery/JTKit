@@ -88,12 +88,13 @@ open class JTKitUITestCase: XCTestCase {
 
     override open func tearDown() {
         let failed = (testRun?.failureCount ?? 0) > 0
-        if failed, let app {
+        // A live UI test shows a real tenant: no element dump, no screenshot (1.3.2).
+        if failed, !launchesLive, let app {
             let tree = (try? app.snapshot()).map { Self.outline(Self.node($0)) } ?? "(no element tree)\n"
             print("UIDUMP-BEGIN\n\(tree)UIDUMP-END")
         }
         // A failure recorded off the main thread got no screenshot yet.
-        if let shot = Self.failureScreenshot(failed: failed, alreadyAttached: didAttachFailureScreenshot,
+        if !launchesLive, let shot = Self.failureScreenshot(failed: failed, alreadyAttached: didAttachFailureScreenshot,
                                              capture: { XCTAttachment(screenshot: failureScreenshotSource()) }) {
             didAttachFailureScreenshot = true
             add(shot)
@@ -279,7 +280,7 @@ open class JTKitUITestCase: XCTestCase {
     /// data only, never a real tenant.
     override open func record(_ issue: XCTIssue) {
         var issue = issue
-        if Thread.isMainThread,
+        if Thread.isMainThread, !launchesLive,
            let shot = Self.failureScreenshot(failed: true, alreadyAttached: didAttachFailureScreenshot,
                                              capture: { XCTAttachment(screenshot: failureScreenshotSource()) }) {
             didAttachFailureScreenshot = true

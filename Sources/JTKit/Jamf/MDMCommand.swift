@@ -278,6 +278,10 @@ extension MDMCommand {
         case noUDID
         /// The app found no record for it on the connection.
         case noRecord
+        /// The run was stopped (a wait before a retry ended with
+        /// `RequestWaits.cancelAll()`, or the task canceled) before this
+        /// device’s request was sent (1.3.2).
+        case stopped
 
         /// After "SERIAL: ", in results.
         public var line: String {
@@ -287,6 +291,7 @@ extension MDMCommand {
             case .noManagementID: "the record has no management ID. Run a fresh lookup first."
             case .noUDID: "the record has no UDID, so the MDM profile can’t be renewed. Run a fresh lookup first."
             case .noRecord: "no record on this connection."
+            case .stopped: "not sent, stopped."
             }
         }
 
@@ -299,6 +304,7 @@ extension MDMCommand {
             case .noManagementID: one ? "1 has no management ID" : "\(count) have no management ID"
             case .noUDID: one ? "1 has no UDID" : "\(count) have no UDID"
             case .noRecord: one ? "1 has no record on this connection" : "\(count) have no record on this connection"
+            case .stopped: one ? "1 wasn’t sent, stopped" : "\(count) weren’t sent, stopped"
             }
         }
     }
@@ -588,6 +594,13 @@ extension MDMCommand {
 
         public var sent: [Target] { outcomes.filter { $0.outcome == .sent }.map(\.target) }
 
+        /// The devices not sent to because the run was stopped (1.3.2).
+        public var stopped: [Target] { outcomes.filter { $0.outcome == .skipped(.stopped) }.map(\.target) }
+
+        /// The run was stopped before every device was sent to; `sent` holds
+        /// those that were.
+        public var wasStopped: Bool { !stopped.isEmpty }
+
         /// Every applicable device received it, and nothing needs saying.
         public var isComplete: Bool { problems == nil }
 
@@ -655,7 +668,10 @@ extension ActivityLog {
             return
         }
         let sent = outcomes.filter { $0.outcome == .sent }.count
-        let summary = sent == outcomes.count
+        let stopped = outcomes.filter { $0.outcome == .skipped(.stopped) }.count
+        let summary = stopped > 0
+            ? "\(title) stopped: \(sent) sent, \(stopped) not sent"
+            : sent == outcomes.count
             ? "Sent \(title) to \(Self.devices(sent))"
             : sent == 0 ? "\(title) reached none of the \(Self.devices(outcomes.count))"
             : "Sent \(title) to \(sent) of \(Self.devices(outcomes.count))"
@@ -670,6 +686,8 @@ extension ActivityLog {
             case .notProcessed:
                 failed = true
                 lines.append("\(item.target.serial): accepted, but not processed")
+            case .skipped(.stopped):
+                lines.append("\(item.target.serial): not sent, stopped")
             case .skipped(let reason):
                 lines.append("\(item.target.serial): skipped — \(reason.line)")
             }

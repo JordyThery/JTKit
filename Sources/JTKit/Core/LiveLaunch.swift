@@ -55,11 +55,15 @@ public nonisolated enum LiveLaunch {
             /// The run’s item holding the secret, e.g. "jamfpro-password";
             /// nil: the sign-in’s usual one (`secretItem(_:)`).
             public var secretItem: String?
+            /// The role lists test devices for this run (1.3.2): the only
+            /// connections a device command may go through.
+            public var receivesCommands: Bool?
 
-            public init(role: String, connection: Connection, secretItem: String? = nil) {
+            public init(role: String, connection: Connection, secretItem: String? = nil, receivesCommands: Bool? = nil) {
                 self.role = role
                 self.connection = connection
                 self.secretItem = secretItem
+                self.receivesCommands = receivesCommands
             }
 
             /// The item of the run holding this connection’s main secret.
@@ -134,6 +138,14 @@ public nonisolated enum LiveLaunch {
                 .appending(path: "jtkit-live-refused-\(UUID().uuidString)", directoryHint: .isDirectory)
                 .appending(path: safe, directoryHint: .isDirectory)
         }
+    }
+
+    /// Whether a device command may go through this connection under the
+    /// switch: its role lists test devices for the run (1.3.2). False when
+    /// the switch is off or refused. The gateway still decides every command.
+    public static func receivesCommands(_ connectionID: UUID) -> Bool {
+        guard case .active(let active) = state else { return false }
+        return active.connections.first { $0.connection.id == connectionID }?.receivesCommands == true
     }
 
     /// The release check’s connections, in the order the gateway listed them.

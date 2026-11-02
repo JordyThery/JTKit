@@ -1,5 +1,33 @@
 # Changelog
 
+## 1.3.2 (2026-11-02)
+A patch release: a command stopped during a wait keeps what it sent. Code written for 1.3.1 compiles unchanged,
+unless it switches over `MDMCommand.SkipReason` (none of the eight apps does): add `.stopped`.
+
+### Fixed
+- Jamf Pro, Jamf School and Intune commands sent one request at a time: when a wait before a retry is stopped
+  (`RequestWaits.cancelAll()`) or the task is canceled, `send` returns what it already sent, marks the other devices
+  `.skipped(.stopped)` (“not sent, stopped.”) and throws no `CancellationError`. Before, the whole result was thrown
+  away and an app could report devices that had received the command as failed.
+
+- `JamfWebLink`: a Jamf Pro address keeps its path (an on-premises server under `/jamf`), without a trailing `/api`;
+  before, the link went to the origin only and such a server answered 404.
+
+- `JTKitUITestCase`: a live UI test (`launchesLive`) attaches no failure screenshot and prints no element dump: it
+  shows a real tenant. An app also sets `systemAttachmentLifetime = "keepNever"` on its release-check scheme’s test
+  action so XCTest keeps no automatic screenshots.
+
+### Added
+- `MDMCommand.SkipReason.stopped`; `MDMCommand.Result.stopped` and `wasStopped`.
+- Live checks: the launch file marks the connections whose role lists test devices for the run
+  (`receivesCommands`, after `READ_ONLY_ROLES`), and `LiveLaunch.receivesCommands(_:)` tells an app under the
+  switch, so it can let a device command through those connections only. The gateway still decides every command.
+- The Action entry of a stopped command reads “<Command> stopped: n sent, m not sent”, names each device not sent
+  to, and is a warning, not a failure.
+
+### Moving an app to 1.3.2
+- Show a stopped result as such (`wasStopped`): its `sent` devices received the command, never report them failed.
+
 ## 1.3.1 (2026-11-02)
 A patch release for the release checks: live UI tests can use an app’s own saved connections. Code written for
 1.3.0 compiles unchanged.
