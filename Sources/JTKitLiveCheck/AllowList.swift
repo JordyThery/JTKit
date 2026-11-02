@@ -11,6 +11,13 @@ import Foundation
 /// refused: a customer’s tenant is never on the list) and `testDevices` (the
 /// devices commands may go to). Access may also be written `disposable` (=
 /// `full`) and `read` (= `readOnly`), the names of the 1.1.0 plan.
+///
+/// Version 3 (1.3.0) adds, both optional: per entry `productionTestDevices`
+/// (a production entry may list test devices, for Blank Push, Update
+/// Inventory and check-in only) and per test device `interruptive` (false:
+/// that device never gets an interruptive command). A file using either must
+/// say version 3, so an older JTKit refuses it instead of reading it without
+/// them.
 public nonisolated struct AllowList: Codable, Sendable, Equatable {
     public var version: Int
     public var tenants: [Entry]
@@ -25,7 +32,7 @@ public nonisolated struct AllowList: Codable, Sendable, Equatable {
     }
 
     /// The versions this JTKit reads.
-    public static let supportedVersions: Set<Int> = [1, 2]
+    public static let supportedVersions: Set<Int> = [1, 2, 3]
 
     /// `~/Library/Application Support/JTKit Release Check/allowlist.json`.
     public static var defaultURL: URL {
@@ -65,17 +72,27 @@ public nonisolated struct AllowList: Codable, Sendable, Equatable {
     /// A device commands may be sent to: Blank Push, check-in and Update
     /// Inventory at once (at most 3 devices a run); restart, renew and every
     /// other interruptive or destructive command only after the serial
-    /// prompt. The serial is all the list holds; the IDs are learned from
-    /// the tenant’s own answers during the run.
+    /// prompt, never to a device marked `interruptive: false`, never to a
+    /// production entry’s device and never to the Mac the release check runs
+    /// on. The serial is all the list holds; the IDs are learned from the
+    /// tenant’s own answers during the run.
     public nonisolated struct TestDevice: Codable, Sendable, Equatable, Hashable {
         public let serial: String
         /// What the prompt shows when the tenant’s answer has no name.
         public let name: String?
+        /// False: non-interruptive commands only (Blank Push, Update
+        /// Inventory, check-in). Nil or true: interruptive ones too, after
+        /// the serial prompt (as in version 2). Version 3.
+        public let interruptive: Bool?
 
-        public init(serial: String, name: String? = nil) {
+        public init(serial: String, name: String? = nil, interruptive: Bool? = nil) {
             self.serial = serial
             self.name = name
+            self.interruptive = interruptive
         }
+
+        /// The serial as the policy compares it: trimmed, uppercased.
+        var normalizedSerial: String { serial.trimmingCharacters(in: .whitespaces).uppercased() }
     }
 
     public nonisolated struct Entry: Codable, Sendable, Equatable {
@@ -101,11 +118,15 @@ public nonisolated struct AllowList: Codable, Sendable, Equatable {
         public let customer: Bool?
         /// The devices commands may be sent to (see `TestDevice`); none by default.
         public let testDevices: [TestDevice]?
+        /// A production entry may list `testDevices`, for non-interruptive
+        /// commands only (Blank Push, Update Inventory, check-in). Nil or
+        /// false: a production entry takes no test devices. Version 3.
+        public let productionTestDevices: Bool?
 
         public init(role: String, service: Service, host: String? = nil, aliases: [String]? = nil,
                     region: String? = nil, environmentID: String? = nil, entraTenantID: String? = nil,
                     clientID: String? = nil, access: Access, production: Bool = false, keychainService: String? = nil,
-                    customer: Bool? = nil, testDevices: [TestDevice]? = nil) {
+                    customer: Bool? = nil, testDevices: [TestDevice]? = nil, productionTestDevices: Bool? = nil) {
             self.role = role
             self.service = service
             self.host = host
@@ -119,11 +140,22 @@ public nonisolated struct AllowList: Codable, Sendable, Equatable {
             self.keychainService = keychainService
             self.customer = customer
             self.testDevices = testDevices
+            self.productionTestDevices = productionTestDevices
         }
 
         /// The listed test devices’ serials, uppercased.
         public var testDeviceSerials: Set<String> {
-            Set((testDevices ?? []).map { $0.serial.trimmingCharacters(in: .whitespaces).uppercased() })
+            Set((testDevices ?? []).map(\.normalizedSerial))
+        }
+
+        /// The listed test device with this serial (uppercased).
+        func testDevice(serial: String) -> TestDevice? {
+            testDevices?.first { $0.normalizedSerial == serial }
+        }
+
+        /// Uses a version 3 key.
+        var usesVersionThree: Bool {
+            productionTestDevices != nil || (testDevices ?? []).contains { $0.interruptive != nil }
         }
 
         /// Every hostname of a Jamf Pro or Jamf School entry, lowercased
@@ -171,7 +203,12 @@ public nonisolated struct AllowList: Codable, Sendable, Equatable {
             throw LoadError.unreadable(String(describing: error))
         }
         guard supportedVersions.contains(list.version) else { throw LoadError.unsupportedVersion(list.version) }
-        for entry in list.tenants { try entry.validate() }
+        for entry in list.tenants {
+            try entry.validate()
+            if list.version < 3 && entry.usesVersionThree {
+                throw LoadError.incomplete(role: entry.role, reason: "productionTestDevices and a test device’s interruptive need version 3")
+            }
+        }
         return list
     }
 
@@ -201,7 +238,7 @@ public nonisolated struct AllowList: Codable, Sendable, Equatable {
                          environmentID: entry.environmentID, entraTenantID: entry.entraTenantID, clientID: entry.clientID,
                          access: .readOnly, production: entry.production, keychainService: entry.keychainService,
                          // read only for this app: no device commands either
-                         customer: entry.customer, testDevices: nil)
+                         customer: entry.customer, testDevices: nil, productionTestDevices: entry.productionTestDevices)
         }
         return list
     }
@@ -235,8 +272,11 @@ extension AllowList.Entry {
             throw AllowList.LoadError.incomplete(role: role, reason: "Apple Business or Apple School Manager is read only")
         }
         if let testDevices, !testDevices.isEmpty {
-            if production {
-                throw AllowList.LoadError.incomplete(role: role, reason: "a production tenant takes no test devices: it is only read")
+            if production && productionTestDevices != true {
+                throw AllowList.LoadError.incomplete(role: role, reason: "a production tenant takes no test devices without productionTestDevices: it is only read")
+            }
+            if production && testDevices.contains(where: { $0.interruptive == true }) {
+                throw AllowList.LoadError.incomplete(role: role, reason: "a production tenant’s test devices take non-interruptive commands only")
             }
             if service == .appleBusinessManager || service == .appleSchoolManager {
                 throw AllowList.LoadError.incomplete(role: role, reason: "Apple Business or Apple School Manager takes no commands")
