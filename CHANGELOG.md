@@ -1,6 +1,6 @@
 # Changelog
 
-## 1.4.0 (unreleased)
+## 1.4.0 (2026-11-03)
 A minor release: UI tests survive a fresh test runner, and three additions for the Blueprint apps. Code written for
 1.3 compiles unchanged, and existing functions behave as before.
 
