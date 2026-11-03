@@ -60,6 +60,7 @@ extension JTKitUITestCase {
         app.launchEnvironment = environment
         app.launch()
         app.activate()
+        clickBeforeFirstEvent()
         didLaunch()
     }
 

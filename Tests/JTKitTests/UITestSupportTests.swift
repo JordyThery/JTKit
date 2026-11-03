@@ -94,3 +94,32 @@ struct UITestSupportFailureScreenshotTests {
         #expect(captures == 0)
     }
 }
+
+@Suite("UI test support: a fresh runner (1.4.0)")
+struct UITestSupportFreshRunnerTests {
+    @Test("The screenshot waits for the runner’s first click, the main thread, and a demo test")
+    func screenshotOnlyWhenSafe() {
+        #expect(JTKitUITestCase.screenshotIsSafe(onMainThread: true, live: false, runnerHasClicked: true))
+        #expect(!JTKitUITestCase.screenshotIsSafe(onMainThread: true, live: false, runnerHasClicked: false),
+                "before the first click a screenshot can stop the runner")
+        #expect(!JTKitUITestCase.screenshotIsSafe(onMainThread: false, live: false, runnerHasClicked: true))
+        #expect(!JTKitUITestCase.screenshotIsSafe(onMainThread: true, live: true, runnerHasClicked: true))
+    }
+
+    @Test("A runtime warning the app logs is no failure: record takes no screenshot for it")
+    func warningIsNoFailure() {
+        let warning = XCTIssue(type: .system, compactDescription: "This method should not be called on the main thread",
+                               severity: .warning)
+        #expect(!warning.isFailure)
+        #expect(XCTIssue(type: .assertionFailure, compactDescription: "Missing button").isFailure)
+    }
+
+    @Test("The failure line names the file and line, or ? without a location")
+    func failureLine() {
+        let location = XCTSourceCodeLocation(filePath: "/tmp/Tests/SmokeUITests.swift", lineNumber: 42)
+        let located = XCTIssue(type: .assertionFailure, compactDescription: "XCTAssertTrue failed - Missing Settings",
+                               sourceCodeContext: XCTSourceCodeContext(location: location))
+        #expect(JTKitUITestCase.failureLine(located) == "UITEST-FAILURE SmokeUITests.swift:42: XCTAssertTrue failed - Missing Settings")
+        #expect(JTKitUITestCase.failureLine(XCTIssue(type: .system, compactDescription: "Crash")) == "UITEST-FAILURE ?: Crash")
+    }
+}

@@ -176,6 +176,20 @@ extension JamfPlatform {
             }
             return updated == latestUpdated
         }
+
+        /// The stricter check before a write or a deploy (1.4.0): `latest` is
+        /// the same Blueprint with the same steps, compared in full, and the
+        /// same `updated` time. When either copy has no `updated` time
+        /// (Blueprints made in the Jamf UI can have none), the steps and the
+        /// scope decide: other fields, such as the deployment state, change
+        /// between two reads without anyone editing the Blueprint.
+        public func isUnchangedInStepsAndScope(in latest: BlueprintDetail) -> Bool {
+            guard overview.id == latest.overview.id, (steps ?? .null) == (latest.steps ?? .null) else { return false }
+            guard let updated = overview.updated, let latestUpdated = latest.overview.updated else {
+                return (scope ?? .null) == (latest.scope ?? .null)
+            }
+            return updated == latestUpdated
+        }
     }
 
     /// Where a deployment stands: the Blueprint’s last deployment and its report.
@@ -336,7 +350,20 @@ extension JamfPlatform {
         /// from the previous one (also one started since the caller’s copy
         /// was read).
         public func startDeployment(id: String) async throws -> String? {
-            let before = try await detail(id: id).overview.deploymentState
+            try await startDeployment(id: id, check: { _ in })
+        }
+
+        /// `startDeployment(id:)` with a check on the Blueprint it reads
+        /// first (1.4.0), e.g. that it’s still the one the user confirmed
+        /// (`isUnchangedInStepsAndScope(in:)`). An error thrown by `check`
+        /// stops it before anything is sent, and is thrown as it is.
+        public func startDeployment(
+            id: String,
+            check: @Sendable (BlueprintDetail) async throws -> Void
+        ) async throws -> String? {
+            let latest = try await detail(id: id)
+            try await check(latest)
+            let before = latest.overview.deploymentState
             DeploymentBaselines.shared.set(before?.state, for: baselineKey(id))
             try await deploy(id: id)
             return before?.lastDeploymentStarted

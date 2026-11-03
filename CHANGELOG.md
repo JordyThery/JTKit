@@ -1,5 +1,49 @@
 # Changelog
 
+## 1.4.0 (unreleased)
+A minor release: UI tests survive a fresh test runner, and three additions for the Blueprint apps. Code written for
+1.3 compiles unchanged, and existing functions behave as before.
+
+### Fixed
+- `JTKitUITestCase`: a test whose first event is a key press (⌘, in `openSettings()`, as `checkSettingsTabs` and
+  `checkConnectionsEditor` start) no longer stops a fresh UI test runner in CoreGraphics
+  (`CGS_REQUIRE_INIT`). Before a test’s first event, once per runner, JTKit clicks the title bar of the app’s
+  window (`clickBeforeFirstEvent()`, in `setUp`, `relaunch` and `launchLive`, before `didLaunch()`). The runner’s
+  CoreGraphics starts with that click; XCTest’s own screenshots start it otherwise, but a scheme with
+  `systemAttachmentLifetime = "keepNever"` takes none.
+- `JTKitUITestCase.record(_:)`: a failure is printed first (`UITEST-FAILURE file:line: message`), so the log keeps
+  it whatever happens next. The failure screenshot is taken only after the runner’s first click; before it, the
+  failure is recorded without one instead of stopping the runner.
+- `JTKitUITestCase.record(_:)`: an issue that doesn’t fail the test, such as a runtime warning the app logs
+  (`[Security] … This method should not be called on the main thread`, of warning severity), gets no screenshot and
+  no `UITEST-FAILURE` line, and no longer uses up the test’s one failure screenshot. Under `keepNever` that
+  screenshot stopped the runner, so the release check reported a test that hadn’t failed as failed.
+
+### Added
+- `JamfPlatform.BlueprintDetail.isUnchangedInStepsAndScope(in:)`: the stricter check before a write or a deploy.
+  The same Blueprint, the same steps compared in full, and the same `updated` time; when either copy has no
+  `updated` time, the steps and the scope decide (not fields such as the deployment state, which change without
+  an edit). `isUnchanged(in:)` stays as it is.
+- `JamfPlatform.Blueprints.startDeployment(id:check:)`: runs `check` on the Blueprint it reads just before the
+  deploy; an error thrown by `check` stops it before anything is sent and is thrown as it is. The deployment is
+  then watched with `watchDeployment` as before. `startDeployment(id:)` is unchanged.
+- `JamfPlatform.APIError.divisionLocked`, the sentence for a Blueprint assigned to a division (the same text as the
+  standard hint after a 409 `DIVISION_PATCH_NOT_ALLOWED`), for an app to show when
+  `BlueprintDetail.isDivisionLocked` before any request; and `divisionLockMessage`, that sentence for such an
+  error, nil for any other.
+
+### Moving an app to 1.4.0
+- Remove the click before the first key press: Serial Number Reader’s title-bar click in
+  `DemoSmokeUITests.didLaunch()` and `LiveUITests.didLaunch()`, and AppSettings2Blueprint’s in
+  `DemoSmokeUITests.didLaunch()`. JTKit clicks first. A `didLaunch()` that only made that click can go.
+- Jamf Deployer: remove the `print` before `super.record(issue)` in `DeployerUITestCase.record(_:)` (and the
+  override, which does nothing else); JTKit prints the failure first. With that, its release-check scheme can take
+  `systemAttachmentLifetime = "keepNever"` as 1.3.2’s notes ask.
+- AppSettings2Blueprint (and the other Blueprint apps): `BlueprintWriter.isUnchanged(loaded:latest:)` can become
+  `loaded.isUnchangedInStepsAndScope(in: latest)`; `DeployModel` can deploy with
+  `startDeployment(id:check:)` instead of reading the Blueprint and taking its last start itself; and
+  `JamfWriteModel.divisionText` can be `JamfPlatform.APIError.divisionLocked`.
+
 ## 1.3.3 (2026-11-02)
 A patch release for the release checks: a live check can upload an Intune app package. Code written for 1.3.2
 compiles unchanged.
