@@ -123,3 +123,39 @@ struct UITestSupportFreshRunnerTests {
         #expect(JTKitUITestCase.failureLine(XCTIssue(type: .system, compactDescription: "Crash")) == "UITEST-FAILURE ?: Crash")
     }
 }
+
+@Suite("UI test support: the first click (1.4.0)")
+struct UITestSupportFirstClickTests {
+    @Test("The first click lands near the top-left corner, far from the middle of the title bar")
+    func clickPoint() {
+        let offset = JTKitUITestCase.firstClickOffset
+        #expect(offset.dx == 40 && offset.dy == 4)
+        // an app’s own click 8 points below the middle of a window at least 300 points wide is far away
+        #expect(abs(150 - offset.dx) > 100)
+    }
+
+    @Test("After a launch without a window, later launches in the runner don’t wait for one")
+    func noWaitAfterNoWindow() {
+        #expect(JTKitUITestCase.firstWindowWait(timeout: 20, sawNoWindow: false) == 20)
+        #expect(JTKitUITestCase.firstWindowWait(timeout: 20, sawNoWindow: true) == 0)
+        #expect(JTKitUITestCase.firstWindowWait(timeout: 0, sawNoWindow: false) == 0)
+        #expect(JTKitUITestCase.firstWindowWait(timeout: -1, sawNoWindow: false) == 0)
+    }
+
+    @Test("The runner’s flags are safe to read and write from several threads")
+    func runnerStateAcrossThreads() async {
+        let state = JTKitUITestCase.RunnerState()
+        #expect(!state.hasClicked && !state.sawNoWindow)
+        await withTaskGroup(of: Void.self) { group in
+            for index in 0..<200 {
+                group.addTask {
+                    if index == 100 { state.hasClicked = true }
+                    _ = state.hasClicked
+                    _ = state.sawNoWindow
+                }
+            }
+        }
+        #expect(state.hasClicked)
+        #expect(!state.sawNoWindow)
+    }
+}

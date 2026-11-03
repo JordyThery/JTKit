@@ -690,7 +690,7 @@ struct JamfPlatformBlueprintTests {
         #expect(!undated.isUnchanged(in: changedUndated), "two missing times aren’t the same time")
     }
 
-    @Test("1.4.0: isUnchangedInStepsAndScope compares the steps in full, and the scope when an updated time is missing")
+    @Test("1.4.0: isUnchangedInStepsAndScope compares the steps and the scope in full, and the updated times when both have one")
     func unchangedInStepsAndScope() throws {
         func detail(_ text: String) throws -> JamfPlatform.BlueprintDetail {
             try JamfPlatform.BlueprintDetail(data: Data(text.utf8))
@@ -706,9 +706,9 @@ struct JamfPlatformBlueprintTests {
         let otherSteps = try detail(blueprintJSON().replacingOccurrences(of: #""ratio":1.0"#, with: #""ratio":2.0"#))
         #expect(base.isUnchanged(in: otherSteps))
         #expect(!base.isUnchangedInStepsAndScope(in: otherSteps))
-        // the same steps and time, another scope: the time decides, as Jamf changes it with the scope
+        // the same steps and time, another scope: changed (the scope is always compared)
         let otherScope = try detail(blueprintJSON().replacingOccurrences(of: #"["g1"]"#, with: #"["g2"]"#))
-        #expect(base.isUnchangedInStepsAndScope(in: otherScope))
+        #expect(!base.isUnchangedInStepsAndScope(in: otherScope))
 
         // no updated time on either side: steps and scope decide, not the deployment state
         let undated = try detail(undatedText(blueprintJSON()))
@@ -726,6 +726,18 @@ struct JamfPlatformBlueprintTests {
         #expect(!bare.isUnchangedInStepsAndScope(in: undated))
     }
 
+    @Test("1.4.0: only the scope changed, both updated times equal: changed, so a deploy check stops")
+    func onlyTheScopeChanged() throws {
+        let confirmed = try JamfPlatform.BlueprintDetail(data: Data(blueprintJSON().utf8))
+        let rescoped = try JamfPlatform.BlueprintDetail(data: Data(blueprintJSON(extra: "")
+            .replacingOccurrences(of: #""scope":{"deviceGroups":["g1"]}"#, with: #""scope":{"deviceGroups":["g1","g2"]}"#).utf8))
+        #expect(confirmed.overview.updated == rescoped.overview.updated)
+        #expect(confirmed.steps == rescoped.steps)
+        #expect(confirmed.isUnchanged(in: rescoped), "the older check only compares the updated times")
+        #expect(!confirmed.isUnchangedInStepsAndScope(in: rescoped))
+        #expect(!rescoped.isUnchangedInStepsAndScope(in: confirmed))
+    }
+
     @Test("1.4.0: startDeployment’s check sees the Blueprint it reads, and an error from it stops the deploy")
     func startDeploymentWithCheck() async throws {
         let server = MockServer { request in
@@ -739,8 +751,10 @@ struct JamfPlatformBlueprintTests {
                 guard confirmed.isUnchangedInStepsAndScope(in: latest) else { throw Changed(updated: latest.overview.updated) }
             }
             Issue.record("The deploy wasn’t stopped")
-        } catch let error as Changed {
-            #expect(error.updated == "2026-10-03T10:00:00Z", "the check got the Blueprint as read just now")
+        } catch let error as JamfPlatform.Blueprints.DeploymentNotStarted {
+            #expect(error.stage == .check)
+            let changed = try #require(error.underlying as? Changed, "the check’s own error inside")
+            #expect(changed.updated == "2026-10-03T10:00:00Z", "the check got the Blueprint as read just now")
         }
         #expect(server.requests.map(\.method) == ["GET"], "nothing sent after the check stopped it")
 
@@ -750,6 +764,60 @@ struct JamfPlatformBlueprintTests {
         #expect(seen.value == [blueprintID])
         #expect(server.requests.map(\.method) == ["GET", "GET", "POST"])
         #expect(server.requests.last?.path == blueprintPath + "/deploy")
+    }
+
+    @Test("1.4.0: a failed read is DeploymentNotStarted(.read) with the read’s error; nothing is sent")
+    func startDeploymentReadFails() async throws {
+        let server = MockServer { request in
+            request.method == "POST" ? MockResponse(status: 202, body: Data()) : .json(200, "not JSON")
+        }
+        let api = try blueprints(server)
+        do {
+            _ = try await api.startDeployment(id: blueprintID) { _ in Issue.record("no check without a Blueprint") }
+            Issue.record("The deploy wasn’t stopped")
+        } catch let error as JamfPlatform.Blueprints.DeploymentNotStarted {
+            #expect(error.stage == .read)
+            let read = try #require(error.underlying as? JamfPlatform.APIError)
+            guard case .invalidResponse = read.kind else { Issue.record("Got \(read.kind)"); return }
+            #expect(error.localizedDescription == read.localizedDescription)
+        }
+        #expect(!server.requests.contains { $0.method == "POST" })
+
+        let unavailable = MockServer { _ in .json(503, "{}") }
+        do {
+            _ = try await blueprints(unavailable).startDeployment(id: blueprintID) { _ in }
+            Issue.record("The deploy wasn’t stopped")
+        } catch let error as JamfPlatform.Blueprints.DeploymentNotStarted {
+            #expect(error.stage == .read)
+            #expect((error.underlying as? JamfPlatform.APIError)?.status == 503)
+        }
+        #expect(unavailable.requests.allSatisfy { $0.method == "GET" })
+    }
+
+    @Test("1.4.0: a failed deploy request is thrown as it is, never as DeploymentNotStarted")
+    func startDeploymentPostFails() async throws {
+        let server = MockServer { request in
+            request.method == "POST" ? .json(503, "{}") : .json(200, blueprintJSON())
+        }
+        let api = try blueprints(server)
+        do {
+            _ = try await api.startDeployment(id: blueprintID) { _ in }
+            Issue.record("No error")
+        } catch let error as JamfPlatform.APIError {
+            #expect(error.status == 503)
+        } catch {
+            Issue.record("Not the deploy request’s own error: \(error)")
+        }
+        #expect(server.requests.filter { $0.method == "POST" }.count == 1, "sent once: it may have started")
+    }
+
+    @Test("1.4.0: startDeployment(id:) still throws the read’s own error, as in 1.3")
+    func startDeploymentWithoutCheckUnchanged() async throws {
+        let server = MockServer { _ in .json(503, "{}") }
+        let api = try blueprints(server)
+        let error = await thrown { _ = try await api.startDeployment(id: blueprintID) }
+        #expect(error?.status == 503)
+        #expect(!server.requests.contains { $0.method == "POST" })
     }
 
     @Test("1.4.0: a deployment started with a check is watched as one started without")

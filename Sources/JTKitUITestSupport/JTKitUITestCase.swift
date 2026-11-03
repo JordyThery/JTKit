@@ -172,8 +172,46 @@ open class JTKitUITestCase: XCTestCase {
 
     // MARK: First event
 
+    /// What this test runner has done so far (1.4.0), read and written under
+    /// a lock: `record(_:)` can run on another thread than `setUp`.
+    final class RunnerState: @unchecked Sendable {
+        private let lock = NSLock()
+        private var clicked = false
+        private var noWindow = false
+
+        /// The runner has clicked the app’s window (`clickBeforeFirstEvent()`).
+        var hasClicked: Bool {
+            get { lock.withLock { clicked } }
+            set { lock.withLock { clicked = newValue } }
+        }
+
+        /// A launch in this runner showed no window in time.
+        var sawNoWindow: Bool {
+            get { lock.withLock { noWindow } }
+            set { lock.withLock { noWindow = newValue } }
+        }
+    }
+
+    static let runner = RunnerState()
+
     /// Whether this test runner has clicked the app’s window yet (1.4.0).
-    static var runnerHasClicked = false
+    static var runnerHasClicked: Bool { runner.hasClicked }
+
+    /// How long `clickBeforeFirstEvent()` waits for the app’s first window
+    /// (1.4.0). An app that opens no window at launch returns 0.
+    open var firstWindowTimeout: TimeInterval { 20 }
+
+    /// Where the first click lands, from the window’s top-left corner: 40
+    /// points in and 4 down, above the window buttons and left of any
+    /// toolbar item, and far from the middle of the title bar, so a click an
+    /// app still makes there itself can’t become a double-click.
+    static let firstClickOffset = CGVector(dx: 40, dy: 4)
+
+    /// The wait for the first window: none once a launch in this runner
+    /// showed no window, so an app without one doesn’t wait on every launch.
+    static func firstWindowWait(timeout: TimeInterval, sawNoWindow: Bool) -> TimeInterval {
+        sawNoWindow ? 0 : max(0, timeout)
+    }
 
     /// Clicks the title bar of the app’s window once per test runner, before
     /// a test’s first event (1.4.0); `setUp`, `relaunch` and `launchLive` do
@@ -181,15 +219,25 @@ open class JTKitUITestCase: XCTestCase {
     /// until its first click, and a key press or a screenshot before it stops
     /// the runner (`CGS_REQUIRE_INIT`). XCTest’s own screenshots start it
     /// otherwise, but not when the scheme keeps none
-    /// (`systemAttachmentLifetime = "keepNever"`). Waits up to 20 s for a
-    /// window; without one it does nothing and the next launch tries again.
+    /// (`systemAttachmentLifetime = "keepNever"`).
+    ///
+    /// Assumes the app’s first window has a standard title bar (or a title
+    /// bar with a unified toolbar): the click lands near its top-left corner
+    /// (`firstClickOffset`), where such a window has nothing to click. A
+    /// window with a hidden title bar or content under it would get the
+    /// click on its content. Waits up to `firstWindowTimeout` for the window;
+    /// without one it clicks nothing, and later launches in the runner don’t
+    /// wait again.
     public func clickBeforeFirstEvent() {
-        guard !Self.runnerHasClicked, let app else { return }
+        guard !Self.runner.hasClicked, let app else { return }
         let window = app.windows.firstMatch
-        guard window.waitForExistence(timeout: 20) else { return }
-        // 8 points below the window’s top edge, in the middle: the title bar.
-        window.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0)).withOffset(CGVector(dx: 0, dy: 8)).click()
-        Self.runnerHasClicked = true
+        let wait = Self.firstWindowWait(timeout: firstWindowTimeout, sawNoWindow: Self.runner.sawNoWindow)
+        guard wait > 0 ? window.waitForExistence(timeout: wait) : window.exists else {
+            Self.runner.sawNoWindow = true
+            return
+        }
+        window.coordinate(withNormalizedOffset: .zero).withOffset(Self.firstClickOffset).click()
+        Self.runner.hasClicked = true
     }
 
     // MARK: Elements
@@ -304,7 +352,7 @@ open class JTKitUITestCase: XCTestCase {
     /// data only, never a real tenant.
     ///
     /// From 1.4.0 the failure is printed first (`UITEST-FAILURE file:line:
-    /// message`), so the log keeps it whatever happens next. The screenshot
+    /// message`) and flushed at once, so the log keeps it whatever happens next. The screenshot
     /// is taken only for an issue that fails the test (`isFailure`; a
     /// runtime warning the app logs is an issue of warning severity), and
     /// only once this runner has clicked (`clickBeforeFirstEvent()`): before
@@ -312,7 +360,9 @@ open class JTKitUITestCase: XCTestCase {
     /// recorded with no screenshot.
     override open func record(_ issue: XCTIssue) {
         guard issue.isFailure else { return super.record(issue) }
+        // Flushed at once, so the line is in the log even if the runner stops right after.
         print(Self.failureLine(issue))
+        fflush(stdout)
         var issue = issue
         if Self.screenshotIsSafe(onMainThread: Thread.isMainThread, live: launchesLive, runnerHasClicked: Self.runnerHasClicked),
            let shot = Self.failureScreenshot(failed: true, alreadyAttached: didAttachFailureScreenshot,
