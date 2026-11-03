@@ -216,7 +216,7 @@ extension JamfPlatform {
                 hints.append("The Environment ID doesn’t belong to this integration. Copy it from the integration’s details in Jamf Account.")
             }
             if hasCode(.divisionPatchNotAllowed) {
-                hints.append("This Blueprint is assigned to a division and can’t be changed through the API.")
+                hints.append(Self.divisionLocked)
             }
             switch kind {
             case let .signIn(status, _, _) where (status == 400 || status == 401) && server == .jamfPro:
@@ -328,6 +328,17 @@ extension JamfPlatform {
             }
             lines.append(message())
             return Redaction.text(lines.joined(separator: "\n"))
+        }
+
+        /// The sentence for a Blueprint assigned to a division (1.4.0): the hint
+        /// after a 409 `DIVISION_PATCH_NOT_ALLOWED`, and what an app shows
+        /// before any request when `BlueprintDetail.isDivisionLocked`.
+        public static let divisionLocked = "This Blueprint is assigned to a division and can’t be changed through the API."
+
+        /// The division-lock sentence when the answer was a 409
+        /// `DIVISION_PATCH_NOT_ALLOWED`; nil for any other error (1.4.0).
+        public var divisionLockMessage: String? {
+            hasCode(.divisionPatchNotAllowed) ? Self.divisionLocked : nil
         }
 
         /// The same sentence as the connection editor’s.

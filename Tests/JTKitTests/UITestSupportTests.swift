@@ -94,3 +94,68 @@ struct UITestSupportFailureScreenshotTests {
         #expect(captures == 0)
     }
 }
+
+@Suite("UI test support: a fresh runner (1.4.0)")
+struct UITestSupportFreshRunnerTests {
+    @Test("The screenshot waits for the runner’s first click, the main thread, and a demo test")
+    func screenshotOnlyWhenSafe() {
+        #expect(JTKitUITestCase.screenshotIsSafe(onMainThread: true, live: false, runnerHasClicked: true))
+        #expect(!JTKitUITestCase.screenshotIsSafe(onMainThread: true, live: false, runnerHasClicked: false),
+                "before the first click a screenshot can stop the runner")
+        #expect(!JTKitUITestCase.screenshotIsSafe(onMainThread: false, live: false, runnerHasClicked: true))
+        #expect(!JTKitUITestCase.screenshotIsSafe(onMainThread: true, live: true, runnerHasClicked: true))
+    }
+
+    @Test("A runtime warning the app logs is no failure: record takes no screenshot for it")
+    func warningIsNoFailure() {
+        let warning = XCTIssue(type: .system, compactDescription: "This method should not be called on the main thread",
+                               severity: .warning)
+        #expect(!warning.isFailure)
+        #expect(XCTIssue(type: .assertionFailure, compactDescription: "Missing button").isFailure)
+    }
+
+    @Test("The failure line names the file and line, or ? without a location")
+    func failureLine() {
+        let location = XCTSourceCodeLocation(filePath: "/tmp/Tests/SmokeUITests.swift", lineNumber: 42)
+        let located = XCTIssue(type: .assertionFailure, compactDescription: "XCTAssertTrue failed - Missing Settings",
+                               sourceCodeContext: XCTSourceCodeContext(location: location))
+        #expect(JTKitUITestCase.failureLine(located) == "UITEST-FAILURE SmokeUITests.swift:42: XCTAssertTrue failed - Missing Settings")
+        #expect(JTKitUITestCase.failureLine(XCTIssue(type: .system, compactDescription: "Crash")) == "UITEST-FAILURE ?: Crash")
+    }
+}
+
+@Suite("UI test support: the first click (1.4.0)")
+struct UITestSupportFirstClickTests {
+    @Test("The first click lands near the top-left corner, far from the middle of the title bar")
+    func clickPoint() {
+        let offset = JTKitUITestCase.firstClickOffset
+        #expect(offset.dx == 40 && offset.dy == 4)
+        // an app’s own click 8 points below the middle of a window at least 300 points wide is far away
+        #expect(abs(150 - offset.dx) > 100)
+    }
+
+    @Test("After a launch without a window, later launches in the runner don’t wait for one")
+    func noWaitAfterNoWindow() {
+        #expect(JTKitUITestCase.firstWindowWait(timeout: 20, sawNoWindow: false) == 20)
+        #expect(JTKitUITestCase.firstWindowWait(timeout: 20, sawNoWindow: true) == 0)
+        #expect(JTKitUITestCase.firstWindowWait(timeout: 0, sawNoWindow: false) == 0)
+        #expect(JTKitUITestCase.firstWindowWait(timeout: -1, sawNoWindow: false) == 0)
+    }
+
+    @Test("The runner’s flags are safe to read and write from several threads")
+    func runnerStateAcrossThreads() async {
+        let state = JTKitUITestCase.RunnerState()
+        #expect(!state.hasClicked && !state.sawNoWindow)
+        await withTaskGroup(of: Void.self) { group in
+            for index in 0..<200 {
+                group.addTask {
+                    if index == 100 { state.hasClicked = true }
+                    _ = state.hasClicked
+                    _ = state.sawNoWindow
+                }
+            }
+        }
+        #expect(state.hasClicked)
+        #expect(!state.sawNoWindow)
+    }
+}

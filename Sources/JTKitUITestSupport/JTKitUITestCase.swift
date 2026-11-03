@@ -83,6 +83,7 @@ open class JTKitUITestCase: XCTestCase {
                           "The release check runs UI tests in demo mode only: launch with launchInDemo()")
         }
         app.activate()
+        clickBeforeFirstEvent()
         didLaunch()
     }
 
@@ -94,7 +95,7 @@ open class JTKitUITestCase: XCTestCase {
             print("UIDUMP-BEGIN\n\(tree)UIDUMP-END")
         }
         // A failure recorded off the main thread got no screenshot yet.
-        if !launchesLive, let shot = Self.failureScreenshot(failed: failed, alreadyAttached: didAttachFailureScreenshot,
+        if Self.screenshotIsSafe(onMainThread: true, live: launchesLive, runnerHasClicked: Self.runnerHasClicked), let shot = Self.failureScreenshot(failed: failed, alreadyAttached: didAttachFailureScreenshot,
                                              capture: { XCTAttachment(screenshot: failureScreenshotSource()) }) {
             didAttachFailureScreenshot = true
             add(shot)
@@ -165,7 +166,78 @@ open class JTKitUITestCase: XCTestCase {
         app.launchArguments += arguments
         app.launch()
         app.activate()
+        clickBeforeFirstEvent()
         didLaunch()
+    }
+
+    // MARK: First event
+
+    /// What this test runner has done so far (1.4.0), read and written under
+    /// a lock: `record(_:)` can run on another thread than `setUp`.
+    final class RunnerState: @unchecked Sendable {
+        private let lock = NSLock()
+        private var clicked = false
+        private var noWindow = false
+
+        /// The runner has clicked the app’s window (`clickBeforeFirstEvent()`).
+        var hasClicked: Bool {
+            get { lock.withLock { clicked } }
+            set { lock.withLock { clicked = newValue } }
+        }
+
+        /// A launch in this runner showed no window in time.
+        var sawNoWindow: Bool {
+            get { lock.withLock { noWindow } }
+            set { lock.withLock { noWindow = newValue } }
+        }
+    }
+
+    static let runner = RunnerState()
+
+    /// Whether this test runner has clicked the app’s window yet (1.4.0).
+    static var runnerHasClicked: Bool { runner.hasClicked }
+
+    /// How long `clickBeforeFirstEvent()` waits for the app’s first window
+    /// (1.4.0). An app that opens no window at launch returns 0.
+    open var firstWindowTimeout: TimeInterval { 20 }
+
+    /// Where the first click lands, from the window’s top-left corner: 40
+    /// points in and 4 down, above the window buttons and left of any
+    /// toolbar item, and far from the middle of the title bar, so a click an
+    /// app still makes there itself can’t become a double-click.
+    static let firstClickOffset = CGVector(dx: 40, dy: 4)
+
+    /// The wait for the first window: none once a launch in this runner
+    /// showed no window, so an app without one doesn’t wait on every launch.
+    static func firstWindowWait(timeout: TimeInterval, sawNoWindow: Bool) -> TimeInterval {
+        sawNoWindow ? 0 : max(0, timeout)
+    }
+
+    /// Clicks the title bar of the app’s window once per test runner, before
+    /// a test’s first event (1.4.0); `setUp`, `relaunch` and `launchLive` do
+    /// this before `didLaunch()`. A fresh runner’s CoreGraphics isn’t started
+    /// until its first click, and a key press or a screenshot before it stops
+    /// the runner (`CGS_REQUIRE_INIT`). XCTest’s own screenshots start it
+    /// otherwise, but not when the scheme keeps none
+    /// (`systemAttachmentLifetime = "keepNever"`).
+    ///
+    /// Assumes the app’s first window has a standard title bar (or a title
+    /// bar with a unified toolbar): the click lands near its top-left corner
+    /// (`firstClickOffset`), where such a window has nothing to click. A
+    /// window with a hidden title bar or content under it would get the
+    /// click on its content. Waits up to `firstWindowTimeout` for the window;
+    /// without one it clicks nothing, and later launches in the runner don’t
+    /// wait again.
+    public func clickBeforeFirstEvent() {
+        guard !Self.runner.hasClicked, let app else { return }
+        let window = app.windows.firstMatch
+        let wait = Self.firstWindowWait(timeout: firstWindowTimeout, sawNoWindow: Self.runner.sawNoWindow)
+        guard wait > 0 ? window.waitForExistence(timeout: wait) : window.exists else {
+            Self.runner.sawNoWindow = true
+            return
+        }
+        window.coordinate(withNormalizedOffset: .zero).withOffset(Self.firstClickOffset).click()
+        Self.runner.hasClicked = true
     }
 
     // MARK: Elements
@@ -278,15 +350,40 @@ open class JTKitUITestCase: XCTestCase {
     /// looks at that moment. Smoke tests run in demo mode (`launchInDemo()`,
     /// required under the release check), so the screenshot shows sample
     /// data only, never a real tenant.
+    ///
+    /// From 1.4.0 the failure is printed first (`UITEST-FAILURE file:line:
+    /// message`) and flushed at once, so the log keeps it whatever happens next. The screenshot
+    /// is taken only for an issue that fails the test (`isFailure`; a
+    /// runtime warning the app logs is an issue of warning severity), and
+    /// only once this runner has clicked (`clickBeforeFirstEvent()`): before
+    /// that, taking it can stop the runner. Without it the failure is
+    /// recorded with no screenshot.
     override open func record(_ issue: XCTIssue) {
+        guard issue.isFailure else { return super.record(issue) }
+        // Flushed at once, so the line is in the log even if the runner stops right after.
+        print(Self.failureLine(issue))
+        fflush(stdout)
         var issue = issue
-        if Thread.isMainThread, !launchesLive,
+        if Self.screenshotIsSafe(onMainThread: Thread.isMainThread, live: launchesLive, runnerHasClicked: Self.runnerHasClicked),
            let shot = Self.failureScreenshot(failed: true, alreadyAttached: didAttachFailureScreenshot,
                                              capture: { XCTAttachment(screenshot: failureScreenshotSource()) }) {
             didAttachFailureScreenshot = true
             issue.add(shot)
         }
         super.record(issue)
+    }
+
+    /// Whether a failure screenshot may be taken: on the main thread, not in
+    /// a live test (it shows a real tenant), and only after this runner’s
+    /// first click (`clickBeforeFirstEvent()`).
+    static func screenshotIsSafe(onMainThread: Bool, live: Bool, runnerHasClicked: Bool) -> Bool {
+        onMainThread && !live && runnerHasClicked
+    }
+
+    /// `UITEST-FAILURE file:line: message`, the line `record` prints.
+    static func failureLine(_ issue: XCTIssue) -> String {
+        let place = issue.sourceCodeContext.location.map { "\($0.fileURL.lastPathComponent):\($0.lineNumber)" } ?? "?"
+        return "UITEST-FAILURE \(place): \(issue.compactDescription)"
     }
 
     /// What the failure screenshot shows: the app’s frontmost window (with

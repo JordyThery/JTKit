@@ -315,6 +315,20 @@ struct StoredSecretBindingTests {
         #expect(!ConnectionServiceChoices.savingClearsStoredSecrets(saved: saved, edited: edited))
     }
 
+    /// 1.1.0 (A4): an `http://` address is refused when used; changing only
+    /// the scheme to `https://` is the same server, so the secret stays.
+    @Test func onlyTheSchemeChangedUsesTheStoredSecret() {
+        var plain = saved
+        plain.serverURL = "http://prod.jamfcloud.com"
+        var edited = plain
+        edited.serverURL = "https://prod.jamfcloud.com"
+        #expect(ConnectionServiceChoices.storedSecretApplies(.main, saved: plain, edited: edited))
+        #expect(!ConnectionServiceChoices.savingClearsStoredSecrets(saved: plain, edited: edited))
+        var otherHost = plain
+        otherHost.serverURL = "https://other.jamfcloud.com"
+        #expect(!ConnectionServiceChoices.storedSecretApplies(.main, saved: plain, edited: otherHost))
+    }
+
     @Test func aChangedAddressNeedsTheSecretAgain() {
         var edited = saved
         edited.serverURL = "https://prod.jamfcloud.co"

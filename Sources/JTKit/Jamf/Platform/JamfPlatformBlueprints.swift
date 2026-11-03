@@ -176,6 +176,24 @@ extension JamfPlatform {
             }
             return updated == latestUpdated
         }
+
+        /// The stricter check before a write or a deploy (1.4.0): `latest` is
+        /// the same Blueprint with the same steps and the same scope, both
+        /// compared in full, and, when both copies have one, the same
+        /// `updated` time. The scope is always compared: whether Jamf changes
+        /// `updated` for a scope-only change isn’t known, and a deploy must go
+        /// to the scope the user confirmed. Without an `updated` time on
+        /// either side (Blueprints made in the Jamf UI can have none), the
+        /// steps and the scope decide: other fields, such as the deployment
+        /// state, change between two reads without anyone editing the Blueprint.
+        public func isUnchangedInStepsAndScope(in latest: BlueprintDetail) -> Bool {
+            guard overview.id == latest.overview.id,
+                  (steps ?? .null) == (latest.steps ?? .null),
+                  (scope ?? .null) == (latest.scope ?? .null)
+            else { return false }
+            guard let updated = overview.updated, let latestUpdated = latest.overview.updated else { return true }
+            return updated == latestUpdated
+        }
     }
 
     /// Where a deployment stands: the Blueprint’s last deployment and its report.
@@ -336,10 +354,66 @@ extension JamfPlatform {
         /// from the previous one (also one started since the caller’s copy
         /// was read).
         public func startDeployment(id: String) async throws -> String? {
-            let before = try await detail(id: id).overview.deploymentState
+            do {
+                return try await startDeployment(id: id, check: { _ in })
+            } catch let error as DeploymentNotStarted {
+                // as before 1.4.0: the read’s own error
+                throw error.underlying
+            }
+        }
+
+        /// `startDeployment(id:)` with a check on the Blueprint it reads
+        /// first (1.4.0), e.g. that it’s still the one the user confirmed
+        /// (`isUnchangedInStepsAndScope(in:)`).
+        ///
+        /// Anything that stops it before the deploy request is sent is thrown
+        /// as `DeploymentNotStarted`, with the error inside: the read failed
+        /// or was canceled (`.read`), or `check` threw (`.check`, with the
+        /// check’s own error). Nothing was sent then, so nothing started.
+        /// Any other error comes from the deploy request (`POST …/deploy`)
+        /// and is thrown as it is: unless it says the request wasn’t
+        /// accepted (a 4xx answer), the deployment may have started.
+        public func startDeployment(
+            id: String,
+            check: @Sendable (BlueprintDetail) async throws -> Void
+        ) async throws -> String? {
+            let latest: BlueprintDetail
+            do {
+                latest = try await detail(id: id)
+            } catch {
+                throw DeploymentNotStarted(stage: .read, underlying: error)
+            }
+            do {
+                try await check(latest)
+            } catch {
+                throw DeploymentNotStarted(stage: .check, underlying: error)
+            }
+            let before = latest.overview.deploymentState
             DeploymentBaselines.shared.set(before?.state, for: baselineKey(id))
             try await deploy(id: id)
             return before?.lastDeploymentStarted
+        }
+
+        /// `startDeployment(id:check:)` stopped before the deploy request was
+        /// sent (1.4.0): nothing started. `underlying` is the read’s error or
+        /// the one `check` threw; the message is the underlying one.
+        public struct DeploymentNotStarted: Error, LocalizedError {
+            public enum Stage: Sendable, Hashable {
+                /// Reading the Blueprint failed or was canceled.
+                case read
+                /// The check refused the Blueprint as read.
+                case check
+            }
+
+            public let stage: Stage
+            public let underlying: any Error
+
+            public init(stage: Stage, underlying: any Error) {
+                self.stage = stage
+                self.underlying = underlying
+            }
+
+            public var errorDescription: String? { underlying.localizedDescription }
         }
 
         /// Follows the deployment that replaced `previousStart` until it
