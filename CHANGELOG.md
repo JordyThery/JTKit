@@ -17,7 +17,8 @@ in the release check. Code written for 1.4 compiles unchanged, and existing func
   returns `JamfPro.GroupMember`s with their inventory: a mobile group from its membership pages, a smart computer
   group from its member IDs and a static one from the Classic API, then the computers from `v4/computers-inventory`
   in batches of 100. A mobile membership that holds only IDs and names (as the Platform API answers it) is filled
-  in from `v2/mobile-devices/detail`.
+  in from `v2/mobile-devices/detail`. Membership pages are read until one adds no new device, so an answer
+  without a total or a next-page flag can’t repeat forever or count a device twice.
 - Declaration Reporting: `declarationReports(deviceID:filter:)` and `declarationReports(declarationIdentifier:filter:)`,
   every page, typed (`JamfPlatform.DeclarationReport`), with the Blueprint and step an identifier comes from.
   Without a filter a device's report asks for every declaration, then for the Blueprints' when that's refused.
@@ -28,8 +29,11 @@ in the release check. Code written for 1.4 compiles unchanged, and existing func
   recommended cadence, automatic actions, standard-user updates, notifications, Rapid Security Responses, beta),
   only what the Blueprint includes, with each component’s step and activation predicate.
 - `AppleReleases` (SOFA and GDMF) with `OSVersion`: the latest release per major, builds, supported models or
-  board IDs per major, the last version a model can run, marketing names. A source that can’t be read is named
-  in `problems`; the rest is used.
+  board IDs per major, the last version a model can run, marketing names. `Catalog.supports(release:model:boardID:)`
+  checks one release’s own device list, for a release Apple published for some devices only (nil when the list or
+  the device is unknown). A source that can’t be read is named in `problems`; the rest is used. `OSVersion` reads
+  version strings only (up to three parts, optionally after a name and with a Rapid Security Response’s letter);
+  a build, a model identifier or four parts give nil.
 - `JamfPlatform.APIError.permissions`: a refusal can name several Platform API permissions (`permission` stays,
   as the first of them). `JamfPlatform.Permission` names the read permissions; `PermissionCheck.devicesRead`.
 - Demo: `DemoSoftwareUpdate.install(on:)` adds sample iPads and Macs in every update state, their groups, status
@@ -39,7 +43,9 @@ in the release check. Code written for 1.4 compiles unchanged, and existing func
   Blueprint asks for a specific version, the Mac Blueprint enforces minor updates seven days after their release.
 - Release check: the allow-list may list `publicHosts`. A request to one is sent only as a GET without a body,
   credentials, cookies, an authorization header or a credential in the query; every other host is decided as
-  before. A public host must be a plain host name and never a tenant’s or a sign-in service’s.
+  before. A public host must be a plain host name (not an address) and never a tenant’s or a sign-in service’s;
+  `LiveCheckPolicy` applies the same rule to an allow-list built in code. A public host’s redirect is handed back,
+  never followed.
 
 ## 1.4.0 (2026-11-03)
 A minor release: UI tests survive a fresh test runner, and three additions for the Blueprint apps. Code written for

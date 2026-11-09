@@ -108,6 +108,42 @@ struct PublicHostTests {
         #expect(throws: AllowList.LoadError.self) { try AllowList.load(from: url) }
     }
 
+    @Test func aPolicyBuiltInCodeIgnoresAPublicHostThatIsATenantsOrASignInServices() {
+        // without loading a file: the same rule applies when the policy is built
+        let list = AllowList(version: 3, tenants: [
+            .init(role: "lab", service: .jamfPro, host: "lab.jamf.example", access: .readOnly),
+        ], publicHosts: ["lab.jamf.example", "eu.api.jamfcloud.com", "login.microsoftonline.com", "1.2.3.4", publicHost])
+        let policy = publicPolicy(list)
+        #expect(policy.publicHosts == [publicHost])
+        // the tenant's host is decided as the tenant: a read under its own role
+        guard case .allow(let allowed) = policy.decide(request("GET", "https://lab.jamf.example/api/v1/jamf-pro-version")) else {
+            Issue.record("refused"); return
+        }
+        #expect(allowed.role == "lab")
+        #expect(refusal(policy.decide(request("POST", "https://lab.jamf.example/api/v1/buildings", json: ["name": "JTKTEST"]))) != nil)
+        #expect(policy.decide(request("GET", "https://\(publicHost)/feed.json")).isAllowed)
+    }
+
+    @Test func anAddressIsNotAPlainHostName() throws {
+        let url = try writeList(#"""
+        {"version": 3, "publicHosts": ["192.168.1.20"], "tenants": [
+          {"role": "lab", "service": "jamfPro", "host": "lab.jamf.example", "access": "read", "production": false}]}
+        """#)
+        #expect(throws: AllowList.LoadError.self) { try AllowList.load(from: url) }
+    }
+
+    @Test func aRedirectFromAPublicHostIsHandedBackNotFollowed() async throws {
+        let upstream = MockServer { _ in .redirect(302, to: URL(string: "https://elsewhere.example.net/feed.json")!) }
+        // the mock server's session with the real upstream's rule: never follow a redirect
+        let noRedirects = URLSession(configuration: upstream.session.configuration, delegate: LiveCheckNetwork.NoRedirects(),
+                                     delegateQueue: nil)
+        let network = LiveCheckNetwork(policy: publicPolicy(), upstream: noRedirects)
+        let (_, response) = try await network.session.data(from: URL(string: "https://\(publicHost)/feed.json")!)
+        #expect((response as? HTTPURLResponse)?.statusCode == 302)
+        #expect(upstream.requests.count == 1)
+        #expect(upstream.requests.allSatisfy { $0.url.host() == publicHost })
+    }
+
     @Test func noCookieIsSentOrKept() async throws {
         let upstream = MockServer { _ in
             MockResponse(status: 200, headers: ["Content-Type": "application/json", "Set-Cookie": "session=abc; Path=/; Secure"],

@@ -18,14 +18,18 @@ public struct OSVersion: Sendable, Hashable, Comparable, Codable, LosslessString
         self.extra = extra
     }
 
-    /// Reads `27`, `27.1`, `27.0.1`, `iOS 27.1`, `macOS Golden Gate 27.2`
-    /// or `26.3.1 (a)`: the first run of numbers and dots. Nil without one.
+    /// Reads a version string only: `27`, `27.1`, `27.0.1`, optionally after
+    /// a name (`iOS 27.1`, `macOS Golden Gate 27.2`, `Sequoia 15`) and with a
+    /// Rapid Security Response’s letter (`26.3.1 (a)`). Anything else is nil:
+    /// a build (`23A344`), a model identifier (`iPad13,18`), four parts.
     public init?(_ description: String) {
-        guard let range = description.range(of: "[0-9]+(\\.[0-9]+){0,2}", options: .regularExpression) else { return nil }
-        let parts = description[range].split(separator: ".").compactMap { Int($0) }
+        let text = description.trimmingCharacters(in: .whitespacesAndNewlines)
+        let pattern = #"^(?:[A-Za-z][A-Za-z ]*\s)?([0-9]+(?:\.[0-9]+){0,2})(?:\s*(\([a-z]\)))?$"#
+        guard let match = text.firstMatch(of: try! Regex(pattern)),
+              let number = match.output[1].substring else { return nil }
+        let parts = number.split(separator: ".").compactMap { Int($0) }
         guard let major = parts.first else { return nil }
-        let rest = description[range.upperBound...].trimmingCharacters(in: .whitespaces)
-        let extra = rest.range(of: "^\\([a-z]\\)", options: .regularExpression).map { String(rest[$0]) }
+        let extra = match.output.count > 2 ? match.output[2].substring.map(String.init) : nil
         self.init(major: major, minor: parts.count > 1 ? parts[1] : 0, patch: parts.count > 2 ? parts[2] : 0, extra: extra)
     }
 

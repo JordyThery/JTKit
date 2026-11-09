@@ -145,7 +145,9 @@ public nonisolated final class LiveCheckPolicy: @unchecked Sendable {
          confirmer: InterruptiveConfirmer? = nil, thisMacSerial: String?) {
         self.thisMacSerial = thisMacSerial?.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
         entries = allowList.entries(roles: roles)
-        publicHosts = allowList.publicHostSet
+        // the same rule as loading the file: a tenant's or a sign-in service's
+        // host is never public, also for a list built in code
+        publicHosts = allowList.validPublicHosts
         self.writesAllowed = writesAllowed
         self.productionReads = productionReads ?? (allowList.productionReads ?? false)
         self.commandsFile = commandsFile

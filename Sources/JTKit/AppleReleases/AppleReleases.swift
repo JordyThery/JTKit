@@ -111,6 +111,19 @@ public enum AppleReleases {
             return supportedDevices(platform, major: major).contains(id)
         }
 
+        /// Whether Apple offers this release to a device, by the release’s own
+        /// device list (a point release can be for some models only): true
+        /// or false when the release has a list and the device is known to
+        /// the catalog, nil otherwise (then only the major can be checked).
+        public func supports(release: Release, model: String?, boardID: String?) -> Bool? {
+            guard !release.supportedDevices.isEmpty else { return nil }
+            var ids = Set([model, boardID].compactMap { $0 }.filter { !$0.isEmpty })
+            // a Mac's releases list board IDs: add the boards of its model
+            if let model { ids.formUnion(macModelByBoard.filter { $0.value == model }.keys) }
+            guard ids.contains(where: { isKnown($0, release.platform) }) else { return nil }
+            return !ids.isDisjoint(with: release.supportedDevices)
+        }
+
         /// The newest version a device can run, from the newest major that
         /// supports it; nil when no source knows the device.
         public func lastSupportedVersion(model: String?, boardID: String? = nil, _ platform: Platform) -> OSVersion? {

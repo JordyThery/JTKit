@@ -45,6 +45,20 @@ public nonisolated struct AllowList: Codable, Sendable, Equatable {
         Set((publicHosts ?? []).map { $0.trimmingCharacters(in: .whitespaces).lowercased() })
     }
 
+    /// The public hosts that pass `validatePublicHosts`, lowercased; any
+    /// other is left out.
+    var validPublicHosts: Set<String> {
+        let tenantHosts = Set(tenants.flatMap(\.hosts).map { $0.lowercased() })
+        return publicHostSet.filter { host in
+            Self.isPlainHost(host) && !tenantHosts.contains(host) && !LiveCheckPolicy.isCredentialHost(host)
+        }
+    }
+
+    static func isPlainHost(_ host: String) -> Bool {
+        host.range(of: "^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)*\\.[a-z]([a-z0-9-]*[a-z0-9])?$",
+                   options: .regularExpression) != nil
+    }
+
     /// A public host must be a plain host name (no scheme, port, path or
     /// wildcard), and never one of a tenant’s or a service whose requests
     /// carry credentials.
@@ -52,7 +66,7 @@ public nonisolated struct AllowList: Codable, Sendable, Equatable {
         let tenantHosts = Set(tenants.flatMap(\.hosts).map { $0.lowercased() })
         for raw in publicHosts ?? [] {
             let host = raw.trimmingCharacters(in: .whitespaces).lowercased()
-            let plain = host.range(of: "^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$", options: .regularExpression) != nil
+            let plain = Self.isPlainHost(host)
             guard plain else {
                 throw LoadError.incomplete(role: "publicHosts", reason: "“\(raw)” isn’t a plain host name")
             }

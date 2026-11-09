@@ -254,11 +254,25 @@ extension JamfPlatform.Client {
         switch group.kind {
         case .mobileDevice:
             let kind = group.isSmart ? "smart-group-membership" : "static-group-membership"
-            let members = try await readAllPages(
-                "pro/v2/mobile-device-groups/\(kind)/\(JamfPlatform.pathSegment(group.groupID))",
-                privileges: [group.isSmart ? .readSmartMobileDeviceGroups : .readStaticMobileDeviceGroups, .readMobileDevices],
-                permissions: [JamfPlatform.Permission.deviceGroupsRead, JamfPlatform.Permission.devicesRead],
-                item: JamfPro.GroupMember.init(mobileDevice:))
+            // One per device, and the paging stops at a page that brings no new
+            // device: the reference lists no paging for this read, so an answer
+            // that repeats the whole list on every page ends there.
+            let path = "pro/v2/mobile-device-groups/\(kind)/\(JamfPlatform.pathSegment(group.groupID))"
+            let privileges: [JamfPro.Privilege] = [group.isSmart ? .readSmartMobileDeviceGroups : .readStaticMobileDeviceGroups, .readMobileDevices]
+            let permissions = [JamfPlatform.Permission.deviceGroupsRead, JamfPlatform.Permission.devicesRead]
+            var seen = Set<String>()
+            var members: [JamfPro.GroupMember] = []
+            let pageSize = 100
+            for page in 0..<1_000 {
+                let json = try await readJSON(path, query: [URLQueryItem(name: "page", value: String(page)),
+                                                            URLQueryItem(name: "page-size", value: String(pageSize))],
+                                              privileges: privileges, permissions: permissions)
+                let found = try JamfPlatform.Page(json: json, item: JamfPro.GroupMember.init(mobileDevice:))
+                let new = found.results.filter { seen.insert($0.id).inserted }
+                members += new
+                let received = page * pageSize + found.results.count + found.unreadableCount
+                if new.isEmpty || !JamfPlatform.hasMore(after: found, received: received, pageSize: pageSize) { break }
+            }
             // Through the Platform API the membership holds only each device's
             // ID and name (the rest null, checked 2026-11-09): read the rest
             // from the inventory.
