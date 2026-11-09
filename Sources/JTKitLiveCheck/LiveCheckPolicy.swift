@@ -108,6 +108,8 @@ public nonisolated final class LiveCheckPolicy: @unchecked Sendable {
     /// no interruptive command goes to it. Nil (unreadable): none goes anywhere.
     let thisMacSerial: String?
     let devices = DeviceRegistry()
+    /// The allow-list’s public hosts, lowercased (see `AllowList.publicHosts`).
+    let publicHosts: Set<String>
 
     private let lock = NSLock()
     private var sentCommands: [SentDeviceCommand] = []
@@ -143,6 +145,7 @@ public nonisolated final class LiveCheckPolicy: @unchecked Sendable {
          confirmer: InterruptiveConfirmer? = nil, thisMacSerial: String?) {
         self.thisMacSerial = thisMacSerial?.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
         entries = allowList.entries(roles: roles)
+        publicHosts = allowList.publicHostSet
         self.writesAllowed = writesAllowed
         self.productionReads = productionReads ?? (allowList.productionReads ?? false)
         self.commandsFile = commandsFile
@@ -170,6 +173,9 @@ public nonisolated final class LiveCheckPolicy: @unchecked Sendable {
             return .refuse("Only https requests to allow-listed tenants are sent")
         }
         let path = request.url.path(percentEncoded: false)
+        if publicHosts.contains(host) {
+            return Self.decidePublic(request, host: host)
+        }
         if Self.isAzureStorage(host) {
             return decideStorageUpload(request, host: host, path: path)
         }
@@ -624,6 +630,48 @@ public nonisolated final class LiveCheckPolicy: @unchecked Sendable {
 
     static func isApple(_ service: AllowList.Service) -> Bool {
         service == .appleBusinessManager || service == .appleSchoolManager
+    }
+
+    /// The target of every request to a public host.
+    static func publicTarget(_ host: String) -> String { "public:\(host)" }
+
+    /// A public host gets a GET only, without a body, credentials, cookies
+    /// or any header that could carry them.
+    static func decidePublic(_ request: LiveRequest, host: String) -> LiveDecision {
+        guard request.method == "GET" else {
+            return .refuse("\(host) is a public source: only GET is sent, \(request.method) refused")
+        }
+        guard request.body.isEmpty else {
+            return .refuse("\(host) is a public source: a request with a body is refused")
+        }
+        guard request.url.user == nil, request.url.password == nil else {
+            return .refuse("\(host) is a public source: an address with credentials is refused")
+        }
+        let credentialHeaders: Set<String> = ["authorization", "proxy-authorization", "cookie", "cookie2"]
+        // compared without dashes and underscores: api-key, api_key and apikey alike
+        let credentialWords = ["token", "secret", "apikey", "password", "session", "auth", "credential"]
+        func carriesCredential(_ name: String) -> Bool {
+            let plain = name.lowercased().replacingOccurrences(of: "-", with: "").replacingOccurrences(of: "_", with: "")
+            return credentialWords.contains { plain.contains($0) }
+        }
+        if let name = request.headers.keys.first(where: { credentialHeaders.contains($0) || carriesCredential($0) }) {
+            return .refuse("\(host) is a public source: a request with a \(name) header is refused")
+        }
+        let query = (URLComponents(url: request.url, resolvingAgainstBaseURL: false)?.queryItems ?? []).map { $0.name.lowercased() }
+        if let name = query.first(where: { carriesCredential($0) || ["key", "sig", "signature"].contains($0) }) {
+            return .refuse("\(host) is a public source: a query with \(name) is refused")
+        }
+        return .allow(.init(kind: .read, role: "public", target: publicTarget(host), resource: nil, id: nil))
+    }
+
+    /// Hosts whose requests carry credentials, never public: Jamf’s
+    /// gateway and Jamf Cloud, Microsoft’s and Apple’s sign-in and APIs,
+    /// Azure Storage.
+    static func isCredentialHost(_ host: String) -> Bool {
+        platformRegion(host: host) != nil || host.hasSuffix(".jamfcloud.com") || host == "jamfcloud.com"
+            || ["login.microsoftonline.com", "graph.microsoft.com", "account.apple.com",
+                "api-business.apple.com", "api-school.apple.com"].contains(host)
+            || isAzureStorage(host)
     }
 
     /// `us`, `eu`, `apac` for `<region>.api.jamfcloud.com`.

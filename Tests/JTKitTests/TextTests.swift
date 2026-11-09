@@ -122,6 +122,8 @@ struct TextTests {
     /// A date format’s quotes are syntax.
     static let straightApostropheExceptions = [
         "yyyy-MM-dd'T'HHmmss",
+        "yyyy-MM-dd'T'HH:mm:ss",
+        "yyyy-MM-dd'T'HH:mm",
     ]
 
     @Test("No string literal in Sources has a straight apostrophe in its text")

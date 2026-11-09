@@ -64,7 +64,7 @@ extension JamfPro {
     public struct StatusItem: Hashable, Sendable {
         public var key: String
         public var value: String?
-        /// As Jamf Pro writes it: the device’s own clock, without a zone.
+        /// As Jamf Pro writes it: the server’s local time, without a zone.
         public var lastUpdateTime: String?
 
         public init(key: String, value: String? = nil, lastUpdateTime: String? = nil) {

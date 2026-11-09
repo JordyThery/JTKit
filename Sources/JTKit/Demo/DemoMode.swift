@@ -366,6 +366,9 @@ nonisolated final class DemoServices: Sendable {
             ABM.Service.school.host: appleSchool,
         ]
         for host in DemoIntuneServer.hosts { servers[host] = intune }
+        let appleReleases = DemoAppleReleaseServer()
+        servers[DemoAppleReleaseServer.sofaHost] = appleReleases
+        servers[DemoAppleReleaseServer.gdmfHost] = appleReleases
         if scenario == .rateLimited {
             for (host, server) in servers where host != DemoAppleSignInServer.host {
                 servers[host] = DemoRateLimitedServer(server)

@@ -739,6 +739,11 @@ nonisolated final class LiveCheckURLProtocol: URLProtocol, @unchecked Sendable {
     }
 
     private func send(_ outgoing: URLRequest, allowed: LiveDecision.Allowed, seen: LiveRequest, network: LiveCheckNetwork) {
+        var outgoing = outgoing
+        if allowed.target.hasPrefix(LiveCheckPolicy.publicTarget("")) {
+            // a public source: no cookie is sent or kept
+            outgoing.httpShouldHandleCookies = false
+        }
         let task = network.upstream.dataTask(with: outgoing) { [weak self] data, response, error in
             guard let self else { return }
             if let error {

@@ -369,7 +369,7 @@ extension JamfPro {
 // MARK: - Lookups
 
 /// Where a device kind is listed and how it is filtered.
-private nonisolated struct InventoryList: Sendable {
+nonisolated struct InventoryList: Sendable {
     let path: String
     let serialField: String
     let udidField: String
@@ -576,7 +576,7 @@ extension JamfPlatform.Client {
     }
 
     /// Every record matching the filter, page by page (at most 10 pages of 100).
-    private func inventory<Record: Decodable & Sendable>(
+    func inventory<Record: Decodable & Sendable>(
         _ list: InventoryList, filter: String, sections: [JamfPro.InventorySection], recording: JamfPro.Recording
     ) async throws -> [Record] {
         let pageSize = 100

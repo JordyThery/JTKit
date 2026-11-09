@@ -141,10 +141,15 @@ extension JamfPlatform {
         /// Usually one; an MDM command needs two (View MDM command information,
         /// and the command’s own).
         public var privileges: [JamfPro.Privilege]
-        /// The Jamf Account permission the request needs on the Platform API,
+        /// The Jamf Account permissions the request needs on the Platform API,
         /// e.g. `device-actions:execute`, named in the hint when the gateway
-        /// refuses it (403). Nil: the hint names no permission.
-        public var permission: String?
+        /// refuses it (403). Empty: the hint names no permission.
+        public var permissions: [String] = []
+        /// The first of `permissions`; setting it replaces them.
+        public var permission: String? {
+            get { permissions.first }
+            set { permissions = newValue.map { [$0] } ?? [] }
+        }
 
         /// The first of `privileges`; setting it replaces them.
         public var privilege: JamfPro.Privilege? {
@@ -229,8 +234,12 @@ extension JamfPlatform {
                 hints.append("Jamf didn’t accept the sign-in. Check the client ID, client secret and region.")
             case .status(403, _, _, _, _) where server == .jamfPro:
                 hints.append(jamfProPrivilegeHint)
-            case .status(403, _, _, _, _) where permission != nil:
-                hints.append("The API integration is missing the “\(permission ?? "")” permission, or isn’t scoped to this environment. Add it to the API integration in Jamf Account.")
+            case .status(403, _, _, _, _) where !permissions.isEmpty:
+                let names = permissions.map { "“\($0)”" }
+                let missing = names.count == 1
+                    ? "the \(names[0]) permission"
+                    : "the " + names.dropLast().joined(separator: ", ") + " and \(names[names.count - 1]) permissions"
+                hints.append("The API integration is missing \(missing), or isn’t scoped to this environment. Add \(names.count == 1 ? "it" : "them") to the API integration in Jamf Account.")
             case .status(403, _, _, _, _):
                 hints.append("The API integration is missing a permission for this request, or isn’t scoped to this environment. Check its permissions in Jamf Account.")
             case .status(429, _, _, _, _):

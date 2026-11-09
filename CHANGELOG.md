@@ -1,5 +1,37 @@
 # Changelog
 
+## 1.5.0 (not released yet)
+A minor release: read-only calls for software update reporting, Apple’s release data, and public data sources
+in the release check. Code written for 1.4 compiles unchanged, and existing functions behave as before.
+
+### Added
+- `JamfPro.SoftwareUpdateStatus`: a device’s DDM status items read as a software update status (install state,
+  pending version, failure, install reasons, beta, OS version and build, model, board ID, passcode, newest time),
+  from flattened keys or Jamf Pro’s `{key=value}` text. `JamfPlatform.Client.softwareUpdateStatus(managementID:kind:)`
+  returns nil for a device without a report (404) and throws a refusal (403), naming `devices:read` on the
+  Platform API. `JamfPro.serverDate(_:timeZone:)` reads a time Jamf Pro writes in its own local time.
+- Jamf Pro groups: `mobileDeviceGroups()`, `computerGroups()`, `jamfProGroups(_:)` and `members(of:)`, which
+  returns `JamfPro.GroupMember`s with their inventory: a mobile group from its membership pages, a smart computer
+  group from its member IDs and a static one from the Classic API, then the computers from `v4/computers-inventory`
+  in batches of 100.
+- Declaration Reporting: `declarationReports(deviceID:filter:)` and `declarationReports(declarationIdentifier:filter:)`,
+  every page, typed (`JamfPlatform.DeclarationReport`), with the Blueprint and step an identifier comes from.
+- `BlueprintDetail.softwareUpdateBlocks` and `Blueprints.softwareUpdate(blueprintID:)`: every software update
+  enforcement of a Blueprint with its step and activation predicate (manual, latest, semantic, or Apple’s
+  declaration in a custom-declarations component, with its build), read only.
+- `AppleReleases` (SOFA and GDMF) with `OSVersion`: the latest release per major, builds, supported models or
+  board IDs per major, the last version a model can run, marketing names. A source that can’t be read is named
+  in `problems`; the rest is used.
+- `JamfPlatform.APIError.permissions`: a refusal can name several Platform API permissions (`permission` stays,
+  as the first of them). `JamfPlatform.Permission` names the read permissions; `PermissionCheck.devicesRead`.
+- Demo: `DemoSoftwareUpdate.install(on:)` adds sample iPads and Macs in every update state, their groups, status
+  and declaration reports, and two Blueprints, to the demo Platform API for an app that asks for them; the
+  Contoso world and every other app’s demo are unchanged. `DemoAppleReleaseServer` answers the release feeds
+  on the demo network’s own hosts.
+- Release check: the allow-list may list `publicHosts`. A request to one is sent only as a GET without a body,
+  credentials, cookies, an authorization header or a credential in the query; every other host is decided as
+  before. A public host must be a plain host name and never a tenant’s or a sign-in service’s.
+
 ## 1.4.0 (2026-11-03)
 A minor release: UI tests survive a fresh test runner, and three additions for the Blueprint apps. Code written for
 1.3 compiles unchanged, and existing functions behave as before.
