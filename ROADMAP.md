@@ -6,7 +6,7 @@ Sources were chosen from the code (October 2026): prefer the copy with tests and
 
 ## Standards for every app
 
-Decided by Jordy on 2026-10-25. They apply to the eight macOS apps: AppSettings2Blueprint, Blueprint Managed Preferences Editor, Checkpoint, Intune Deployer, Jamf Deployer, JamfMigrator, Profile2Blueprint, Serial Number Reader. IntuneOnboard and Device Assist are out of JTKit entirely.
+Decided by Jordy on 2026-10-25. They apply to the nine macOS apps: AppSettings2Blueprint, Blueprint Managed Preferences Editor, Checkpoint, Intune Deployer, Jamf Deployer, JamfMigrator, Profile2Blueprint, Serial Number Reader, Software Update Dashboard (from its 0.1.0, 2026-11-09). IntuneOnboard and Device Assist are out of JTKit entirely.
 
 - **About:** one JTKit About window in every app, opened only from the app menu ("About [App]"). Never a page inside the app, and not listed in the Window menu.
 - **Copyright:** JTKit’s About window writes the copyright line itself, "© [year] [author]. Released under the [license].", from what the app passes in (MIT by default). It doesn’t read the app’s `NSHumanReadableCopyright`.
