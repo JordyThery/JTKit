@@ -112,15 +112,24 @@ public enum AppleReleases {
         }
 
         /// Whether Apple offers this release to a device, by the release’s own
-        /// device list (a point release can be for some models only): true
-        /// or false when the release has a list and the device is known to
-        /// the catalog, nil otherwise (then only the major can be checked).
+        /// device list (a point release can be for some models only).
+        ///
+        /// The device is recognized by its own device ID first (the status
+        /// report’s `softwareupdate.device-id`), then by its model (for a Mac,
+        /// the boards of its model), and only when Apple lists that ID for
+        /// the release’s major. A device it doesn’t recognize, such as an Intel
+        /// Mac reporting `X86LEGACYAP`, is unknown: nil, never false, so only
+        /// the major can be checked. Nil too for a release without a list.
         public func supports(release: Release, model: String?, boardID: String?) -> Bool? {
             guard !release.supportedDevices.isEmpty else { return nil }
-            var ids = Set([model, boardID].compactMap { $0 }.filter { !$0.isEmpty })
-            // a Mac's releases list board IDs: add the boards of its model
-            if let model { ids.formUnion(macModelByBoard.filter { $0.value == model }.keys) }
-            guard ids.contains(where: { isKnown($0, release.platform) }) else { return nil }
+            let listed = supportedByMajor[release.platform]?[release.version.major] ?? []
+            if let boardID = boardID.flatMap({ $0.isEmpty ? nil : $0 }), listed.contains(boardID) {
+                return release.supportedDevices.contains(boardID)
+            }
+            guard let model = model.flatMap({ $0.isEmpty ? nil : $0 }) else { return nil }
+            // a Mac's releases list board IDs: the boards of its model
+            let ids = Set([model]).union(macModelByBoard.filter { $0.value == model }.keys).intersection(listed)
+            guard !ids.isEmpty else { return nil }
             return !ids.isDisjoint(with: release.supportedDevices)
         }
 

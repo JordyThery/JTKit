@@ -138,7 +138,8 @@ public final class LiveGatewayClient: @unchecked Sendable {
     /// Adds a step’s result to the run’s report (the gateway writes it).
     public func record(step: String, passed: Bool, note: String? = nil) async throws {
         let request = LiveGatewayRequest(token: token, command: LiveGateway.recordCommand,
-                                         step: LiveCheckRun.StepResult(step: step, passed: passed, note: note))
+                                         step: LiveCheckRun.StepResult(step: LiveCheckRun.redacted(step), passed: passed,
+                                                                       note: note.map { LiveCheckRun.redacted($0) }))
         let answer = try await Self.exchange(request, port: launch.port)
         if let error = answer.error { throw ClientError.failed(error) }
     }

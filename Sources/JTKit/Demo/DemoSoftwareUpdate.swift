@@ -332,7 +332,7 @@ public nonisolated final class DemoSoftwareUpdateServer: DemoServer {
         add("softwareupdate.beta-enrollment", "")
         func pending(_ version: String) {
             add("softwareupdate.pending-version",
-                "{os-version=\(version), build-version=\(DemoAppleReleaseServer.build(of: version, mac: device.family == .mac)), target-local-date-time=\(DemoSoftwareUpdate.deadline(now: now))}")
+                "{os-version=\(version), build-version=\(DemoAppleReleaseServer.build(of: version, mac: device.family == .mac)), target-local-date-time=\(device.family == .mac ? DemoAppleReleaseServer.macDeadline(of: version, now: now) : DemoSoftwareUpdate.deadline(now: now))}")
             add("softwareupdate.install-reason", "{reason=[{softwareupdate-reason=declaration, declaration-id=Blueprint_\(device.family == .mac ? DemoSoftwareUpdate.macBlueprintID : DemoSoftwareUpdate.iPadBlueprintID)_s1_c1_sys_cfg1}]}")
         }
         switch device.state {
@@ -429,6 +429,22 @@ public nonisolated final class DemoAppleReleaseServer: DemoServer {
     ]
     private static let supportedIPads = ["iPad13,1", "iPad13,18", "iPad14,8", "iPad15,7", "iPad16,1", "iPad16,3"]
     private static let supportedBoards = ["J413AP", "J613AP"]
+
+    /// The deadline a Mac reports for a pending version, as a moment with
+    /// an offset (as Macs write it): the Mac Blueprint’s delay after the
+    /// release, at 17:00 UTC.
+    static func macDeadline(of version: String, now: Date) -> String {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(identifier: "UTC") ?? .gmt
+        let daysAgo = macReleases.first { $0.version == version }?.daysAgo ?? 0
+        let day = calendar.startOfDay(for: now.addingTimeInterval(-Double(daysAgo) * 86_400))
+        let deadline = (calendar.date(byAdding: .day, value: DemoSoftwareUpdate.macDelayDays, to: day) ?? day).addingTimeInterval(17 * 3_600)
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = calendar.timeZone
+        formatter.dateFormat = "yyyy-MM-dd HH:mm:ss Z"
+        return formatter.string(from: deadline)
+    }
 
     /// The made-up build of a demo version (`unknown` for one it doesn’t have).
     public static func build(of version: String, mac: Bool) -> String {

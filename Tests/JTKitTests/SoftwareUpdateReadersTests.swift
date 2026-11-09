@@ -78,7 +78,9 @@ struct SoftwareUpdateStatusTests {
         let status = JamfPro.SoftwareUpdateStatus(items: items([
             ("softwareupdate.pending-version", #"{"os-version":"27.1","build-version":"24B5074"}"#),
         ]))
-        #expect(status.pendingVersion == .init(osVersion: "27.1", buildVersion: "24B5074"))
+        #expect(status.pendingVersion?.osVersion == "27.1" && status.pendingVersion?.buildVersion == "24B5074")
+        // with when it was reported
+        #expect(status.pendingVersion?.updated != nil)
     }
 
     @Test("OS, model, board ID, beta, passcode and the install reasons")

@@ -121,6 +121,14 @@ extension JamfPro {
             public var room: String?
         }
 
+        /// The bootstrap token, from the `SECURITY` section (asked for by
+        /// `members(of:)` only).
+        public struct Security: Hashable, Sendable {
+            /// `ESCROWED`, `NOT_ESCROWED` or `NOT_SUPPORTED`.
+            public var bootstrapTokenEscrowedStatus: String?
+            public var bootstrapTokenAllowed: Bool?
+        }
+
         public var id: String?
         public var udid: String?
         public var general: General?
@@ -128,6 +136,7 @@ extension JamfPro {
         public var operatingSystem: OperatingSystem?
         public var diskEncryption: DiskEncryption?
         public var userAndLocation: UserAndLocation?
+        public var security: Security?
 
         public var serialNumber: String? { hardware?.serialNumber }
 
@@ -162,6 +171,10 @@ extension JamfPro {
                     individualRecoveryKeyValidityStatus: d.text("individualRecoveryKeyValidityStatus"),
                     bootPartitionFileVault2State: boot?.text("partitionFileVault2State"),
                     bootPartitionFileVault2Percent: boot?.number("partitionFileVault2Percent"))
+            }
+            if let s = try? c.nestedContainer(keyedBy: AnyKey.self, forKey: "security") {
+                security = Security(bootstrapTokenEscrowedStatus: s.text("bootstrapTokenEscrowedStatus"),
+                                    bootstrapTokenAllowed: s.flag("bootstrapTokenAllowed"))
             }
             if let u = try? c.nestedContainer(keyedBy: AnyKey.self, forKey: "userAndLocation") {
                 userAndLocation = UserAndLocation(

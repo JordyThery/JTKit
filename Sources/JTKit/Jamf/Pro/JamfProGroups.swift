@@ -90,6 +90,9 @@ extension JamfPro {
         public var mdmProfileExpiration: Date?
         public var building: String?
         public var department: String?
+        /// A Mac’s bootstrap token: `ESCROWED`, `NOT_ESCROWED` or `NOT_SUPPORTED`.
+        public var bootstrapTokenEscrowedStatus: String?
+        public var bootstrapTokenAllowed: Bool?
 
         public init(id: String, kind: MDMCommand.DeviceKind, name: String? = nil, serialNumber: String? = nil,
                     udid: String? = nil, managementID: String? = nil, osVersion: String? = nil, osBuild: String? = nil,
@@ -99,7 +102,10 @@ extension JamfPro {
                     ddmEnabled: Bool? = nil, passcodePresent: Bool? = nil, batteryLevel: Int? = nil,
                     batteryHealth: String? = nil, availableSpaceMB: Int? = nil, capacityMB: Int? = nil,
                     roaming: Bool? = nil, dataRoamingEnabled: Bool? = nil, mdmProfileExpiration: Date? = nil,
-                    building: String? = nil, department: String? = nil) {
+                    building: String? = nil, department: String? = nil, bootstrapTokenEscrowedStatus: String? = nil,
+                    bootstrapTokenAllowed: Bool? = nil) {
+            self.bootstrapTokenEscrowedStatus = bootstrapTokenEscrowedStatus
+            self.bootstrapTokenAllowed = bootstrapTokenAllowed
             self.id = id
             self.kind = kind
             self.name = name
@@ -206,7 +212,9 @@ extension JamfPro {
                       model: computer.hardware?.model, modelIdentifier: computer.hardware?.modelIdentifier,
                       lastContact: computer.general?.lastContact ?? computer.general?.lastCheckIn, lastInventoryUpdate: computer.general?.reportDate,
                       managed: computer.general?.managed, supervised: computer.general?.supervised,
-                      mdmProfileExpiration: computer.general?.mdmProfileExpiration)
+                      mdmProfileExpiration: computer.general?.mdmProfileExpiration,
+                      bootstrapTokenEscrowedStatus: computer.security?.bootstrapTokenEscrowedStatus,
+                      bootstrapTokenAllowed: computer.security?.bootstrapTokenAllowed)
         }
     }
 }
@@ -313,7 +321,7 @@ extension JamfPlatform.Client {
             let records: [JamfPro.Computer]
             do {
                 records = try await inventory(.computers, filter: "id=in=(\(batch.joined(separator: ",")))",
-                                              sections: [.general, .hardware, .operatingSystem], recording: .results)
+                                              sections: [.general, .hardware, .operatingSystem, .security], recording: .results)
             } catch var error as JamfPlatform.APIError where error.server == .platformAPI {
                 error.permissions = [JamfPlatform.Permission.devicesRead]
                 throw error

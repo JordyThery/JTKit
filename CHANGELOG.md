@@ -9,7 +9,12 @@ in the release check. Code written for 1.4 compiles unchanged, and existing func
   pending version, failure, install reasons, beta, OS version and build, model, board ID, passcode, newest time),
   from flattened keys or Jamf Pro’s `{key=value}` text. `JamfPlatform.Client.softwareUpdateStatus(managementID:kind:)`
   returns nil for a device without a report (404) and throws a refusal (403), naming `devices:read` on the
-  Platform API. `JamfPro.serverDate(_:timeZone:)` reads a time Jamf Pro writes in its own local time.
+  Platform API. `JamfPro.serverDate(_:timeZone:)` reads a time Jamf Pro writes in its own local time. The install
+  reasons are read from Jamf Pro’s flattened `softwareupdate.install-reason.reason` too; the pending version has
+  `updated` (when it was reported), `targetDate` and `targetOffset` (a deadline written with an offset).
+- `JamfPro.Computer.security` (`bootstrapTokenEscrowedStatus`, `bootstrapTokenAllowed`), read when the `SECURITY`
+  section is asked for; `members(of:)` asks for it, so `GroupMember` has a Mac’s bootstrap token. Other reads are
+  unchanged.
 - Jamf Pro groups: `JamfPro.DeviceGroup`, identified by kind and number together (`id`, a `DeviceGroup.ID`;
   `groupID` is Jamf Pro's number, which a mobile device group and a computer group can share), with
   `DeviceGroup.ID(_:)` for the Jamf Pro group a Platform API group stands for;
@@ -30,8 +35,9 @@ in the release check. Code written for 1.4 compiles unchanged, and existing func
   only what the Blueprint includes, with each component’s step and activation predicate.
 - `AppleReleases` (SOFA and GDMF) with `OSVersion`: the latest release per major, builds, supported models or
   board IDs per major, the last version a model can run, marketing names. `Catalog.supports(release:model:boardID:)`
-  checks one release’s own device list, for a release Apple published for some devices only (nil when the list or
-  the device is unknown). A source that can’t be read is named in `problems`; the rest is used. `OSVersion` reads
+  checks one release’s own device list, for a release Apple published for some devices only: by the device ID
+  first, then the model, and only when Apple lists that ID for the release’s major (nil when the release has no
+  list or the device isn’t recognized, such as an Intel Mac reporting `X86LEGACYAP`). A source that can’t be read is named in `problems`; the rest is used. `OSVersion` reads
   version strings only (up to three parts, optionally after a name and with a Rapid Security Response’s letter);
   a build, a model identifier or four parts give nil.
 - `JamfPlatform.APIError.permissions`: a refusal can name several Platform API permissions (`permission` stays,
@@ -45,7 +51,10 @@ in the release check. Code written for 1.4 compiles unchanged, and existing func
   credentials, cookies, an authorization header or a credential in the query; every other host is decided as
   before. A public host must be a plain host name (not an address) and never a tenant’s or a sign-in service’s;
   `LiveCheckPolicy` applies the same rule to an allow-list built in code. A public host’s redirect is handed back,
-  never followed.
+  never followed. `LiveCheckRun.record` masks every step name and note (`LiveCheckRun.redacted`: UUIDs, long hex,
+  serial-shaped words), and `neverReport(_:)` adds values a test read, such as Jamf Pro IDs, so a run report can’t
+  hold a real ID.
+- Demo: a demo Mac’s pending update reports the Mac Blueprint’s deadline, with an offset as Macs write it.
 
 ## 1.4.0 (2026-11-03)
 A minor release: UI tests survive a fresh test runner, and three additions for the Blueprint apps. Code written for

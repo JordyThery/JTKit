@@ -51,13 +51,47 @@ extension JamfPro {
         public struct PendingVersion: Hashable, Sendable {
             public var osVersion: String?
             public var buildVersion: String?
-            /// The deadline in the device’s local time, without a zone.
+            /// The deadline as the device wrote it: in its local time without a
+            /// zone, or as a moment with an offset (`2026-11-09 22:59:12 +0000`).
             public var targetLocalDateTime: String?
+            /// When the pending version item last changed: the Jamf Pro
+            /// server’s local time, without a zone.
+            public var updated: String?
 
-            public init(osVersion: String? = nil, buildVersion: String? = nil, targetLocalDateTime: String? = nil) {
+            public init(osVersion: String? = nil, buildVersion: String? = nil, targetLocalDateTime: String? = nil,
+                        updated: String? = nil) {
                 self.osVersion = osVersion
                 self.buildVersion = buildVersion
                 self.targetLocalDateTime = targetLocalDateTime
+                self.updated = updated
+            }
+
+            /// The deadline as a moment, when the device wrote it with an
+            /// offset; nil for a local time without one.
+            public var targetDate: Date? { Self.offsetDate(targetLocalDateTime)?.date }
+
+            /// The offset from UTC the deadline was written with, in seconds;
+            /// nil without one.
+            public var targetOffset: Int? { Self.offsetDate(targetLocalDateTime)?.offset }
+
+            /// `2026-11-09 22:59:12 +0000`, `2026-11-09T22:59:12+01:00` or `…Z`.
+            static func offsetDate(_ text: String?) -> (date: Date, offset: Int)? {
+                guard let text = text?.trimmingCharacters(in: .whitespaces),
+                      let match = text.firstMatch(of: /^(\d{4}-\d{2}-\d{2})[T ](\d{2}:\d{2}(?::\d{2})?)(?:\.\d+)?\s*(Z|[+-]\d{2}:?\d{2})$/)
+                else { return nil }
+                let zone = String(match.output.3)
+                var offset = 0
+                if zone != "Z" {
+                    let digits = zone.dropFirst().filter(\.isNumber)
+                    guard digits.count == 4, let hours = Int(digits.prefix(2)), let minutes = Int(digits.suffix(2)) else { return nil }
+                    offset = (hours * 3_600 + minutes * 60) * (zone.hasPrefix("-") ? -1 : 1)
+                }
+                let clock = match.output.2.count == 5 ? "\(match.output.2):00" : String(match.output.2)
+                let formatter = DateFormatter()
+                formatter.locale = Locale(identifier: "en_US_POSIX")
+                formatter.timeZone = TimeZone(secondsFromGMT: offset)
+                formatter.dateFormat = "yyyy-MM-dd'T'HH:mm:ss"
+                return formatter.date(from: "\(match.output.1)T\(clock)").map { ($0, offset) }
             }
         }
 
@@ -123,8 +157,13 @@ extension JamfPro {
         public init(items: [StatusItem]) {
             var values: [String: String] = [:]
             var times: [String] = []
+            var pendingTimes: [String] = []
             for item in items {
                 values[item.key] = item.value
+                if item.key.hasPrefix("softwareupdate.pending-version"),
+                   let time = item.lastUpdateTime?.trimmingCharacters(in: .whitespaces), !time.isEmpty {
+                    pendingTimes.append(time)
+                }
                 if item.key.hasPrefix("softwareupdate.") || item.key.hasPrefix("device.operating-system."),
                    let time = item.lastUpdateTime?.trimmingCharacters(in: .whitespaces), !time.isEmpty {
                     times.append(time)
@@ -142,16 +181,23 @@ extension JamfPro {
             let pending = PendingVersion(osVersion: nested("softwareupdate.pending-version", "os-version"),
                                          buildVersion: nested("softwareupdate.pending-version", "build-version"),
                                          targetLocalDateTime: nested("softwareupdate.pending-version", "target-local-date-time"))
+            var pendingWithTime = pending
+            if pending != PendingVersion() { pendingWithTime.updated = pendingTimes.max() }
             let failure = Failure(count: nested("softwareupdate.failure-reason", "count").flatMap { Int($0) },
                                   reason: nested("softwareupdate.failure-reason", "reason"),
                                   timestamp: nested("softwareupdate.failure-reason", "timestamp"))
             let reasonTexts = values.filter { $0.key.hasPrefix("softwareupdate.install-reason") }
                 .sorted { $0.key < $1.key }.compactMap(\.value)
+            // flattened, `softwareupdate.install-reason.reason` holds the reasons
+            // themselves, comma-separated (`declaration,system-settings`)
+            let flatReasons = (value("softwareupdate.install-reason.reason") ?? "")
+                .split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
+            let nestedReasons = Self.allFields("softwareupdate-reason", in: reasonTexts.joined(separator: ","))
             self.init(
                 installState: value("softwareupdate.install-state").map(InstallState.init),
-                pendingVersion: pending == PendingVersion() ? nil : pending,
+                pendingVersion: pending == PendingVersion() ? nil : pendingWithTime,
                 failure: failure == Failure() ? nil : failure,
-                installReasons: Self.allFields("softwareupdate-reason", in: reasonTexts.joined(separator: ",")),
+                installReasons: nestedReasons.isEmpty ? flatReasons : nestedReasons,
                 betaEnrollment: value("softwareupdate.beta-enrollment"),
                 osVersion: value("device.operating-system.version"),
                 osBuild: value("device.operating-system.build-version"),
