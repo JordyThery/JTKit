@@ -52,8 +52,9 @@ in the release check. Code written for 1.4 compiles unchanged, and existing func
   before. A public host must be a plain host name (not an address) and never a tenant’s or a sign-in service’s;
   `LiveCheckPolicy` applies the same rule to an allow-list built in code. A public host’s redirect is handed back,
   never followed. `LiveCheckRun.record` masks every step name and note (`LiveCheckRun.redacted`: UUIDs, long hex,
-  serial-shaped words), and `neverReport(_:)` adds values a test read, such as Jamf Pro IDs, so a run report can’t
-  hold a real ID.
+  serial-shaped words), and `neverReport(_:)` adds values a test read: names and serials are masked anywhere, a
+  numeric Jamf Pro ID where it stands as an ID (after `id`, `group`, `device` and the like, or in a path), so counts,
+  dates, versions and builds stay readable.
 - Demo: a demo Mac’s pending update reports the Mac Blueprint’s deadline, with an offset as Macs write it.
 
 ## 1.4.0 (2026-11-03)

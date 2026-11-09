@@ -449,10 +449,12 @@ public nonisolated final class LiveCheckRun: @unchecked Sendable {
         lock.withLock { LiveCheckNetwork.appendLine(line, to: runFolder.appending(path: "results.jsonl")) }
     }
 
-    /// Values the report must never show, e.g. the Jamf Pro IDs of the
-    /// groups and devices a test read: masked as whole words in every step
-    /// name and note from now on. A count that happens to equal one is
-    /// masked too: never showing an ID comes first.
+    /// Values the report must never show, e.g. the names, serials and Jamf
+    /// Pro IDs of the groups and devices a test read, masked in every step
+    /// name and note from now on: a name or serial as whole words anywhere;
+    /// a purely numeric ID where it stands as an ID (after `id`, `group`,
+    /// `device`, `computer`, `mobile` or `member`, or in a path), so counts,
+    /// dates, versions and builds stay readable.
     public func neverReport(_ values: some Sequence<String>) {
         let usable = values.map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
         lock.withLock { unreportable.formUnion(usable) }
@@ -461,8 +463,8 @@ public nonisolated final class LiveCheckRun: @unchecked Sendable {
     /// A step name or note without IDs: UUIDs (and so every Blueprint
     /// declaration identifier) become `<id>`, hex runs of 16 or more
     /// characters (server tokens, hashes) `<hash>`, serial-shaped words
-    /// (10–14 capitals and digits, both) `<code>`, and every value in
-    /// `hiding` `<id>`.
+    /// (10–14 capitals and digits, both) `<code>`, and the values in
+    /// `hiding` `<id>` (see `neverReport(_:)`).
     public static func redacted(_ text: String, hiding: Set<String> = []) -> String {
         var out = text.replacingOccurrences(
             of: "[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}", with: "<id>", options: .regularExpression)
@@ -471,8 +473,15 @@ public nonisolated final class LiveCheckRun: @unchecked Sendable {
                                        options: .regularExpression)
         // longest first, so a value inside a longer one doesn't leave a part behind
         for value in hiding.sorted(by: { $0.count > $1.count }) {
-            let pattern = "(?<![A-Za-z0-9])" + NSRegularExpression.escapedPattern(for: value) + "(?![A-Za-z0-9])"
-            out = out.replacingOccurrences(of: pattern, with: "<id>", options: .regularExpression)
+            let escaped = NSRegularExpression.escapedPattern(for: value)
+            if value.allSatisfy(\.isNumber) {
+                let pattern = "((?:\\b(?:[Ii][Dd]|[Gg]roup|[Dd]evice|[Cc]omputer|[Mm]obile|[Mm]ember)s?[ :=#]{1,2})|/)"
+                    + escaped + "(?![A-Za-z0-9.])"
+                out = out.replacingOccurrences(of: pattern, with: "$1<id>", options: .regularExpression)
+            } else {
+                out = out.replacingOccurrences(of: "(?<![A-Za-z0-9])" + escaped + "(?![A-Za-z0-9])", with: "<id>",
+                                               options: .regularExpression)
+            }
         }
         return out
     }

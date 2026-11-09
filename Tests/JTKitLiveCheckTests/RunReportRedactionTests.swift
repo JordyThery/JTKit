@@ -20,5 +20,14 @@ struct RunReportRedactionTests {
     func registered() {
         let masked = LiveCheckRun.redacted("group 812 has 8120 devices; device 812", hiding: ["812"])
         #expect(masked == "group <id> has 8120 devices; device <id>")
+        #expect(LiveCheckRun.redacted("Test Mac 7 in Field iPads", hiding: ["Test Mac 7", "Field iPads"]) == "<id> in <id>")
+        #expect(LiveCheckRun.redacted("path pro/v1/groups/12, id=12, computer #12", hiding: ["12"])
+                == "path pro/v1/groups/<id>, id=<id>, computer #<id>")
+    }
+
+    @Test("A numeric ID doesn’t mask counts, dates, versions or builds")
+    func numbersStayReadable() {
+        let text = "12 devices run 15.8.1 (24G12), reported 2026-10-14T19:08, 10 of 27"
+        #expect(LiveCheckRun.redacted(text, hiding: ["10", "12", "14", "15", "27", "8"]) == text)
     }
 }
