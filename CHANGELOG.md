@@ -1,5 +1,65 @@
 # Changelog
 
+## 1.5.0 (2026-11-09)
+A minor release: read-only calls for software update reporting, Apple’s release data, and public data sources
+in the release check. Code written for 1.4 compiles unchanged, and existing functions behave as before.
+
+### Added
+- `JamfPro.SoftwareUpdateStatus`: a device’s DDM status items read as a software update status (install state,
+  pending version, failure, install reasons, beta, OS version and build, model, board ID, passcode, newest time),
+  from flattened keys or Jamf Pro’s `{key=value}` text. `JamfPlatform.Client.softwareUpdateStatus(managementID:kind:)`
+  returns nil for a device without a report (404) and throws a refusal (403), naming `devices:read` on the
+  Platform API. `JamfPro.serverDate(_:timeZone:)` reads a time Jamf Pro writes in its own local time. The install
+  reasons are read from Jamf Pro’s flattened `softwareupdate.install-reason.reason` too; the pending version has
+  `updated` (when it was reported), `targetDate` and `targetOffset` (a deadline written with an offset).
+- `JamfPro.Computer.security` (`bootstrapTokenEscrowedStatus`, `bootstrapTokenAllowed`), read when the `SECURITY`
+  section is asked for; `members(of:)` asks for it, so `GroupMember` has a Mac’s bootstrap token. Other reads are
+  unchanged.
+- Jamf Pro groups: `JamfPro.DeviceGroup`, identified by kind and number together (`id`, a `DeviceGroup.ID`;
+  `groupID` is Jamf Pro’s number, which a mobile device group and a computer group can share), with
+  `DeviceGroup.ID(_:)` for the Jamf Pro group a Platform API group stands for;
+  `mobileDeviceGroups()`, `computerGroups()`, `jamfProGroups(_:)` and `members(of:)`, which
+  returns `JamfPro.GroupMember`s with their inventory: a mobile group from its membership pages, a smart computer
+  group from its member IDs and a static one from the Classic API, then the computers from `v4/computers-inventory`
+  in batches of 100. A mobile membership that holds only IDs and names (as the Platform API answers it) is filled
+  in from `v2/mobile-devices/detail`. Membership pages are read until one adds no new device, so an answer
+  without a total or a next-page flag can’t repeat forever or count a device twice.
+- Declaration Reporting: `declarationReports(deviceID:filter:)` and `declarationReports(declarationIdentifier:filter:)`,
+  every page, typed (`JamfPlatform.DeclarationReport`), with the Blueprint and step an identifier comes from.
+  Without a filter a device’s report asks for every declaration, then for the Blueprints’ when that’s refused.
+- `BlueprintDetail.softwareUpdateBlocks` and `Blueprints.softwareUpdate(blueprintID:)`: every software update
+  enforcement of a Blueprint with its step and activation predicate (manual, latest, semantic, or Apple’s
+  declaration in a custom-declarations component, with its build), read only.
+- `BlueprintDetail.softwareUpdateSettings`: a Blueprint’s software update settings components (deferrals,
+  recommended cadence, automatic actions, standard-user updates, notifications, Rapid Security Responses, beta),
+  only what the Blueprint includes, with each component’s step and activation predicate.
+- `AppleReleases` (SOFA and GDMF) with `OSVersion`: the latest release per major, builds, supported models or
+  board IDs per major, the last version a model can run, marketing names. `Catalog.supports(release:model:boardID:)`
+  checks one release’s own device list, for a release Apple published for some devices only: by the device ID
+  first, then the model, and only when Apple lists that ID for the release’s major (nil when the release has no
+  list or the device isn’t recognized, such as an Intel Mac reporting `X86LEGACYAP`). `Release.postings` keeps
+  every GDMF entry of a version (build, devices, posting date, public or not); `Catalog.publicPosting(of:model:boardID:)`
+  gives the public posting meant for a device and `build(of:model:boardID:)` its build. A release’s date is the
+  first any source gives. A source that can’t be read is named in `problems`; the rest is used. `OSVersion` reads
+  version strings only (up to three parts, optionally after a name and with a Rapid Security Response’s letter);
+  a build, a model identifier or four parts give nil.
+- `JamfPlatform.APIError.permissions`: a refusal can name several Platform API permissions (`permission` stays,
+  as the first of them). `JamfPlatform.Permission` names the read permissions; `PermissionCheck.devicesRead`.
+- Demo: `DemoSoftwareUpdate.install(on:)` adds sample iPads and Macs in every update state, their groups, status
+  and declaration reports, and two Blueprints, to the demo Platform API for an app that asks for them; the
+  Contoso world and every other app’s demo are unchanged. `DemoAppleReleaseServer` answers the release feeds
+  on the demo network’s own hosts. Release dates are relative to now; the demo iPad
+  Blueprint asks for a specific version, the Mac Blueprint enforces minor updates seven days after their release.
+- Release check: the allow-list may list `publicHosts`. A request to one is sent only as a GET without a body,
+  credentials, cookies, an authorization header or a credential in the query; every other host is decided as
+  before. A public host must be a plain host name (not an address) and never a tenant’s or a sign-in service’s;
+  `LiveCheckPolicy` applies the same rule to an allow-list built in code. A public host’s redirect is handed back,
+  never followed. `LiveCheckRun.record` masks every step name and note (`LiveCheckRun.redacted`: UUIDs, long hex,
+  serial-shaped words), and `neverReport(_:)` adds values a test read: names and serials are masked anywhere, a
+  numeric Jamf Pro ID where it stands as an ID (after `id`, `group`, `device` and the like, or in a path), so counts,
+  dates, versions and builds stay readable.
+- Demo: a demo Mac’s pending update reports the Mac Blueprint’s deadline, with an offset as Macs write it.
+
 ## 1.4.0 (2026-11-03)
 A minor release: UI tests survive a fresh test runner, and three additions for the Blueprint apps. Code written for
 1.3 compiles unchanged, and existing functions behave as before.

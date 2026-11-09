@@ -38,7 +38,11 @@ A connections list and editor for several services in one list. Names, addresses
 
 ### Jamf Pro, Jamf Platform API and Jamf School
 
-Sign-in with an API client or a username and password, with tokens renewed as needed. Jamf Pro device lookups, records, PreStages, sites, recovery secrets and MDM commands through the Jamf Pro API and the Classic API; Blueprints, device groups, devices and environments through the Jamf Platform API, also as a gateway to Jamf Pro; devices, groups, locations, Automated Device Enrollment and commands in Jamf School.
+Sign-in with an API client or a username and password, with tokens renewed as needed. Jamf Pro device lookups, records, PreStages, sites, recovery secrets and MDM commands through the Jamf Pro API and the Classic API; Blueprints, device groups, devices and environments through the Jamf Platform API, also as a gateway to Jamf Pro; devices, groups, locations, Automated Device Enrollment and commands in Jamf School. For software update reporting, read only: Jamf Pro groups with their members’ inventory, DDM status items typed as a software update status, Declaration Reporting, and a Blueprint’s software update enforcements.
+
+### Apple release data
+
+Apple’s OS releases from SOFA (Mac Admins Open Source) and Apple’s own software lookup service (GDMF), read with GET only and no credentials: the latest release per major, the build of a version, which models (or a Mac’s board ID) can run a major, the last version a model can run, and `OSVersion` to compare versions.
 
 ### Microsoft Intune through Graph
 
@@ -50,7 +54,7 @@ One client for both: devices, MDM servers, assignments, AppleCare coverage, Acti
 
 ### Demo Mode
 
-Fake Jamf Pro, Jamf Platform API, Jamf School, Intune and Apple servers inside the app, with sample data, so an app can be tried without a tenant.
+Fake Jamf Pro, Jamf Platform API, Jamf School, Intune and Apple servers inside the app, with sample data, so an app can be tried without a tenant. An app can add sample iPads and Macs in the middle of a software update, with Apple’s release data, to the demo Platform API.
 
 ### Activity log and redaction
 
@@ -61,7 +65,7 @@ Every request to Jamf, Microsoft Graph and Apple is recorded in an activity log 
 - **Secrets are never logged or written to disk.** They live in the Keychain. Request bodies are never recorded unless an app marks a request as safe, sensitive calls are recorded without headers or bodies, and everything else is redacted before it is shown or exported.
 - **Every request to a service goes through one place.** `RequestRecorder` sends, times, redacts and logs each request to Jamf, Microsoft Graph and Apple, sign-in included; `HTTPClient` adds the shared retry rules on top. The only requests outside it are the update check and download from GitHub, and Microsoft’s own sign-in window.
 - **Demo Mode never reaches a tenant.** Demo clients get a private network that answers only from the servers inside the app, and a request for a demo connection on any other session is refused before it is sent.
-- **The release check’s live tests deny by default.** Every request is checked before it is sent: only tenants on a local allow-list are reached, read-only tenants get reads and sign-in only, plus commands to the devices listed for testing, and elsewhere only test objects are created, changed or deleted.
+- **The release check’s live tests deny by default.** Every request is checked before it is sent: only tenants on a local allow-list are reached, read-only tenants get reads and sign-in only, plus commands to the devices listed for testing, and elsewhere only test objects are created, changed or deleted. Public data sources the allow-list names get a GET without credentials or cookies, nothing else.
 
 ## Used by
 

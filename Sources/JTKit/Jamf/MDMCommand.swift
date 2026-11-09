@@ -33,7 +33,7 @@ public nonisolated enum MDMCommand: String, CaseIterable, Sendable, Hashable {
         case intune
     }
 
-    public enum DeviceKind: String, Sendable, Hashable {
+    public enum DeviceKind: String, Sendable, Hashable, Codable {
         case computer
         case mobileDevice
     }

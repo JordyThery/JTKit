@@ -18,17 +18,62 @@ import Foundation
 /// that device never gets an interruptive command). A file using either must
 /// say version 3, so an older JTKit refuses it instead of reading it without
 /// them.
+///
+/// `publicHosts` (1.5.0, optional in any version): host names of public data
+/// sources an app reads, e.g. Apple’s release data. A request to one is sent
+/// only as a GET without a body, credentials, cookies or an authorization
+/// header; nothing else to them, and every other host as before. An older
+/// JTKit ignores the key, so those hosts stay refused there.
 public nonisolated struct AllowList: Codable, Sendable, Equatable {
     public var version: Int
     public var tenants: [Entry]
     /// Production tenants are read (GET only) without `--include-production`.
     /// Nil or false: as in version 1, only with it.
     public var productionReads: Bool?
+    /// Public hosts read with GET only, without credentials (see above).
+    public var publicHosts: [String]?
 
-    public init(version: Int = 1, tenants: [Entry], productionReads: Bool? = nil) {
+    public init(version: Int = 1, tenants: [Entry], productionReads: Bool? = nil, publicHosts: [String]? = nil) {
         self.version = version
         self.tenants = tenants
         self.productionReads = productionReads
+        self.publicHosts = publicHosts
+    }
+
+    /// The public hosts, lowercased.
+    public var publicHostSet: Set<String> {
+        Set((publicHosts ?? []).map { $0.trimmingCharacters(in: .whitespaces).lowercased() })
+    }
+
+    /// The public hosts that pass `validatePublicHosts`, lowercased; any
+    /// other is left out.
+    var validPublicHosts: Set<String> {
+        let tenantHosts = Set(tenants.flatMap(\.hosts).map { $0.lowercased() })
+        return publicHostSet.filter { host in
+            Self.isPlainHost(host) && !tenantHosts.contains(host) && !LiveCheckPolicy.isCredentialHost(host)
+        }
+    }
+
+    static func isPlainHost(_ host: String) -> Bool {
+        host.range(of: "^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)*\\.[a-z]([a-z0-9-]*[a-z0-9])?$",
+                   options: .regularExpression) != nil
+    }
+
+    /// A public host must be a plain host name (no scheme, port, path or
+    /// wildcard), and never one of a tenant’s or a service whose requests
+    /// carry credentials.
+    func validatePublicHosts() throws {
+        let tenantHosts = Set(tenants.flatMap(\.hosts).map { $0.lowercased() })
+        for raw in publicHosts ?? [] {
+            let host = raw.trimmingCharacters(in: .whitespaces).lowercased()
+            let plain = Self.isPlainHost(host)
+            guard plain else {
+                throw LoadError.incomplete(role: "publicHosts", reason: "“\(raw)” isn’t a plain host name")
+            }
+            if tenantHosts.contains(host) || LiveCheckPolicy.isCredentialHost(host) {
+                throw LoadError.incomplete(role: "publicHosts", reason: "\(host) is a tenant’s or a sign-in service’s host, never a public one")
+            }
+        }
     }
 
     /// The versions this JTKit reads.
@@ -203,6 +248,7 @@ public nonisolated struct AllowList: Codable, Sendable, Equatable {
             throw LoadError.unreadable(String(describing: error))
         }
         guard supportedVersions.contains(list.version) else { throw LoadError.unsupportedVersion(list.version) }
+        try list.validatePublicHosts()
         for entry in list.tenants {
             try entry.validate()
             if list.version < 3 && entry.usesVersionThree {
