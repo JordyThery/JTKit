@@ -168,14 +168,25 @@ extension JamfPro {
             allFields(sub, in: text).first
         }
 
+        /// Every value of `sub`: `"sub": "value"` (or a bare value) in JSON,
+        /// else `sub=value` in Java’s `{key=value, …}` text, where a value
+        /// runs to the next comma or closing brace and keeps its quotes (a
+        /// failure reason holds `Code=8406 "…"`).
         static func allFields(_ sub: String, in text: String) -> [String] {
             let name = NSRegularExpression.escapedPattern(for: sub)
-            let pattern = "(?:^|[{\\[ ,])\"?\(name)\"?\\s*[=:]\\s*\"?([^,}\\]\"]*)"
-            guard let regex = try? NSRegularExpression(pattern: pattern) else { return [] }
+            let isJSON = text.range(of: "\"\(name)\"\\s*:", options: .regularExpression) != nil
+            let patterns = isJSON
+                ? ["\"\(name)\"\\s*:\\s*\"((?:[^\"\\\\]|\\\\.)*)\"", "\"\(name)\"\\s*:\\s*([^,}\\]\"]+)"]
+                : ["(?:^|[{\\[ ,])\(name)=([^,}\\]]*)"]
             let range = NSRange(text.startIndex..., in: text)
-            return regex.matches(in: text, range: range).compactMap { match in
-                Range(match.range(at: 1), in: text).map { text[$0].trimmingCharacters(in: .whitespaces) }
-            }.filter { !$0.isEmpty && $0 != "null" }
+            for pattern in patterns {
+                guard let regex = try? NSRegularExpression(pattern: pattern) else { continue }
+                let values = regex.matches(in: text, range: range).compactMap { match in
+                    Range(match.range(at: 1), in: text).map { text[$0].trimmingCharacters(in: .whitespaces) }
+                }.filter { !$0.isEmpty && $0 != "null" }
+                if !values.isEmpty { return values }
+            }
+            return []
         }
 
         static func bool(_ text: String) -> Bool? {

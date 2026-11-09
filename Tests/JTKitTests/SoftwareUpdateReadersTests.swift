@@ -59,6 +59,20 @@ struct SoftwareUpdateStatusTests {
         #expect(text.failure?.timestamp == "2026-11-08T09:00:00Z")
     }
 
+    @Test("A reason in the {key=value} text keeps its quotes up to the next comma or brace")
+    func quotedReason() {
+        let status = JamfPro.SoftwareUpdateStatus(items: items([
+            ("softwareupdate.failure-reason", #"{count=2, reason=Error Domain=SUCoreError Code=8406 "InstallationKeybagRequired", timestamp=2026-11-05T09:30:00}"#),
+        ]))
+        #expect(status.failure?.reason == #"Error Domain=SUCoreError Code=8406 "InstallationKeybagRequired""#)
+        #expect(status.failure?.timestamp == "2026-11-05T09:30:00")
+        let json = JamfPro.SoftwareUpdateStatus(items: items([
+            ("softwareupdate.failure-reason", #"{"count":2,"reason":"Code=1 \"Download, failed\""}"#),
+        ]))
+        #expect(json.failure?.count == 2)
+        #expect(json.failure?.reason == #"Code=1 \"Download, failed\""#)
+    }
+
     @Test("A value in JSON form is read too")
     func jsonValue() {
         let status = JamfPro.SoftwareUpdateStatus(items: items([
