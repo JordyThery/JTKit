@@ -1,6 +1,6 @@
 # Changelog
 
-## 1.5.0 (not released yet)
+## 1.5.0 (2026-11-09)
 A minor release: read-only calls for software update reporting, Apple’s release data, and public data sources
 in the release check. Code written for 1.4 compiles unchanged, and existing functions behave as before.
 
@@ -16,7 +16,7 @@ in the release check. Code written for 1.4 compiles unchanged, and existing func
   section is asked for; `members(of:)` asks for it, so `GroupMember` has a Mac’s bootstrap token. Other reads are
   unchanged.
 - Jamf Pro groups: `JamfPro.DeviceGroup`, identified by kind and number together (`id`, a `DeviceGroup.ID`;
-  `groupID` is Jamf Pro's number, which a mobile device group and a computer group can share), with
+  `groupID` is Jamf Pro’s number, which a mobile device group and a computer group can share), with
   `DeviceGroup.ID(_:)` for the Jamf Pro group a Platform API group stands for;
   `mobileDeviceGroups()`, `computerGroups()`, `jamfProGroups(_:)` and `members(of:)`, which
   returns `JamfPro.GroupMember`s with their inventory: a mobile group from its membership pages, a smart computer
@@ -26,7 +26,7 @@ in the release check. Code written for 1.4 compiles unchanged, and existing func
   without a total or a next-page flag can’t repeat forever or count a device twice.
 - Declaration Reporting: `declarationReports(deviceID:filter:)` and `declarationReports(declarationIdentifier:filter:)`,
   every page, typed (`JamfPlatform.DeclarationReport`), with the Blueprint and step an identifier comes from.
-  Without a filter a device's report asks for every declaration, then for the Blueprints' when that's refused.
+  Without a filter a device’s report asks for every declaration, then for the Blueprints’ when that’s refused.
 - `BlueprintDetail.softwareUpdateBlocks` and `Blueprints.softwareUpdate(blueprintID:)`: every software update
   enforcement of a Blueprint with its step and activation predicate (manual, latest, semantic, or Apple’s
   declaration in a custom-declarations component, with its build), read only.

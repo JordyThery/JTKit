@@ -23,6 +23,9 @@ struct RunReportRedactionTests {
         #expect(LiveCheckRun.redacted("Test Mac 7 in Field iPads", hiding: ["Test Mac 7", "Field iPads"]) == "<id> in <id>")
         #expect(LiveCheckRun.redacted("path pro/v1/groups/12, id=12, computer #12", hiding: ["12"])
                 == "path pro/v1/groups/<id>, id=<id>, computer #<id>")
+        // followed by punctuation: still an ID; followed by a digit after a period: a version
+        #expect(LiveCheckRun.redacted("read group 501. Then group 501) and device 501: done; group 501.2", hiding: ["501"])
+                == "read group <id>. Then group <id>) and device <id>: done; group 501.2")
     }
 
     @Test("A numeric ID doesn’t mask counts, dates, versions or builds")
