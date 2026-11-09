@@ -120,6 +120,51 @@ extension JamfPro {
                       department: text("department"))
         }
 
+        /// A member from a mobile device’s inventory record
+        /// (`v2/mobile-devices/detail`, by section).
+        init?(mobileDetail json: LosslessJSON) {
+            guard let id = json["mobileDeviceId"]?.text ?? json["id"]?.text else { return nil }
+            let general = json["general"], hardware = json["hardware"], security = json["security"]
+            let network = json["network"], location = json["userAndLocation"]
+            func date(_ value: LosslessJSON?) -> Date? { value?.text.flatMap(JamfPlatform.date(from:)) }
+            self.init(id: id, kind: .mobileDevice, name: general?["displayName"]?.text,
+                      serialNumber: hardware?["serialNumber"]?.text, udid: general?["udid"]?.text,
+                      managementID: general?["managementId"]?.text, osVersion: general?["osVersion"]?.text,
+                      osBuild: general?["osBuild"]?.text, osSupplementalBuild: general?["osSupplementalBuildVersion"]?.text,
+                      osRapidSecurityResponse: general?["osRapidSecurityResponse"]?.text, model: hardware?["model"]?.text,
+                      modelIdentifier: hardware?["modelIdentifier"]?.text, timeZone: general?["timeZone"]?.text,
+                      lastContact: date(general?["lastContactDate"]), lastInventoryUpdate: date(general?["lastInventoryUpdateDate"]),
+                      managed: general?["managed"]?.bool, supervised: general?["supervised"]?.bool,
+                      ddmEnabled: general?["declarativeDeviceManagementEnabled"]?.bool,
+                      passcodePresent: security?["passcodePresent"]?.bool, batteryLevel: hardware?["batteryLevel"]?.int,
+                      batteryHealth: hardware?["batteryHealth"]?.text, availableSpaceMB: hardware?["availableSpaceMb"]?.int,
+                      capacityMB: hardware?["capacityMb"]?.int, roaming: network?["roaming"]?.bool,
+                      dataRoamingEnabled: network?["dataRoamingEnabled"]?.bool,
+                      mdmProfileExpiration: date(general?["mdmProfileExpirationDate"]),
+                      building: location?["buildingName"]?.text ?? location?["building"]?.text,
+                      department: location?["departmentName"]?.text ?? location?["department"]?.text)
+        }
+
+        /// This member with what it lacks taken from `other` (the same device).
+        func filled(from other: JamfPro.GroupMember) -> JamfPro.GroupMember {
+            JamfPro.GroupMember(
+                id: id, kind: kind, name: name ?? other.name, serialNumber: serialNumber ?? other.serialNumber,
+                udid: udid ?? other.udid, managementID: managementID ?? other.managementID,
+                osVersion: osVersion ?? other.osVersion, osBuild: osBuild ?? other.osBuild,
+                osSupplementalBuild: osSupplementalBuild ?? other.osSupplementalBuild,
+                osRapidSecurityResponse: osRapidSecurityResponse ?? other.osRapidSecurityResponse,
+                model: model ?? other.model, modelIdentifier: modelIdentifier ?? other.modelIdentifier,
+                timeZone: timeZone ?? other.timeZone, lastContact: lastContact ?? other.lastContact,
+                lastInventoryUpdate: lastInventoryUpdate ?? other.lastInventoryUpdate, managed: managed ?? other.managed,
+                supervised: supervised ?? other.supervised, ddmEnabled: ddmEnabled ?? other.ddmEnabled,
+                passcodePresent: passcodePresent ?? other.passcodePresent, batteryLevel: batteryLevel ?? other.batteryLevel,
+                batteryHealth: batteryHealth ?? other.batteryHealth, availableSpaceMB: availableSpaceMB ?? other.availableSpaceMB,
+                capacityMB: capacityMB ?? other.capacityMB, roaming: roaming ?? other.roaming,
+                dataRoamingEnabled: dataRoamingEnabled ?? other.dataRoamingEnabled,
+                mdmProfileExpiration: mdmProfileExpiration ?? other.mdmProfileExpiration,
+                building: building ?? other.building, department: department ?? other.department)
+        }
+
         /// A member from a computer’s inventory record.
         init?(computer: JamfPro.Computer) {
             guard let id = computer.id else { return nil }
@@ -177,15 +222,40 @@ extension JamfPlatform.Client {
         switch group.kind {
         case .mobileDevice:
             let kind = group.isSmart ? "smart-group-membership" : "static-group-membership"
-            return try await readAllPages(
+            let members = try await readAllPages(
                 "pro/v2/mobile-device-groups/\(kind)/\(JamfPlatform.pathSegment(group.id))",
                 privileges: [group.isSmart ? .readSmartMobileDeviceGroups : .readStaticMobileDeviceGroups, .readMobileDevices],
                 permissions: [JamfPlatform.Permission.deviceGroupsRead, JamfPlatform.Permission.devicesRead],
                 item: JamfPro.GroupMember.init(mobileDevice:))
+            // Through the Platform API the membership holds only each device's
+            // ID and name (the rest null, checked 2026-11-09): read the rest
+            // from the inventory.
+            guard members.contains(where: { $0.managementID == nil }) else { return members }
+            let details = try await mobileInventory(ids: members.map(\.id))
+            return members.map { member in details[member.id].map { member.filled(from: $0) } ?? member }
         case .computer:
             let ids = group.isSmart ? try await smartComputerGroupMemberIDs(group.id) : try await staticComputerGroupMemberIDs(group.id)
             return try await computerMembers(ids: ids)
         }
+    }
+
+    /// The inventory of these mobile devices (`v2/mobile-devices/detail`,
+    /// general, hardware, security, network, user and location), in batches
+    /// of 100, by Jamf Pro ID.
+    func mobileInventory(ids: [String]) async throws -> [String: JamfPro.GroupMember] {
+        let safe = ids.filter { !$0.isEmpty && $0.allSatisfy(\.isNumber) }
+        var byID: [String: JamfPro.GroupMember] = [:]
+        let sections = ["GENERAL", "HARDWARE", "SECURITY", "NETWORK", "USER_AND_LOCATION"].map { URLQueryItem(name: "section", value: $0) }
+        for start in stride(from: 0, to: safe.count, by: 100) {
+            let batch = safe[start..<min(start + 100, safe.count)]
+            let records = try await readAllPages(
+                "pro/v2/mobile-devices/detail",
+                query: sections + [URLQueryItem(name: "filter", value: "mobileDeviceId=in=(\(batch.joined(separator: ",")))")],
+                privileges: [.readMobileDevices], permissions: [JamfPlatform.Permission.devicesRead],
+                item: JamfPro.GroupMember.init(mobileDetail:))
+            for record in records { byID[record.id] = record }
+        }
+        return byID
     }
 
     /// The computers with these Jamf Pro IDs, in batches of 100, in the order given.

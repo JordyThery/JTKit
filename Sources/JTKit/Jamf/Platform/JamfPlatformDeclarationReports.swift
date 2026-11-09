@@ -127,13 +127,26 @@ extension JamfPlatform.Client {
     ///   - filter: RSQL on `declarationIdentifier`, `active`, `validityState`,
     ///     `declarationType`, `dateUpdated` or `channel`, e.g.
     ///     `declarationIdentifier==Blueprint_<uuid>*`.
+    ///
+    /// Without a filter every declaration is asked for (`active==true,active==false`:
+    /// the report answers 400 to a request without one); when that is
+    /// refused with 400 too, the Blueprints’ declarations
+    /// (`declarationIdentifier==Blueprint_*`).
     public func declarationReports(deviceID: String, filter: String? = nil) async throws -> [JamfPlatform.DeclarationReport]? {
+        let path = "ddm/report/v1/devices/\(JamfPlatform.pathSegment(deviceID))/declarations"
+        func read(_ filter: String) async throws -> [JamfPlatform.DeclarationReport] {
+            try await readAllPages(path, query: [URLQueryItem(name: "filter", value: filter)],
+                                   pageSize: 100, sizeName: "size", privileges: [],
+                                   permissions: [JamfPlatform.Permission.declarationsRead],
+                                   item: JamfPlatform.DeclarationReport.init(json:))
+        }
         do {
-            return try await readAllPages("ddm/report/v1/devices/\(JamfPlatform.pathSegment(deviceID))/declarations",
-                                          query: filter.map { [URLQueryItem(name: "filter", value: $0)] } ?? [],
-                                          pageSize: 100, sizeName: "size", privileges: [],
-                                          permissions: [JamfPlatform.Permission.declarationsRead],
-                                          item: JamfPlatform.DeclarationReport.init(json:))
+            if let filter { return try await read(filter) }
+            do {
+                return try await read("active==true,active==false")
+            } catch let error as JamfPlatform.APIError where error.status == 400 {
+                return try await read("declarationIdentifier==Blueprint_*")
+            }
         } catch let error as JamfPlatform.APIError where error.status == 404 {
             return nil
         }

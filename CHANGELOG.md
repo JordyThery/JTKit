@@ -13,9 +13,11 @@ in the release check. Code written for 1.4 compiles unchanged, and existing func
 - Jamf Pro groups: `mobileDeviceGroups()`, `computerGroups()`, `jamfProGroups(_:)` and `members(of:)`, which
   returns `JamfPro.GroupMember`s with their inventory: a mobile group from its membership pages, a smart computer
   group from its member IDs and a static one from the Classic API, then the computers from `v4/computers-inventory`
-  in batches of 100.
+  in batches of 100. A mobile membership that holds only IDs and names (as the Platform API answers it) is filled
+  in from `v2/mobile-devices/detail`.
 - Declaration Reporting: `declarationReports(deviceID:filter:)` and `declarationReports(declarationIdentifier:filter:)`,
   every page, typed (`JamfPlatform.DeclarationReport`), with the Blueprint and step an identifier comes from.
+  Without a filter a device's report asks for every declaration, then for the Blueprints' when that's refused.
 - `BlueprintDetail.softwareUpdateBlocks` and `Blueprints.softwareUpdate(blueprintID:)`: every software update
   enforcement of a Blueprint with its step and activation predicate (manual, latest, semantic, or Apple’s
   declaration in a custom-declarations component, with its build), read only.

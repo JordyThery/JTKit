@@ -214,6 +214,45 @@ struct JamfProGroupTests {
         #expect(server.requests.last?.path == "/pro/v2/mobile-device-groups/static-group-membership/8")
     }
 
+    @Test("A membership with only IDs and names is filled in from the inventory, in batches of 100")
+    func thinMembership() async throws {
+        let server = MockServer { request in
+            if request.path.contains("group-membership") {
+                let records = (1...150).map { #"{"mobileDeviceId":"\#($0)","displayName":"iPad \#($0)","managementId":null,"timeZone":null,"osVersion":null}"# }
+                return .json(200, #"{"totalCount":150,"results":[\#(records.joined(separator: ","))]}"#)
+            }
+            let ids = (request.queryValue("filter") ?? "").replacingOccurrences(of: "mobileDeviceId=in=(", with: "")
+                .replacingOccurrences(of: ")", with: "").split(separator: ",")
+            let records = ids.map { id in
+                #"{"mobileDeviceId":"\#(id)","general":{"displayName":"iPad \#(id)","managementId":"M-\#(id)","osVersion":"27.0.1","timeZone":"Europe/Brussels","lastContactDate":"2026-11-08T10:00:00Z","supervised":true},"hardware":{"serialNumber":"ZZTEST\#(id)","modelIdentifier":"iPad13,18","batteryLevel":64},"security":{"passcodePresent":false},"network":{"roaming":false}}"#
+            }
+            return .json(200, #"{"totalCount":\#(records.count),"results":[\#(records.joined(separator: ","))]}"#)
+        }
+        let members = try await platform(server).members(of: .init(id: "7", name: "Field iPads", isSmart: true, kind: .mobileDevice))
+        #expect(members.count == 150)
+        let first = try #require(members.first)
+        #expect(first.name == "iPad 1")
+        #expect(first.managementID == "M-1")
+        #expect(first.timeZone == "Europe/Brussels")
+        #expect(first.serialNumber == "ZZTEST1")
+        #expect(first.osVersion == "27.0.1")
+        #expect(first.passcodePresent == false)
+        #expect(first.lastContact == JamfPlatform.date(from: "2026-11-08T10:00:00Z"))
+        let detail = server.requests.filter { $0.path == "/pro/v2/mobile-devices/detail" }
+        #expect(detail.count == 2)
+        #expect(detail.allSatisfy { $0.method == "GET" && ($0.queryValue("filter") ?? "").hasPrefix("mobileDeviceId=in=(") })
+        #expect(detail.first?.url.query()?.contains("section=GENERAL") == true)
+    }
+
+    @Test("A full membership needs no inventory read")
+    func fullMembership() async throws {
+        let server = MockServer { _ in
+            .json(200, #"{"totalCount":1,"results":[{"mobileDeviceId":"1","managementId":"M-1","timeZone":"UTC"}]}"#)
+        }
+        _ = try await platform(server).members(of: .init(id: "7", name: "G", isSmart: true, kind: .mobileDevice))
+        #expect(server.requests.count == 1)
+    }
+
     @Test("A refused membership names both Platform permissions")
     func refused() async throws {
         let server = MockServer { _ in .json(403, #"{"httpStatus":403,"errors":[]}"#) }
@@ -305,6 +344,21 @@ struct DeclarationReportTests {
         #expect(server.requests.map(\.path) == Array(repeating: "/ddm/report/v1/devices/P-1/declarations", count: 2))
         #expect(server.requests.allSatisfy { $0.queryValue("size") == "100" && $0.queryValue("page-size") == nil })
         #expect(server.requests.first?.queryValue("filter") == "declarationIdentifier==Blueprint_*")
+    }
+
+    @Test("Without a filter every declaration is asked for; a 400 falls back to the Blueprints’")
+    func defaultFilter() async throws {
+        let server = MockServer { request in
+            request.queryValue("filter") == "active==true,active==false"
+                ? .json(400, #"{"httpStatus":400,"errors":[]}"#)
+                : .json(200, #"{"totalCount":1,"results":[{"declarationIdentifier":"Blueprint_x","status":"SUCCESSFUL"}]}"#)
+        }
+        let reports = try await platform(server).declarationReports(deviceID: "P-1")
+        #expect(reports?.count == 1)
+        #expect(server.requests.compactMap { $0.queryValue("filter") } == ["active==true,active==false", "declarationIdentifier==Blueprint_*"])
+        let accepted = MockServer { _ in .json(200, #"{"totalCount":0,"results":[]}"#) }
+        _ = try await platform(accepted).declarationReports(deviceID: "P-1")
+        #expect(accepted.requests.count == 1)
     }
 
     @Test("Statuses and validity it doesn’t know are kept")
