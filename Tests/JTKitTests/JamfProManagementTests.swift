@@ -488,9 +488,9 @@ struct PrivilegeTableTests {
         _ = try? await client.softwareUpdateStatus(managementID: "M-12", kind: .mobileDevice)
         _ = try? await client.jamfProGroups()
         for isSmart in [true, false] {
-            _ = try? await client.members(of: .init(id: "1", name: "G", isSmart: isSmart, kind: .mobileDevice))
+            _ = try? await client.members(of: .init(groupID: "1", name: "G", isSmart: isSmart, kind: .mobileDevice))
         }
-        _ = try? await client.members(of: .init(id: "1", name: "G", isSmart: true, kind: .computer))
+        _ = try? await client.members(of: .init(groupID: "1", name: "G", isSmart: true, kind: .computer))
         _ = try? await client.computerMembers(ids: ["7"])
 
         let requests = seen.value.filter { !$0.path.hasPrefix("proclassic/") }

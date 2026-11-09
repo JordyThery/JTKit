@@ -10,7 +10,10 @@ in the release check. Code written for 1.4 compiles unchanged, and existing func
   from flattened keys or Jamf Pro’s `{key=value}` text. `JamfPlatform.Client.softwareUpdateStatus(managementID:kind:)`
   returns nil for a device without a report (404) and throws a refusal (403), naming `devices:read` on the
   Platform API. `JamfPro.serverDate(_:timeZone:)` reads a time Jamf Pro writes in its own local time.
-- Jamf Pro groups: `mobileDeviceGroups()`, `computerGroups()`, `jamfProGroups(_:)` and `members(of:)`, which
+- Jamf Pro groups: `JamfPro.DeviceGroup`, identified by kind and number together (`id`, a `DeviceGroup.ID`;
+  `groupID` is Jamf Pro's number, which a mobile device group and a computer group can share), with
+  `DeviceGroup.ID(_:)` for the Jamf Pro group a Platform API group stands for;
+  `mobileDeviceGroups()`, `computerGroups()`, `jamfProGroups(_:)` and `members(of:)`, which
   returns `JamfPro.GroupMember`s with their inventory: a mobile group from its membership pages, a smart computer
   group from its member IDs and a static one from the Classic API, then the computers from `v4/computers-inventory`
   in batches of 100. A mobile membership that holds only IDs and names (as the Platform API answers it) is filled

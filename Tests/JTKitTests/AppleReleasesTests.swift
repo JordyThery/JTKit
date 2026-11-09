@@ -213,7 +213,7 @@ struct DemoSoftwareUpdateTests {
     func iPads() async throws {
         let (_, client, _) = try demo()
         let groups = try await client.jamfProGroups()
-        #expect(groups.map(\.name) == ["Field iPads", "Studio Macs", "Loaner Macs"])
+        #expect(groups.map(\.name) == ["Field iPads", "Spare iPads", "Studio Macs", "Loaner Macs"])
         let iPads = try await client.members(of: groups[0])
         #expect(iPads.count == DemoSoftwareUpdate.iPads.count)
         #expect(Set(iPads.map(\.serialNumber)) == Set(DemoSoftwareUpdate.iPads.map(\.serial)))

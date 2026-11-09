@@ -2,16 +2,48 @@ import Foundation
 
 extension JamfPro {
     /// A Jamf Pro mobile device group or computer group.
+    ///
+    /// Mobile device groups and computer groups are numbered separately in
+    /// Jamf Pro, so the same number can name one of each: a group is
+    /// identified by its kind and its number together (`id`), never by the
+    /// number alone.
     public struct DeviceGroup: Hashable, Sendable, Identifiable {
-        /// Jamf Pro’s ID of the group.
-        public var id: String
+        /// What identifies a group: its kind and Jamf Pro’s ID.
+        public struct ID: Hashable, Sendable, Codable, CustomStringConvertible {
+            public var kind: MDMCommand.DeviceKind
+            public var groupID: String
+
+            public init(kind: MDMCommand.DeviceKind, groupID: String) {
+                self.kind = kind
+                self.groupID = groupID
+            }
+
+            /// The Jamf Pro group a Platform API group stands for; nil for
+            /// one that isn’t a mobile device or computer group.
+            public init?(_ platformGroup: JamfPlatform.PlatformGroup) {
+                guard let groupID = platformGroup.jamfProID, !groupID.isEmpty else { return nil }
+                switch platformGroup.deviceType {
+                case .mobile: self.init(kind: .mobileDevice, groupID: groupID)
+                case .computer: self.init(kind: .computer, groupID: groupID)
+                case .other: return nil
+                }
+            }
+
+            /// `mobileDevice 12`, `computer 12`.
+            public var description: String { "\(kind.rawValue) \(groupID)" }
+        }
+
+        /// Jamf Pro’s ID of the group, unique only within its kind.
+        public var groupID: String
         public var name: String
         public var isSmart: Bool
         public var kind: MDMCommand.DeviceKind
         public var description: String?
 
-        public init(id: String, name: String, isSmart: Bool, kind: MDMCommand.DeviceKind, description: String? = nil) {
-            self.id = id
+        public var id: ID { ID(kind: kind, groupID: groupID) }
+
+        public init(groupID: String, name: String, isSmart: Bool, kind: MDMCommand.DeviceKind, description: String? = nil) {
+            self.groupID = groupID
             self.name = name
             self.isSmart = isSmart
             self.kind = kind
@@ -223,7 +255,7 @@ extension JamfPlatform.Client {
         case .mobileDevice:
             let kind = group.isSmart ? "smart-group-membership" : "static-group-membership"
             let members = try await readAllPages(
-                "pro/v2/mobile-device-groups/\(kind)/\(JamfPlatform.pathSegment(group.id))",
+                "pro/v2/mobile-device-groups/\(kind)/\(JamfPlatform.pathSegment(group.groupID))",
                 privileges: [group.isSmart ? .readSmartMobileDeviceGroups : .readStaticMobileDeviceGroups, .readMobileDevices],
                 permissions: [JamfPlatform.Permission.deviceGroupsRead, JamfPlatform.Permission.devicesRead],
                 item: JamfPro.GroupMember.init(mobileDevice:))
@@ -234,7 +266,7 @@ extension JamfPlatform.Client {
             let details = try await mobileInventory(ids: members.map(\.id))
             return members.map { member in details[member.id].map { member.filled(from: $0) } ?? member }
         case .computer:
-            let ids = group.isSmart ? try await smartComputerGroupMemberIDs(group.id) : try await staticComputerGroupMemberIDs(group.id)
+            let ids = group.isSmart ? try await smartComputerGroupMemberIDs(group.groupID) : try await staticComputerGroupMemberIDs(group.groupID)
             return try await computerMembers(ids: ids)
         }
     }
@@ -306,7 +338,7 @@ extension JamfPlatform.Client {
         let items = json.arrayValue ?? json["results"]?.arrayValue ?? []
         return items.compactMap { item in
             guard let id = item["id"]?.text, let name = item["name"]?.text else { return nil }
-            return JamfPro.DeviceGroup(id: id, name: name, isSmart: item[smartKey]?.bool ?? false, kind: kind,
+            return JamfPro.DeviceGroup(groupID: id, name: name, isSmart: item[smartKey]?.bool ?? false, kind: kind,
                                        description: item["description"]?.text)
         }
     }

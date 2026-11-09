@@ -57,6 +57,9 @@ public enum DemoSoftwareUpdate {
     public static let iPadGroupID = "501"
     public static let macGroupID = "601"
     public static let loanerMacGroupID = "602"
+    /// A mobile device group with the same number as the studio's computer
+    /// group: mobile device and computer groups are numbered separately.
+    public static let spareIPadGroupID = "601"
     /// The Platform API device groups the Blueprints are scoped to.
     public static let iPadPlatformGroupID = DemoSamples.uuid(0xd701)
     public static let macPlatformGroupID = DemoSamples.uuid(0xd702)
@@ -176,7 +179,7 @@ public enum DemoSoftwareUpdate {
 public nonisolated final class DemoSoftwareUpdateServer: DemoServer {
     static let paths = [
         "pro/v2/mobile-device-groups", "pro/v1/computer-groups", "pro/v3/computer-groups",
-        "proclassic/computergroups", "pro/v4/computers-inventory", "pro/v1/ddm",
+        "proclassic/computergroups", "pro/v4/computers-inventory", "pro/v1/ddm", "pro/v2/groups",
         "ddm/report", "devices/v1/devices",
     ]
 
@@ -193,11 +196,24 @@ public nonisolated final class DemoSoftwareUpdateServer: DemoServer {
         case 3 where p == ["pro", "v2", "mobile-device-groups"]:
             return DemoJSON.response(200, [
                 ["id": 501, "name": "Field iPads", "description": "iPads of the field team", "isSmartGroup": true],
+                ["id": 601, "name": "Spare iPads", "description": "", "isSmartGroup": false],
             ])
         case 5 where Array(p[0...3]) == ["pro", "v2", "mobile-device-groups", "smart-group-membership"]
             || Array(p[0...3]) == ["pro", "v2", "mobile-device-groups", "static-group-membership"]:
+            if p[4] == DemoSoftwareUpdate.spareIPadGroupID, p[3] == "static-group-membership" {
+                return page([], request)
+            }
             guard p[4] == DemoSoftwareUpdate.iPadGroupID, p[3] == "smart-group-membership" else { return notFound() }
             return page(DemoSoftwareUpdate.iPads.map(mobileRecord), request)
+        case 3 where p == ["pro", "v2", "groups"]:
+            // the Platform API's IDs of the groups the Blueprints are scoped to,
+            // in the shape of Jamf's reference (groupType MOBILE or COMPUTER, smart)
+            return page([
+                ["groupPlatformId": DemoSoftwareUpdate.iPadPlatformGroupID, "groupJamfProId": DemoSoftwareUpdate.iPadGroupID,
+                 "groupName": "Field iPads", "groupType": "MOBILE", "smart": true],
+                ["groupPlatformId": DemoSoftwareUpdate.macPlatformGroupID, "groupJamfProId": DemoSoftwareUpdate.macGroupID,
+                 "groupName": "Studio Macs", "groupType": "COMPUTER", "smart": true],
+            ], request)
         case 3 where p == ["pro", "v1", "computer-groups"]:
             return DemoJSON.response(200, [
                 ["id": "601", "name": "Studio Macs", "description": "Macs of the design studio", "smartGroup": true],

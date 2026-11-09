@@ -175,12 +175,40 @@ struct JamfProGroupTests {
         }
         let groups = try await platform(server).jamfProGroups()
         #expect(groups == [
-            JamfPro.DeviceGroup(id: "7", name: "Field iPads", isSmart: true, kind: .mobileDevice, description: nil),
-            JamfPro.DeviceGroup(id: "8", name: "Spares", isSmart: false, kind: .mobileDevice),
-            JamfPro.DeviceGroup(id: "3", name: "Studio Macs", isSmart: true, kind: .computer),
-            JamfPro.DeviceGroup(id: "4", name: "Loaners", isSmart: false, kind: .computer),
+            JamfPro.DeviceGroup(groupID: "7", name: "Field iPads", isSmart: true, kind: .mobileDevice, description: nil),
+            JamfPro.DeviceGroup(groupID: "8", name: "Spares", isSmart: false, kind: .mobileDevice),
+            JamfPro.DeviceGroup(groupID: "3", name: "Studio Macs", isSmart: true, kind: .computer),
+            JamfPro.DeviceGroup(groupID: "4", name: "Loaners", isSmart: false, kind: .computer),
         ])
         #expect(server.requests.allSatisfy { $0.method == "GET" })
+    }
+
+    @Test("A mobile device group and a computer group with the same number are two groups")
+    func sameNumber() async throws {
+        let server = MockServer { request in
+            request.path == "/pro/v2/mobile-device-groups"
+                ? .json(200, #"[{"id":12,"name":"Mobile twelve","isSmartGroup":true}]"#)
+                : .json(200, #"[{"id":"12","name":"Computer twelve","smartGroup":false}]"#)
+        }
+        let groups = try await platform(server).jamfProGroups()
+        #expect(groups.count == 2)
+        #expect(Set(groups.map(\.id)).count == 2)
+        #expect(groups.map(\.groupID) == ["12", "12"])
+        let computer = try #require(groups.first { $0.id == .init(kind: .computer, groupID: "12") })
+        #expect(computer.name == "Computer twelve")
+        // the identity survives saving
+        let saved = try JSONDecoder().decode(JamfPro.DeviceGroup.ID.self, from: JSONEncoder().encode(computer.id))
+        #expect(saved == computer.id && saved != JamfPro.DeviceGroup.ID(kind: .mobileDevice, groupID: "12"))
+    }
+
+    @Test("A Platform API group names its Jamf Pro group by kind and number")
+    func platformGroupID() {
+        let mobile = JamfPlatform.PlatformGroup(id: "p-1", name: "A", jamfProID: "12", deviceType: .mobile)
+        let computer = JamfPlatform.PlatformGroup(id: "p-2", name: "B", jamfProID: "12", deviceType: .computer)
+        #expect(JamfPro.DeviceGroup.ID(mobile) == .init(kind: .mobileDevice, groupID: "12"))
+        #expect(JamfPro.DeviceGroup.ID(computer) == .init(kind: .computer, groupID: "12"))
+        #expect(JamfPro.DeviceGroup.ID(JamfPlatform.PlatformGroup(id: "p-3", name: "C", jamfProID: nil, deviceType: .mobile)) == nil)
+        #expect(JamfPro.DeviceGroup.ID(JamfPlatform.PlatformGroup(id: "p-4", name: "D", jamfProID: "3", deviceType: .other("USER"))) == nil)
     }
 
     @Test("A mobile group’s members come with their inventory, every page")
@@ -193,7 +221,7 @@ struct JamfProGroupTests {
             }
             return .json(200, #"{"totalCount":101,"results":[\#(records.joined(separator: ","))]}"#)
         }
-        let group = JamfPro.DeviceGroup(id: "7", name: "Field iPads", isSmart: true, kind: .mobileDevice)
+        let group = JamfPro.DeviceGroup(groupID: "7", name: "Field iPads", isSmart: true, kind: .mobileDevice)
         let members = try await platform(server).members(of: group)
         #expect(members.count == 101)
         let first = try #require(members.first)
@@ -210,7 +238,7 @@ struct JamfProGroupTests {
         #expect(server.requests.map(\.path) == Array(repeating: "/pro/v2/mobile-device-groups/smart-group-membership/7", count: 2))
         #expect(server.requests.map { $0.queryValue("page-size") } == ["100", "100"])
 
-        _ = try await platform(server).members(of: .init(id: "8", name: "Spares", isSmart: false, kind: .mobileDevice))
+        _ = try await platform(server).members(of: .init(groupID: "8", name: "Spares", isSmart: false, kind: .mobileDevice))
         #expect(server.requests.last?.path == "/pro/v2/mobile-device-groups/static-group-membership/8")
     }
 
@@ -228,7 +256,7 @@ struct JamfProGroupTests {
             }
             return .json(200, #"{"totalCount":\#(records.count),"results":[\#(records.joined(separator: ","))]}"#)
         }
-        let members = try await platform(server).members(of: .init(id: "7", name: "Field iPads", isSmart: true, kind: .mobileDevice))
+        let members = try await platform(server).members(of: .init(groupID: "7", name: "Field iPads", isSmart: true, kind: .mobileDevice))
         #expect(members.count == 150)
         let first = try #require(members.first)
         #expect(first.name == "iPad 1")
@@ -249,14 +277,14 @@ struct JamfProGroupTests {
         let server = MockServer { _ in
             .json(200, #"{"totalCount":1,"results":[{"mobileDeviceId":"1","managementId":"M-1","timeZone":"UTC"}]}"#)
         }
-        _ = try await platform(server).members(of: .init(id: "7", name: "G", isSmart: true, kind: .mobileDevice))
+        _ = try await platform(server).members(of: .init(groupID: "7", name: "G", isSmart: true, kind: .mobileDevice))
         #expect(server.requests.count == 1)
     }
 
     @Test("A refused membership names both Platform permissions")
     func refused() async throws {
         let server = MockServer { _ in .json(403, #"{"httpStatus":403,"errors":[]}"#) }
-        let group = JamfPro.DeviceGroup(id: "7", name: "Field iPads", isSmart: true, kind: .mobileDevice)
+        let group = JamfPro.DeviceGroup(groupID: "7", name: "Field iPads", isSmart: true, kind: .mobileDevice)
         await #expect {
             try await platform(server).members(of: group)
         } throws: { hints($0).contains("the “device-groups:read” and “devices:read” permissions") }
@@ -280,7 +308,7 @@ struct JamfProGroupTests {
             }
             return .json(200, #"{"totalCount":\#(records.count),"results":[\#(records.joined(separator: ","))]}"#)
         }
-        let members = try await platform(server).members(of: .init(id: "3", name: "Studio Macs", isSmart: true, kind: .computer))
+        let members = try await platform(server).members(of: .init(groupID: "3", name: "Studio Macs", isSmart: true, kind: .computer))
         #expect(members.map(\.id) == ids.reversed())
         let mac = try #require(members.first { $0.id == "1" })
         #expect(mac.managementID == "MC-1")
@@ -303,7 +331,7 @@ struct JamfProGroupTests {
             }
             return .json(200, #"{"totalCount":1,"results":[{"id":"12","general":{"name":"Loaner"},"hardware":{"serialNumber":"ZZTESTM12"}}]}"#)
         }
-        let members = try await platform(server).members(of: .init(id: "4", name: "Loaners", isSmart: false, kind: .computer))
+        let members = try await platform(server).members(of: .init(groupID: "4", name: "Loaners", isSmart: false, kind: .computer))
         #expect(members.map(\.serialNumber) == ["ZZTESTM12"])
         #expect(server.requests.last?.queryValue("filter") == "id=in=(12)")
     }
@@ -311,7 +339,7 @@ struct JamfProGroupTests {
     @Test("An empty group sends no inventory request")
     func emptyGroup() async throws {
         let server = MockServer { _ in .json(200, #"{"members":[]}"#) }
-        let members = try await platform(server).members(of: .init(id: "3", name: "Empty", isSmart: true, kind: .computer))
+        let members = try await platform(server).members(of: .init(groupID: "3", name: "Empty", isSmart: true, kind: .computer))
         #expect(members.isEmpty)
         #expect(server.requests.count == 1)
     }
