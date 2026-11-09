@@ -474,6 +474,46 @@ struct BlueprintSoftwareUpdateTests {
         #expect(detail.softwareUpdateBlocks.map(\.enforcement) == [.latest(enforceAfterDays: 7, deploymentTime: nil), .unknown("SOMETHING")])
     }
 
+    @Test("Software update settings: deferrals, cadence, actions, beta; only what the Blueprint includes")
+    func settings() throws {
+        let detail = try blueprint(#"""
+        [{"name":"Macs","activationPredicate":"@status(device.operating-system.family) == 'macOS'","components":[
+          {"identifier":"com.jamf.ddm.software-update-settings","configuration":{
+            "Deferrals":{"MinorPeriodInDays":{"Value":7,"Included":true},"MajorPeriodInDays":{"Value":30,"Included":false},
+                         "CombinedPeriodInDays":{"Value":5}},
+            "RecommendedCadence":{"Value":"Oldest","Included":true},
+            "AutomaticActions":{"Download":{"Value":"AlwaysOn","Included":true},"InstallOSUpdates":{"Value":"Allowed","Included":true},
+                                "InstallSecurityUpdate":{"Value":"Sometimes","Included":true}},
+            "AllowStandardUserOSUpdates":{"Enabled":false,"Included":true},
+            "Notifications":{"Enabled":true,"Included":false},
+            "RapidSecurityResponse":{"Enable":{"Enabled":true,"Included":true}},
+            "Beta":{"Value":{"ProgramEnrollment":"AlwaysOff"},"Included":true}}},
+          {"identifier":"com.jamf.ddm.sw-updates","configuration":{"enforcementType":"AUTOMATIC","strategy":"SEMANTIC","rules":{"minor":{"enforceAfterDays":14,"deploymentTime":"18:00"}}}}]}]
+        """#)
+        let settings = try #require(detail.softwareUpdateSettings.first)
+        #expect(detail.softwareUpdateSettings.count == 1)
+        #expect(settings.stepName == "Macs" && settings.activationPredicate?.contains("macOS") == true)
+        #expect(settings.minorDeferralDays == 7)
+        #expect(settings.majorDeferralDays == nil)       // not included
+        #expect(settings.combinedDeferralDays == 5)      // included when it doesn’t say
+        #expect(settings.systemDeferralDays == nil)
+        #expect(settings.recommendedCadence == "Oldest")
+        #expect(settings.automaticDownload == .alwaysOn)
+        #expect(settings.automaticInstallOSUpdates == .allowed)
+        #expect(settings.automaticInstallSecurityUpdates == .other("Sometimes"))
+        #expect(settings.allowStandardUserOSUpdates == false)
+        #expect(settings.notifications == nil)
+        #expect(settings.rapidSecurityResponses == true && settings.rapidSecurityResponseRollback == nil)
+        #expect(settings.betaProgramEnrollment == .alwaysOff)
+        // the enforcement beside it is read as before
+        #expect(detail.softwareUpdateBlocks.first?.enforcement == .semantic(minorEnforceAfterDays: 14, deploymentTime: "18:00"))
+    }
+
+    @Test("A Blueprint without a settings component has none")
+    func noSettings() throws {
+        #expect(try blueprint(#"[{"components":[{"identifier":"com.jamf.ddm.sw-updates","configuration":{}}]}]"#).softwareUpdateSettings.isEmpty)
+    }
+
     @Test("The deadline is the device’s local time")
     func deadline() throws {
         let brussels = try #require(JamfPlatform.SoftwareUpdateBlock.deadline("2026-11-16T17:00:00", in: TimeZone(identifier: "Europe/Brussels")!))

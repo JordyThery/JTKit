@@ -151,3 +151,107 @@ extension JamfPlatform.Blueprints {
         return (detail, detail.softwareUpdateBlocks)
     }
 }
+
+extension JamfPlatform {
+    /// A Blueprint’s `com.jamf.ddm.software-update-settings` component: how
+    /// devices are offered updates (deferrals, cadence, automatic actions,
+    /// beta), as opposed to what is enforced. Only settings the Blueprint
+    /// includes are set; nil means “not set here”. Read only.
+    public struct SoftwareUpdateSettings: Hashable, Sendable {
+        /// `Allowed`, `AlwaysOn` or `AlwaysOff`.
+        public enum Action: Hashable, Sendable {
+            case allowed, alwaysOn, alwaysOff
+            case other(String)
+
+            init(_ raw: String) {
+                switch raw.lowercased() {
+                case "allowed": self = .allowed
+                case "alwayson": self = .alwaysOn
+                case "alwaysoff": self = .alwaysOff
+                default: self = .other(raw)
+                }
+            }
+        }
+
+        public var stepIndex: Int
+        public var componentIndex: Int
+        public var stepName: String?
+        public var activationPredicate: String?
+        /// Days an update is held back: all updates, majors, minors, system (Rapid Security Responses).
+        public var combinedDeferralDays: Int?
+        public var majorDeferralDays: Int?
+        public var minorDeferralDays: Int?
+        public var systemDeferralDays: Int?
+        /// `All`, `Oldest` or `Newest`: which major a device is offered when several apply.
+        public var recommendedCadence: String?
+        public var automaticDownload: Action?
+        public var automaticInstallOSUpdates: Action?
+        public var automaticInstallSecurityUpdates: Action?
+        public var allowStandardUserOSUpdates: Bool?
+        public var notifications: Bool?
+        public var rapidSecurityResponses: Bool?
+        public var rapidSecurityResponseRollback: Bool?
+        /// `Allowed`, `AlwaysOn` or `AlwaysOff`.
+        public var betaProgramEnrollment: Action?
+
+        public init(stepIndex: Int, componentIndex: Int, stepName: String? = nil, activationPredicate: String? = nil,
+                    combinedDeferralDays: Int? = nil, majorDeferralDays: Int? = nil, minorDeferralDays: Int? = nil,
+                    systemDeferralDays: Int? = nil, recommendedCadence: String? = nil, automaticDownload: Action? = nil,
+                    automaticInstallOSUpdates: Action? = nil, automaticInstallSecurityUpdates: Action? = nil,
+                    allowStandardUserOSUpdates: Bool? = nil, notifications: Bool? = nil, rapidSecurityResponses: Bool? = nil,
+                    rapidSecurityResponseRollback: Bool? = nil, betaProgramEnrollment: Action? = nil) {
+            self.stepIndex = stepIndex
+            self.componentIndex = componentIndex
+            self.stepName = stepName
+            self.activationPredicate = activationPredicate
+            self.combinedDeferralDays = combinedDeferralDays
+            self.majorDeferralDays = majorDeferralDays
+            self.minorDeferralDays = minorDeferralDays
+            self.systemDeferralDays = systemDeferralDays
+            self.recommendedCadence = recommendedCadence
+            self.automaticDownload = automaticDownload
+            self.automaticInstallOSUpdates = automaticInstallOSUpdates
+            self.automaticInstallSecurityUpdates = automaticInstallSecurityUpdates
+            self.allowStandardUserOSUpdates = allowStandardUserOSUpdates
+            self.notifications = notifications
+            self.rapidSecurityResponses = rapidSecurityResponses
+            self.rapidSecurityResponseRollback = rapidSecurityResponseRollback
+            self.betaProgramEnrollment = betaProgramEnrollment
+        }
+
+        init(component: JamfPlatform.BlueprintDetail.Component, step: LosslessJSON) {
+            let c = component.json["configuration"] ?? .null
+            /// A setting counts when the Blueprint includes it (`Included`, true when left out).
+            func included(_ value: LosslessJSON?) -> LosslessJSON? {
+                guard let value, value != .null else { return nil }
+                return value["Included"]?.bool == false ? nil : value
+            }
+            func days(_ key: String) -> Int? { included(c["Deferrals"]?[key])?["Value"]?.int }
+            func flag(_ value: LosslessJSON?, _ key: String = "Enabled") -> Bool? { included(value)?[key]?.bool }
+            func action(_ key: String) -> Action? { included(c["AutomaticActions"]?[key])?["Value"]?.text.map(Action.init) }
+            self.init(stepIndex: component.stepIndex, componentIndex: component.index, stepName: step["name"]?.text,
+                      activationPredicate: step["activationPredicate"]?.text,
+                      combinedDeferralDays: days("CombinedPeriodInDays"), majorDeferralDays: days("MajorPeriodInDays"),
+                      minorDeferralDays: days("MinorPeriodInDays"), systemDeferralDays: days("SystemPeriodInDays"),
+                      recommendedCadence: included(c["RecommendedCadence"])?["Value"]?.text,
+                      automaticDownload: action("Download"), automaticInstallOSUpdates: action("InstallOSUpdates"),
+                      automaticInstallSecurityUpdates: action("InstallSecurityUpdate"),
+                      allowStandardUserOSUpdates: flag(c["AllowStandardUserOSUpdates"]),
+                      notifications: flag(c["Notifications"]),
+                      rapidSecurityResponses: flag(c["RapidSecurityResponse"]?["Enable"]),
+                      rapidSecurityResponseRollback: flag(c["RapidSecurityResponse"]?["EnableRollback"]),
+                      betaProgramEnrollment: included(c["Beta"])?["Value"]?["ProgramEnrollment"]?.text.map(Action.init))
+        }
+    }
+}
+
+extension JamfPlatform.BlueprintDetail {
+    /// Every software update settings component, in step order.
+    public var softwareUpdateSettings: [JamfPlatform.SoftwareUpdateSettings] {
+        let steps = steps?.arrayValue ?? []
+        return components.filter { $0.identifier == "com.jamf.ddm.software-update-settings" }.map { component in
+            JamfPlatform.SoftwareUpdateSettings(component: component,
+                                                step: component.stepIndex < steps.count ? steps[component.stepIndex] : .null)
+        }
+    }
+}

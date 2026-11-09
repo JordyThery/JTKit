@@ -67,6 +67,8 @@ public enum DemoSoftwareUpdate {
     public static let updateStartedDaysAgo = 10
     /// The deadline, in days from now, at 17:00 in each device’s local time.
     public static let deadlineInDays = 7
+    /// The Mac Blueprint enforces minor updates this many days after Apple releases them, at 17:00.
+    public static let macDelayDays = 7
 
     public static let iPads: [Device] = [
         ipad(101, "Field iPad 01", "iPad Air 11-inch (M2)", "iPad14,8", "27.1", "Europe/Brussels", .onTarget),
@@ -135,11 +137,30 @@ public enum DemoSoftwareUpdate {
             if let predicate { step.append(.init(key: "activationPredicate", value: .string(predicate))) }
             return .object(LosslessJSON.Object(step))
         }
+        let minorUpdates = LosslessJSON.object(LosslessJSON.Object([
+            .init(key: "name", value: .string("macOS")),
+            .init(key: "components", value: .array([.object(LosslessJSON.Object([
+                "identifier": .string("com.jamf.ddm.sw-updates"),
+                "configuration": .object(LosslessJSON.Object([
+                    "enforcementType": .string("AUTOMATIC"), "strategy": .string("SEMANTIC"),
+                    "rules": .object(LosslessJSON.Object(["minor": .object(LosslessJSON.Object([
+                        "enforceAfterDays": .number(.init(macDelayDays)), "deploymentTime": .string("17:00")]))])),
+                ])),
+            ])), .object(LosslessJSON.Object([
+                "identifier": .string("com.jamf.ddm.software-update-settings"),
+                "configuration": .object(LosslessJSON.Object([
+                    "RecommendedCadence": .object(LosslessJSON.Object(["Value": .string("All"), "Included": .bool(true)])),
+                    "AutomaticActions": .object(LosslessJSON.Object([
+                        "Download": .object(LosslessJSON.Object(["Value": .string("AlwaysOn"), "Included": .bool(true)]))])),
+                ])),
+            ]))])),
+        ]))
         func blueprint(_ id: String, _ name: String, group: String, steps: [LosslessJSON]) -> LosslessJSON.Object {
             LosslessJSON.Object([
                 "id": .string(id),
                 "name": .string(name),
-                "description": .string("Everyone on \(targetVersion) within \(deadlineInDays) days"),
+                "description": .string(id == macBlueprintID ? "Minor updates \(macDelayDays) days after release"
+                                        : "Everyone on \(targetVersion) within \(deadlineInDays) days"),
                 "created": .string(DemoWorld.iso(daysAgo: 40, from: now, fractional: true)),
                 "updated": .string(updated),
                 "deploymentState": .object(LosslessJSON.Object([
@@ -155,7 +176,7 @@ public enum DemoSoftwareUpdate {
                 update("@status(device.operating-system.family) == 'iPadOS'", name: "iPadOS"),
                 update("@status(device.operating-system.family) == 'iOS'", name: "iOS"),
             ]),
-            blueprint(macBlueprintID, "Contoso – Mac Update", group: macPlatformGroupID, steps: [update(nil, name: "macOS")]),
+            blueprint(macBlueprintID, "Contoso – Mac Update", group: macPlatformGroupID, steps: [minorUpdates]),
         ]
     }
 
@@ -396,14 +417,15 @@ public nonisolated final class DemoAppleReleaseServer: DemoServer {
     public static var sofaURL: URL { URL(string: "https://\(sofaHost)")! }
     public static var gdmfURL: URL { URL(string: "https://\(gdmfHost)")! }
 
-    private static let iOSReleases: [(version: String, build: String, devices: [String])] = [
-        ("27.1", "24B5074", supportedIPads), ("27.0.2", "24A5350", supportedIPads), ("27.0.1", "24A5341", supportedIPads),
-        ("26.7.1", "23H5031", supportedIPads), ("18.7.10", "22H5240", supportedIPads),
-        ("17.7.10", "21H5450", supportedIPads + ["iPad7,5", "iPad7,6"]),
+    /// Each release with how many days before “now” Apple released it.
+    private static let iOSReleases: [(version: String, build: String, devices: [String], daysAgo: Int)] = [
+        ("27.1", "24B5074", supportedIPads, 12), ("27.0.2", "24A5350", supportedIPads, 25), ("27.0.1", "24A5341", supportedIPads, 40),
+        ("26.7.1", "23H5031", supportedIPads, 25), ("18.7.10", "22H5240", supportedIPads, 25),
+        ("17.7.10", "21H5450", supportedIPads + ["iPad7,5", "iPad7,6"], 300),
     ]
-    private static let macReleases: [(version: String, build: String, boards: [String])] = [
-        ("27.1", "26B5060", supportedBoards), ("27.0.1", "26A5341", supportedBoards),
-        ("26.6", "25G5060", supportedBoards), ("15.7.4", "24G5420", supportedBoards + ["J132AP"]),
+    private static let macReleases: [(version: String, build: String, boards: [String], daysAgo: Int)] = [
+        ("27.1", "26B5060", supportedBoards, 12), ("27.0.1", "26A5341", supportedBoards, 40),
+        ("26.6", "25G5060", supportedBoards, 30), ("15.7.4", "24G5420", supportedBoards + ["J132AP"], 60),
     ]
     private static let supportedIPads = ["iPad13,1", "iPad13,18", "iPad14,8", "iPad15,7", "iPad16,1", "iPad16,3"]
     private static let supportedBoards = ["J413AP", "J613AP"]
@@ -413,7 +435,20 @@ public nonisolated final class DemoAppleReleaseServer: DemoServer {
         (mac ? macReleases.first { $0.version == version }?.build : iOSReleases.first { $0.version == version }?.build) ?? "unknown"
     }
 
-    public init() {}
+    private let now: Date
+
+    public init(now: Date = Date()) {
+        self.now = now
+    }
+
+    /// A release’s date: `daysAgo` days before now, at midnight UTC, as Apple dates them.
+    private func released(_ daysAgo: Int) -> (iso: String, day: String) {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(identifier: "UTC") ?? .gmt
+        let day = calendar.startOfDay(for: now.addingTimeInterval(-Double(daysAgo) * 86_400))
+        let text = day.formatted(.iso8601.year().month().day())
+        return ("\(text)T00:00:00Z", text)
+    }
 
     public func respond(to request: DemoRequest) -> DemoResponse {
         guard request.method == "GET" else { return DemoJSON.response(405, [:]) }
@@ -433,8 +468,9 @@ public nonisolated final class DemoAppleReleaseServer: DemoServer {
                 let releases = majors[major] ?? []
                 return ["OSVersion": String(major),
                         "Latest": ["ProductVersion": releases[0].version, "Build": releases[0].build,
-                                   "ReleaseDate": "2026-10-26T00:00:00Z", "SupportedDevices": releases[0].devices],
-                        "SecurityReleases": releases.map { ["ProductVersion": $0.version, "Build": $0.build] }] as [String: Any]
+                                   "ReleaseDate": released(releases[0].daysAgo).iso, "SupportedDevices": releases[0].devices],
+                        "SecurityReleases": releases.map { ["ProductVersion": $0.version, "Build": $0.build,
+                                                            "ReleaseDate": released($0.daysAgo).iso] }] as [String: Any]
             },
             "Devices": [
                 "iPad7,5": ["MarketingName": "iPad (6th generation) Wi-Fi"],
@@ -452,8 +488,9 @@ public nonisolated final class DemoAppleReleaseServer: DemoServer {
                 let releases = majors[major] ?? []
                 return ["OSVersion": names[major] ?? major,
                         "Latest": ["ProductVersion": releases[0].version, "Build": releases[0].build,
-                                   "ReleaseDate": "2026-10-26T00:00:00Z", "SupportedDevices": releases[0].boards],
-                        "SecurityReleases": releases.map { ["ProductVersion": $0.version, "Build": $0.build] }] as [String: Any]
+                                   "ReleaseDate": released(releases[0].daysAgo).iso, "SupportedDevices": releases[0].boards],
+                        "SecurityReleases": releases.map { ["ProductVersion": $0.version, "Build": $0.build,
+                                                            "ReleaseDate": released($0.daysAgo).iso] }] as [String: Any]
             },
             "Models": [
                 "Mac14,2": ["MarketingName": "MacBook Air (13-inch, M2, 2022)", "OSVersions": [27, 26, 15]],
@@ -468,10 +505,10 @@ public nonisolated final class DemoAppleReleaseServer: DemoServer {
 
     private func gdmf() -> [String: Any] {
         ["PublicAssetSets": [
-            "iOS": Self.iOSReleases.map { ["ProductVersion": $0.version, "Build": $0.build, "PostingDate": "2026-10-26",
+            "iOS": Self.iOSReleases.map { ["ProductVersion": $0.version, "Build": $0.build, "PostingDate": released($0.daysAgo).day,
                                            "SupportedDevices": $0.devices] }
-                + [["ProductVersion": "8.8.2", "Build": "19U5526", "PostingDate": "2026-10-26", "SupportedDevices": ["Watch3,1"]]],
-            "macOS": Self.macReleases.map { ["ProductVersion": $0.version, "Build": $0.build, "PostingDate": "2026-10-26",
+                + [["ProductVersion": "8.8.2", "Build": "19U5526", "PostingDate": released(12).day, "SupportedDevices": ["Watch3,1"]]],
+            "macOS": Self.macReleases.map { ["ProductVersion": $0.version, "Build": $0.build, "PostingDate": released($0.daysAgo).day,
                                              "SupportedDevices": $0.boards] },
         ]]
     }

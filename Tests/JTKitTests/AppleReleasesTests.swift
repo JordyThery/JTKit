@@ -281,6 +281,20 @@ struct DemoSoftwareUpdateTests {
         }
     }
 
+    @Test("The Mac Blueprint enforces minor updates after a delay; release dates are relative to now")
+    func macBlueprintAndDates() async throws {
+        let (_, client, source) = try demo()
+        let update = try await JamfPlatform.Blueprints(client: client).softwareUpdate(blueprintID: DemoSoftwareUpdate.macBlueprintID)
+        #expect(update.blocks.map(\.enforcement) == [.semantic(minorEnforceAfterDays: DemoSoftwareUpdate.macDelayDays, deploymentTime: "17:00")])
+        #expect(update.blueprint.softwareUpdateSettings.first?.automaticDownload == .alwaysOn)
+        let catalog = try await AppleReleases.Client(recorder: RequestRecorder(session: source.session, log: nil), userAgent: "Demo",
+                                                     sofaURL: DemoAppleReleaseServer.sofaURL, gdmfURL: DemoAppleReleaseServer.gdmfURL).catalog()
+        let released = try #require(catalog.release(OSVersion("27.1")!, .macOS)?.releaseDate)
+        let days = Date().timeIntervalSince(released) / 86_400
+        #expect(days > 11 && days < 13.1)
+        #expect(catalog.releases.allSatisfy { $0.releaseDate != nil })
+    }
+
     @Test("Writes are refused")
     func readOnly() {
         let server = DemoSoftwareUpdateServer()

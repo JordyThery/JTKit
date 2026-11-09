@@ -24,6 +24,9 @@ in the release check. Code written for 1.4 compiles unchanged, and existing func
 - `BlueprintDetail.softwareUpdateBlocks` and `Blueprints.softwareUpdate(blueprintID:)`: every software update
   enforcement of a Blueprint with its step and activation predicate (manual, latest, semantic, or Apple’s
   declaration in a custom-declarations component, with its build), read only.
+- `BlueprintDetail.softwareUpdateSettings`: a Blueprint’s software update settings components (deferrals,
+  recommended cadence, automatic actions, standard-user updates, notifications, Rapid Security Responses, beta),
+  only what the Blueprint includes, with each component’s step and activation predicate.
 - `AppleReleases` (SOFA and GDMF) with `OSVersion`: the latest release per major, builds, supported models or
   board IDs per major, the last version a model can run, marketing names. A source that can’t be read is named
   in `problems`; the rest is used.
@@ -32,7 +35,8 @@ in the release check. Code written for 1.4 compiles unchanged, and existing func
 - Demo: `DemoSoftwareUpdate.install(on:)` adds sample iPads and Macs in every update state, their groups, status
   and declaration reports, and two Blueprints, to the demo Platform API for an app that asks for them; the
   Contoso world and every other app’s demo are unchanged. `DemoAppleReleaseServer` answers the release feeds
-  on the demo network’s own hosts.
+  on the demo network’s own hosts. Release dates are relative to now; the demo iPad
+  Blueprint asks for a specific version, the Mac Blueprint enforces minor updates seven days after their release.
 - Release check: the allow-list may list `publicHosts`. A request to one is sent only as a GET without a body,
   credentials, cookies, an authorization header or a credential in the query; every other host is decided as
   before. A public host must be a plain host name and never a tenant’s or a sign-in service’s.
