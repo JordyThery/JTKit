@@ -37,7 +37,10 @@ in the release check. Code written for 1.4 compiles unchanged, and existing func
   board IDs per major, the last version a model can run, marketing names. `Catalog.supports(release:model:boardID:)`
   checks one release’s own device list, for a release Apple published for some devices only: by the device ID
   first, then the model, and only when Apple lists that ID for the release’s major (nil when the release has no
-  list or the device isn’t recognized, such as an Intel Mac reporting `X86LEGACYAP`). A source that can’t be read is named in `problems`; the rest is used. `OSVersion` reads
+  list or the device isn’t recognized, such as an Intel Mac reporting `X86LEGACYAP`). `Release.postings` keeps
+  every GDMF entry of a version (build, devices, posting date, public or not); `Catalog.publicPosting(of:model:boardID:)`
+  gives the public posting meant for a device and `build(of:model:boardID:)` its build. A release’s date is the
+  first any source gives. A source that can’t be read is named in `problems`; the rest is used. `OSVersion` reads
   version strings only (up to three parts, optionally after a name and with a Rapid Security Response’s letter);
   a build, a model identifier or four parts give nil.
 - `JamfPlatform.APIError.permissions`: a refusal can name several Platform API permissions (`permission` stays,

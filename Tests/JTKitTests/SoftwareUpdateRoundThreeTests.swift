@@ -94,3 +94,51 @@ struct BootstrapTokenTests {
         #expect(plain.security == nil)
     }
 }
+
+@Suite("1.5.0: Apple’s postings of a release")
+struct PostingTests {
+    // as Apple posted macOS 27.2: one general build, posted to the public
+    // catalog later than its first date, and two builds for a few Macs
+    static let gdmf = #"""
+    {"PublicAssetSets":{"macOS":[
+       {"ProductVersion":"27.2","Build":"26B123","PostingDate":"2026-11-05","SupportedDevices":["J314sAP","J413AP","J613AP"]},
+       {"ProductVersion":"27.2","Build":"26B8125","PostingDate":"2026-11-05","SupportedDevices":["J773sAP"]}],
+     "iOS":[{"ProductVersion":"27.1","Build":"24B100","PostingDate":"2026-11-02","SupportedDevices":["iPad14,8"]}]},
+     "AssetSets":{"macOS":[
+       {"ProductVersion":"27.2","Build":"26B123","PostingDate":"2026-10-26","SupportedDevices":["J314sAP","J413AP","J613AP"]},
+       {"ProductVersion":"27.0.1","Build":"26A434","PostingDate":"2026-09-28","SupportedDevices":["J314sAP","J413AP","J613AP"]}]}}
+    """#
+    static let sofa = #"""
+    {"OSVersions":[{"OSVersion":"27","Latest":{"ProductVersion":"27.2","Build":"26B8125","ReleaseDate":"2026-10-26T00:00:00Z"}}],
+     "Models":{"MacBookPro18,3":{"OSVersions":[27]}},"Devices":{"J314sAP":{"DeviceID":"MacBookPro18,3"}}}
+    """#
+    static let catalog = try! AppleReleases.Catalog(sofaMacOS: Data(sofa.utf8), gdmf: Data(gdmf.utf8))
+
+    @Test("Every GDMF entry is kept; the release date is the first any source gives")
+    func kept() throws {
+        let release = try #require(Self.catalog.release(OSVersion("27.2")!, .macOS))
+        #expect(release.postings.count == 3)
+        #expect(release.postings.filter(\.isPublic).count == 2)
+        #expect(release.releaseDate == JamfPro.serverDate("2026-10-26T00:00:00", timeZone: .gmt))
+    }
+
+    @Test("The public posting meant for the device: by its device ID, its model, else the general one")
+    func perDevice() throws {
+        let release = try #require(Self.catalog.release(OSVersion("27.2")!, .macOS))
+        let fifth = JamfPro.serverDate("2026-11-05T00:00:00", timeZone: .gmt)
+        #expect(Self.catalog.publicPosting(of: release, model: nil, boardID: "J773sAP")?.build == "26B8125")
+        #expect(Self.catalog.publicPosting(of: release, model: "MacBookPro18,3", boardID: nil)?.build == "26B123")
+        // an Intel Mac reporting X86LEGACYAP: the posting for most devices
+        let unknown = Self.catalog.publicPosting(of: release, model: "MacBookPro16,1", boardID: "X86LEGACYAP")
+        #expect(unknown?.build == "26B123" && unknown?.date == fifth)
+        // the build meant for the device, not the one SOFA names
+        #expect(Self.catalog.build(of: release, model: "MacBookPro18,3", boardID: "J314sAP") == "26B123")
+    }
+
+    @Test("No public posting: nil, so the caller falls back to the release date")
+    func noPublicPosting() throws {
+        let release = try #require(Self.catalog.release(OSVersion("27.0.1")!, .macOS))
+        #expect(Self.catalog.publicPosting(of: release, model: "MacBookPro18,3", boardID: "J314sAP") == nil)
+        #expect(release.releaseDate == JamfPro.serverDate("2026-09-28T00:00:00", timeZone: .gmt))
+    }
+}

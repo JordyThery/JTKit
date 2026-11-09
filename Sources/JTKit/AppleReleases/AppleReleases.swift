@@ -24,9 +24,33 @@ public enum AppleReleases {
         /// Models (iPhone, iPad) or board IDs (Mac) Apple offers it to.
         public var supportedDevices: Set<String>
         public var securityInfo: URL?
+        /// Each entry GDMF has for this version: Apple can post a version in
+        /// several builds, each for its own devices and with its own date.
+        public var postings: [Posting]
+
+        /// One GDMF entry of a version.
+        public struct Posting: Hashable, Sendable {
+            public var build: String?
+            /// The models (iPhone, iPad) or board IDs (Mac) it is for.
+            public var devices: Set<String>
+            /// Its `PostingDate`.
+            public var date: Date?
+            /// From `PublicAssetSets` (Apple’s public catalog, which Jamf counts
+            /// an update’s delay from), else from `AssetSets`.
+            public var isPublic: Bool
+
+            public init(build: String? = nil, devices: Set<String> = [], date: Date? = nil, isPublic: Bool) {
+                self.build = build
+                self.devices = devices
+                self.date = date
+                self.isPublic = isPublic
+            }
+        }
 
         public init(platform: Platform, version: OSVersion, build: String? = nil, releaseDate: Date? = nil,
-                    expirationDate: Date? = nil, supportedDevices: Set<String> = [], securityInfo: URL? = nil) {
+                    expirationDate: Date? = nil, supportedDevices: Set<String> = [], securityInfo: URL? = nil,
+                    postings: [Posting] = []) {
+            self.postings = postings
             self.platform = platform
             self.version = version
             self.build = build
@@ -111,6 +135,43 @@ public enum AppleReleases {
             return supportedDevices(platform, major: major).contains(id)
         }
 
+        /// The public posting (GDMF `PublicAssetSets`) of a release meant for
+        /// this device: the one listing its device ID, else its model’s boards
+        /// (recognized as in `supports(release:model:boardID:)`); for a device
+        /// none lists, the posting for the most devices. Nil when Apple’s
+        /// public catalog has no posting of the release.
+        public func publicPosting(of release: Release, model: String?, boardID: String?) -> Release.Posting? {
+            let postings = release.postings.filter { $0.isPublic && $0.date != nil }
+            guard !postings.isEmpty else { return nil }
+            let ids = recognizedIDs(major: release.version.major, release.platform, model: model, boardID: boardID)
+            for id in ids.ordered {
+                if let posting = postings.first(where: { $0.devices.contains(id) }) { return posting }
+            }
+            return postings.max { $0.devices.count != $1.devices.count ? $0.devices.count < $1.devices.count : ($0.build ?? "") > ($1.build ?? "") }
+        }
+
+        /// The build of a release meant for this device: its posting’s build
+        /// (public or not), else the release’s.
+        public func build(of release: Release, model: String?, boardID: String?) -> String? {
+            let ids = recognizedIDs(major: release.version.major, release.platform, model: model, boardID: boardID)
+            for id in ids.ordered {
+                if let posting = release.postings.first(where: { $0.devices.contains(id) && $0.build != nil }) { return posting.build }
+            }
+            return release.postings.filter { $0.build != nil }.max { $0.devices.count < $1.devices.count }?.build ?? release.build
+        }
+
+        /// The IDs Apple lists for `major` that are this device’s: its device
+        /// ID first, then its model and the boards of its model.
+        private func recognizedIDs(major: Int, _ platform: Platform, model: String?, boardID: String?) -> (ordered: [String], set: Set<String>) {
+            let listed = supportedByMajor[platform]?[major] ?? []
+            var ordered: [String] = []
+            if let boardID = boardID.flatMap({ $0.isEmpty ? nil : $0 }), listed.contains(boardID) { ordered.append(boardID) }
+            if let model = model.flatMap({ $0.isEmpty ? nil : $0 }) {
+                ordered += ([model] + macModelByBoard.filter { $0.value == model }.keys.sorted()).filter { listed.contains($0) }
+            }
+            return (ordered, Set(ordered))
+        }
+
         /// Whether Apple offers this release to a device, by the release’s own
         /// device list (a point release can be for some models only).
         ///
@@ -193,10 +254,13 @@ public enum AppleReleases {
                             devices = devices.filter { $0.hasPrefix("iPhone") || $0.hasPrefix("iPad") || $0.hasPrefix("iPod") }
                             if devices.isEmpty { continue }
                         }
+                        let posted = entry["PostingDate"]?.text.flatMap(Self.date)
                         let release = Release(platform: platform, version: version, build: entry["Build"]?.text,
-                                              releaseDate: entry["PostingDate"]?.text.flatMap(Self.date),
+                                              releaseDate: posted,
                                               expirationDate: entry["ExpirationDate"]?.text.flatMap(Self.date),
-                                              supportedDevices: devices)
+                                              supportedDevices: devices,
+                                              postings: [Release.Posting(build: entry["Build"]?.text, devices: devices, date: posted,
+                                                                         isPublic: set == "PublicAssetSets")])
                         add(release)
                         supportedByMajor[platform, default: [:]][version.major, default: []].formUnion(devices)
                     }
@@ -209,7 +273,9 @@ public enum AppleReleases {
             if let index = releases.firstIndex(where: { $0.platform == release.platform && $0.version == release.version }) {
                 var known = releases[index]
                 known.build = known.build ?? release.build
-                known.releaseDate = known.releaseDate ?? release.releaseDate
+                // the first release date any source gives
+                known.releaseDate = [known.releaseDate, release.releaseDate].compactMap { $0 }.min()
+                known.postings += release.postings
                 known.expirationDate = known.expirationDate ?? release.expirationDate
                 known.securityInfo = known.securityInfo ?? release.securityInfo
                 known.supportedDevices.formUnion(release.supportedDevices)
