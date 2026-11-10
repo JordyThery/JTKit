@@ -193,6 +193,8 @@ public final class DemoMode {
     public var intuneServer: DemoIntuneServer { services().intune }
     public var appleBusinessServer: DemoAppleBusinessServer { services().appleBusiness }
     public var appleSchoolServer: DemoAppleBusinessServer { services().appleSchool }
+    /// The server behind SOFA’s and Apple’s release feeds in demo mode.
+    public var appleReleaseServer: DemoAppleReleaseServer { services().appleReleases }
 
     private func services() -> DemoServices {
         if let services = servicesValue { return services }
@@ -336,6 +338,7 @@ nonisolated final class DemoServices: Sendable {
     let intune: DemoIntuneServer
     let appleBusiness: DemoAppleBusinessServer
     let appleSchool: DemoAppleBusinessServer
+    let appleReleases: DemoAppleReleaseServer
     let network: DemoNetwork
     /// Apple’s sign-in key for the demo organizations: made for this launch,
     /// kept in memory only, never saved.
@@ -366,7 +369,7 @@ nonisolated final class DemoServices: Sendable {
             ABM.Service.school.host: appleSchool,
         ]
         for host in DemoIntuneServer.hosts { servers[host] = intune }
-        let appleReleases = DemoAppleReleaseServer()
+        appleReleases = DemoAppleReleaseServer()
         servers[DemoAppleReleaseServer.sofaHost] = appleReleases
         servers[DemoAppleReleaseServer.gdmfHost] = appleReleases
         if scenario == .rateLimited {

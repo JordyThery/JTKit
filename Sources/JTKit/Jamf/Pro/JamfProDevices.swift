@@ -108,6 +108,14 @@ extension JamfPro {
             /// The boot partition’s FileVault state, e.g. "ENCRYPTED".
             public var bootPartitionFileVault2State: String?
             public var bootPartitionFileVault2Percent: Int?
+
+            public init(fileVault2Enabled: Bool? = nil, individualRecoveryKeyValidityStatus: String? = nil,
+                        bootPartitionFileVault2State: String? = nil, bootPartitionFileVault2Percent: Int? = nil) {
+                self.fileVault2Enabled = fileVault2Enabled
+                self.individualRecoveryKeyValidityStatus = individualRecoveryKeyValidityStatus
+                self.bootPartitionFileVault2State = bootPartitionFileVault2State
+                self.bootPartitionFileVault2Percent = bootPartitionFileVault2Percent
+            }
         }
 
         public struct UserAndLocation: Hashable, Sendable {
