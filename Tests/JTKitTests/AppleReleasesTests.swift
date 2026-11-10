@@ -239,10 +239,38 @@ struct DemoSoftwareUpdateTests {
         let groups = try await client.computerGroups()
         let studio = try await client.members(of: try #require(groups.first { $0.isSmart }))
         let loaners = try await client.members(of: try #require(groups.first { !$0.isSmart }))
-        #expect(studio.count == 8 && loaners.count == 2)
+        #expect(studio.count == 11 && loaners.count == 2)
         let old = try #require(studio.first { $0.modelIdentifier == "MacBookPro15,2" })
         let status = try await client.softwareUpdateStatus(managementID: old.managementID ?? "", kind: .computer)
         #expect(status?.deviceID == "J132AP")
+    }
+
+    @Test("1.7.0: the new cases: an older pending version with the newer deadline, a failed earlier step, an older release, enrollment")
+    func newCases() async throws {
+        let (_, client, _) = try demo()
+        let now = Date()
+        let groups = try await client.computerGroups()
+        let studio = try await client.members(of: try #require(groups.first { $0.isSmart }))
+        func status(_ name: String) async throws -> JamfPro.SoftwareUpdateStatus? {
+            let mac = try #require(studio.first { $0.name == name })
+            return try await client.softwareUpdateStatus(managementID: mac.managementID ?? "", kind: .computer)
+        }
+        // 27.0.2 pending with the deadline the Blueprint gives 27.1
+        let moved = try await status("Studio Mac 09")
+        #expect(moved?.pendingVersion?.osVersion == "27.0.2")
+        #expect(moved?.pendingVersion?.targetLocalDateTime == DemoAppleReleaseServer.macDeadline(of: "27.1", now: now))
+        // the earlier step failed, with its own deadline
+        let failed = try await status("Studio Mac 10")
+        #expect(failed?.installState == .failed && failed?.pendingVersion?.osVersion == "27.0.2")
+        #expect(failed?.pendingVersion?.targetLocalDateTime == DemoAppleReleaseServer.macDeadline(of: "27.0.2", now: now))
+        // a 2018 MacBook Pro on 15.7.3, not supervised
+        let older = try #require(studio.first { $0.name == "Studio Mac 11" })
+        #expect(older.osVersion == "15.7.3" && older.supervised == false)
+        // the iPads' enrollment
+        let iPads = try await client.members(of: try #require(try await client.mobileDeviceGroups().first { $0.isSmart }))
+        #expect(iPads.first { $0.name == "Field iPad 14" }?.isUserEnrollment == true)
+        #expect(iPads.first { $0.name == "Field iPad 13" }?.isUserEnrollment == false)
+        #expect(iPads.first { $0.name == "Field iPad 01" }?.appleEnrollmentType == "supervised")
     }
 
     @Test("The Blueprints’ blocks and the declaration reports")
@@ -386,6 +414,9 @@ struct DemoSoftwareUpdateDetailsTests {
         }
         #expect(try report(109)?.validity == .invalid)
         #expect(try report(113)?.reasons.first?.code == "Error.ConfigurationFailed")
+        // a true reason: nothing about supervision, which a device-enrolled iPad doesn't need
+        let detail = try report(113)?.reasons.first?.details.compactMap(\.description).joined() ?? ""
+        #expect(detail.contains("couldn’t reach Apple’s software update service") && !detail.contains("supervised"))
         #expect(try report(110)?.status == .awaitingSync)
         #expect(try report(111)?.status == .pending)
         #expect(try report(107) == nil, "a device without a status report reports no declarations")

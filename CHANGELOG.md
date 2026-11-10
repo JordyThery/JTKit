@@ -1,5 +1,23 @@
 # Changelog
 
+## 1.7.0 (2026-11-10)
+A minor release: read-only additions. Code written for 1.6 compiles unchanged.
+
+### Added
+- `JamfPro.GroupMember.deviceOwnershipType` and `appleEnrollmentType`: how a mobile device enrolled, from the
+  inventory already read (`general.deviceOwnershipType`, `general.appleEnrollmentType` of `v2/mobile-devices/detail`,
+  or the same keys in a membership record). `isUserEnrollment` reads Apple’s type first, else Jamf Pro’s; nil when the
+  inventory says neither.
+- `DemoSoftwareUpdate`: an older pending version reported with the newer version’s deadline (`Device.deadlineOf`), a
+  failed earlier step past its deadline, a Mac on an older release of a major it can’t leave (and a 15.7.3 sample
+  release), an iPad enrolled with User Enrollment and a Mac that isn’t supervised. The demo inventory gives each
+  device’s supervision and enrollment.
+
+### Changed
+- `DemoSoftwareUpdate`: the unsupervised iPad’s failed declaration gives a reason that holds for its enrollment (the
+  device couldn’t reach Apple’s software update service) instead of a supervision requirement, which Apple doesn’t
+  have for device-enrolled iPhones and iPads.
+
 ## 1.6.0 (2026-11-10)
 A minor release: read-only additions for software update reporting. Code written for 1.5 compiles unchanged, and
 existing functions behave as before, except that a declaration’s device list now sends the filter it needs.

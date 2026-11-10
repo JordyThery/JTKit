@@ -274,6 +274,31 @@ struct JamfProGroupTests {
         #expect(detail.first?.url.query()?.contains("section=GENERAL") == true)
     }
 
+    @Test("1.7.0: how a mobile device enrolled comes from the inventory's general section, with the rest")
+    func enrollmentType() async throws {
+        let server = MockServer { request in
+            if request.path.contains("group-membership") {
+                return .json(200, #"{"totalCount":3,"results":[{"mobileDeviceId":"1"},{"mobileDeviceId":"2"},{"mobileDeviceId":"3"}]}"#)
+            }
+            return .json(200, #"""
+            {"totalCount":3,"results":[
+             {"mobileDeviceId":"1","general":{"managementId":"M-1","deviceOwnershipType":"Institutional","appleEnrollmentType":"supervised"}},
+             {"mobileDeviceId":"2","general":{"managementId":"M-2","deviceOwnershipType":"AccountDrivenUserEnrollment","appleEnrollmentType":"user"}},
+             {"mobileDeviceId":"3","general":{"managementId":"M-3","deviceOwnershipType":"UserEnrollment"}}]}
+            """#)
+        }
+        let members = try await platform(server).members(of: .init(groupID: "7", name: "Field iPads", isSmart: true, kind: .mobileDevice))
+        #expect(members.map(\.deviceOwnershipType) == ["Institutional", "AccountDrivenUserEnrollment", "UserEnrollment"])
+        #expect(members.map(\.appleEnrollmentType) == ["supervised", "user", nil])
+        // by Apple's type first, else Jamf Pro's ownership type
+        #expect(members.map(\.isUserEnrollment) == [false, true, true])
+        #expect(JamfPro.GroupMember(id: "4", kind: .mobileDevice).isUserEnrollment == nil)
+        // an account-driven device enrollment isn't a user enrollment
+        var device = JamfPro.GroupMember(id: "5", kind: .mobileDevice)
+        device.deviceOwnershipType = "AccountDrivenDeviceEnrollment"
+        #expect(device.isUserEnrollment == false)
+    }
+
     @Test("A full membership needs no inventory read")
     func fullMembership() async throws {
         let server = MockServer { _ in

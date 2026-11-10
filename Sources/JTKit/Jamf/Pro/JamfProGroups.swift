@@ -95,6 +95,24 @@ extension JamfPro {
         public var bootstrapTokenAllowed: Bool?
         /// A Mac’s FileVault, from the `DISK_ENCRYPTION` section.
         public var diskEncryption: JamfPro.Computer.DiskEncryption?
+        /// How a mobile device enrolled, as Jamf Pro’s inventory says it
+        /// (`deviceOwnershipType`): `Institutional`, `UserEnrollment`,
+        /// `AccountDrivenUserEnrollment`, `AccountDrivenDeviceEnrollment`.
+        public var deviceOwnershipType: String?
+        /// The enrollment type Apple reports for a mobile device
+        /// (`appleEnrollmentType`): `supervised`, `device`, `user`, `none`, `unknown`.
+        public var appleEnrollmentType: String?
+
+        /// Enrolled with User Enrollment (profile-based or account-driven),
+        /// by Apple’s enrollment type, else Jamf Pro’s ownership type; nil
+        /// when the inventory says neither.
+        public var isUserEnrollment: Bool? {
+            if let apple = appleEnrollmentType?.lowercased(), ["supervised", "device", "user"].contains(apple) {
+                return apple == "user"
+            }
+            guard let ownership = deviceOwnershipType?.lowercased(), !ownership.isEmpty else { return nil }
+            return ownership == "userenrollment" || ownership == "accountdrivenuserenrollment"
+        }
 
         public init(id: String, kind: MDMCommand.DeviceKind, name: String? = nil, serialNumber: String? = nil,
                     udid: String? = nil, managementID: String? = nil, osVersion: String? = nil, osBuild: String? = nil,
@@ -158,6 +176,8 @@ extension JamfPro {
                       dataRoamingEnabled: json["dataRoamingEnabled"]?.bool,
                       mdmProfileExpiration: date("mdmProfileExpirationDate"), building: text("building"),
                       department: text("department"))
+            deviceOwnershipType = text("deviceOwnershipType")
+            appleEnrollmentType = text("appleEnrollmentType")
         }
 
         /// A member from a mobile device’s inventory record
@@ -183,11 +203,13 @@ extension JamfPro {
                       mdmProfileExpiration: date(general?["mdmProfileExpirationDate"]),
                       building: location?["buildingName"]?.text ?? location?["building"]?.text,
                       department: location?["departmentName"]?.text ?? location?["department"]?.text)
+            deviceOwnershipType = general?["deviceOwnershipType"]?.text
+            appleEnrollmentType = general?["appleEnrollmentType"]?.text
         }
 
         /// This member with what it lacks taken from `other` (the same device).
         func filled(from other: JamfPro.GroupMember) -> JamfPro.GroupMember {
-            JamfPro.GroupMember(
+            var member = JamfPro.GroupMember(
                 id: id, kind: kind, name: name ?? other.name, serialNumber: serialNumber ?? other.serialNumber,
                 udid: udid ?? other.udid, managementID: managementID ?? other.managementID,
                 osVersion: osVersion ?? other.osVersion, osBuild: osBuild ?? other.osBuild,
@@ -203,6 +225,9 @@ extension JamfPro {
                 dataRoamingEnabled: dataRoamingEnabled ?? other.dataRoamingEnabled,
                 mdmProfileExpiration: mdmProfileExpiration ?? other.mdmProfileExpiration,
                 building: building ?? other.building, department: department ?? other.department)
+            member.deviceOwnershipType = deviceOwnershipType ?? other.deviceOwnershipType
+            member.appleEnrollmentType = appleEnrollmentType ?? other.appleEnrollmentType
+            return member
         }
 
         /// A member from a computer’s inventory record.

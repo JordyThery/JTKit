@@ -11,7 +11,11 @@ import Foundation
 /// offline, hardware that can’t run the target, no activity since the
 /// update started, not started, installing for hours, a beta of a newer
 /// major (no target), on a version the Mac Blueprint’s declarations don’t
-/// cover; with a few unusual time zones.
+/// cover; with a few unusual time zones. From 1.7.0 also: an older pending
+/// version reported with the newer version’s deadline, a failed Mac past
+/// its earlier step’s deadline, a Mac that can’t run the newest major on an
+/// older release of its own, an iPad enrolled with User Enrollment and a
+/// Mac that isn’t supervised.
 ///
 /// Declaration Reporting answers per device and per declaration
 /// (`ddm/report/v1/declarations/{id}/devices`, which needs a filter, as
@@ -51,8 +55,15 @@ public enum DemoSoftwareUpdate {
         public let lastContactDaysAgo: Int
         public let state: State
         public let passcodePresent: Bool
-        /// False for the one iPad that isn’t supervised.
+        /// False for the iPad and the Mac that aren’t supervised.
         public let supervised: Bool
+        /// A mobile device’s enrollment as Jamf Pro’s inventory gives it
+        /// (`deviceOwnershipType`, `appleEnrollmentType`).
+        public let deviceOwnershipType: String?
+        public let appleEnrollmentType: String?
+        /// The version whose deadline its pending version reports, when it
+        /// isn’t the pending version’s own (the declaration moved on).
+        public let deadlineOf: String?
         /// The beta program it is enrolled in, if any.
         public let betaEnrollment: String?
         /// Its Rapid Security Response (`(a)`), if it has one.
@@ -109,6 +120,9 @@ public enum DemoSoftwareUpdate {
         ipad(111, "Field iPad 11", "iPad mini (A17 Pro)", "iPad16,1", "27.0.1", "America/St_Johns", .idle),
         ipad(112, "Field iPad 12", "iPad Pro 11-inch (3rd generation)", "iPad13,1", "27.0.1", nil, .installing("27.1")),
         ipad(113, "Field iPad 13", "iPad Air 11-inch (M2)", "iPad14,8", "27.0.1", "Europe/Brussels", .idle, supervised: false),
+        // a personal iPad, enrolled with (account-driven) User Enrollment
+        ipad(114, "Field iPad 14", "iPad Air 11-inch (M2)", "iPad14,8", "27.0.1", "Europe/Brussels", .idle, supervised: false,
+             ownership: "AccountDrivenUserEnrollment", appleType: "user"),
     ]
 
     public static let macs: [Device] = [
@@ -127,6 +141,15 @@ public enum DemoSoftwareUpdate {
         // a beta of a major Apple hasn't released: the minor-updates rule gives it no target
         mac(210, "Studio Mac 08", "MacBook Air (13-inch, M3, 2024)", "Mac15,12", "J613AP", "28.0", .idle,
             build: "27A5016f", beta: "macOS 28 Developer Beta"),
+        // still reports the earlier 27.0.2 pending, with the deadline Jamf gives 27.1
+        mac(211, "Studio Mac 09", "MacBook Air (13-inch, M3, 2024)", "Mac15,12", "J613AP", "27.0.1", .downloading("27.0.2"),
+            deadlineOf: "27.1"),
+        // the earlier step 27.0.2 failed, and its own deadline has passed
+        mac(212, "Studio Mac 10", "MacBook Air (13-inch, M2, 2022)", "Mac14,2", "J413AP", "27.0.1",
+            .failed("27.0.2", reason: "InstallFailed: The update couldn’t be installed.", count: 2)),
+        // can't run macOS 27, but can run the newest macOS 15 the Blueprint asks for; not supervised
+        mac(213, "Studio Mac 11", "MacBook Pro (13-inch, 2018, Four Thunderbolt 3 ports)", "MacBookPro15,2", "J132AP", "15.7.3", .idle,
+            supervised: false),
     ]
 
     public static var devices: [Device] { iPads + macs }
@@ -224,9 +247,11 @@ public enum DemoSoftwareUpdate {
             ("UNSUCCESSFUL", "INVALID", [["code": "Error.ConfigurationCannotBeApplied",
                                           "description": "The declaration isn’t valid on this OS version.",
                                           "details": [["key": "Error", "description": "Software update enforcement isn’t supported on iPadOS 17."]]]])
+        // a failure that has nothing to do with how the iPad enrolled: Apple allows the
+        // enforcement on device-enrolled (unsupervised) iPhones and iPads
         case 113:
             ("UNSUCCESSFUL", "VALID", [["code": "Error.ConfigurationFailed", "description": "Configuration failed.",
-                                        "details": [["key": "Error", "description": "Software update enforcement needs a supervised device."]]]])
+                                        "details": [["key": "Error", "description": "Software update enforcement couldn’t start: the device couldn’t reach Apple’s software update service."]]]])
         default: ("SUCCESSFUL", "VALID", [])
         }
     }
@@ -341,20 +366,23 @@ public enum DemoSoftwareUpdate {
 
     private static func ipad(_ number: Int, _ name: String, _ model: String, _ identifier: String, _ os: String,
                              _ zone: String?, _ state: State, contact: Int = 0, passcode: Bool = false,
-                             supervised: Bool = true) -> Device {
+                             supervised: Bool = true, ownership: String = "Institutional", appleType: String? = nil) -> Device {
         Device(number: number, family: .iPad, name: name, model: model, modelIdentifier: identifier, boardID: nil,
                osVersion: os, osBuild: DemoAppleReleaseServer.build(of: os, mac: false), timeZone: zone,
                lastContactDaysAgo: contact, state: state, passcodePresent: passcode, supervised: supervised,
-               betaEnrollment: nil, rapidSecurityResponse: nil, batteryHealth: nil, fileVaultState: nil, bootstrapToken: nil)
+               deviceOwnershipType: ownership, appleEnrollmentType: appleType ?? (supervised ? "supervised" : "device"),
+               deadlineOf: nil, betaEnrollment: nil, rapidSecurityResponse: nil, batteryHealth: nil, fileVaultState: nil,
+               bootstrapToken: nil)
     }
 
     private static func mac(_ number: Int, _ name: String, _ model: String, _ identifier: String, _ board: String,
                             _ os: String, _ state: State, contact: Int = 0, rapidSecurityResponse: String? = nil,
                             battery: String = "normal", fileVault: String = "ENCRYPTED", bootstrap: String = "ESCROWED",
-                            build: String? = nil, beta: String? = nil) -> Device {
+                            build: String? = nil, beta: String? = nil, supervised: Bool = true, deadlineOf: String? = nil) -> Device {
         Device(number: number, family: .mac, name: name, model: model, modelIdentifier: identifier, boardID: board,
                osVersion: os, osBuild: build ?? DemoAppleReleaseServer.build(of: os, mac: true), timeZone: nil,
-               lastContactDaysAgo: contact, state: state, passcodePresent: false, supervised: true, betaEnrollment: beta,
+               lastContactDaysAgo: contact, state: state, passcodePresent: false, supervised: supervised,
+               deviceOwnershipType: nil, appleEnrollmentType: nil, deadlineOf: deadlineOf, betaEnrollment: beta,
                rapidSecurityResponse: rapidSecurityResponse, batteryHealth: battery, fileVaultState: fileVault,
                bootstrapToken: bootstrap)
     }
@@ -475,6 +503,8 @@ public nonisolated final class DemoSoftwareUpdateServer: DemoServer {
             "lastContactDate": iso(Double(device.lastContactDaysAgo) + 0.1),
             "lastInventoryUpdateDate": iso(Double(device.lastContactDaysAgo) + 0.2),
             "managed": true, "supervised": device.supervised, "declarativeDeviceManagementEnabled": true,
+            "deviceOwnershipType": device.deviceOwnershipType ?? "Institutional",
+            "appleEnrollmentType": device.appleEnrollmentType ?? "supervised",
             "passcodePresent": device.passcodePresent, "batteryLevel": device.number == 106 ? 18 : 64 + device.number % 30,
             "batteryHealth": "NORMAL", "availableSpaceMb": device.number == 103 ? 1_900 : 41_000, "capacityMb": 128_000,
             "roaming": false, "dataRoamingEnabled": false, "building": "Contoso HQ", "department": "Field Team",
@@ -488,7 +518,7 @@ public nonisolated final class DemoSoftwareUpdateServer: DemoServer {
             "id": String(device.number), "udid": device.udid,
             "general": ["name": device.name, "managementId": device.managementID,
                         "lastContactTime": iso(Double(device.lastContactDaysAgo) + 0.1),
-                        "reportDate": iso(Double(device.lastContactDaysAgo) + 0.2), "supervised": true,
+                        "reportDate": iso(Double(device.lastContactDaysAgo) + 0.2), "supervised": device.supervised,
                         "remoteManagement": ["managed": true]],
             "hardware": ["serialNumber": device.serial, "model": device.model, "modelIdentifier": device.modelIdentifier],
             "operatingSystem": ["name": "macOS", "version": device.osVersion, "build": device.osBuild],
@@ -527,8 +557,10 @@ public nonisolated final class DemoSoftwareUpdateServer: DemoServer {
         }
         add("management.declarations", managementDeclarations(device))
         func pending(_ version: String) {
+            // the pending version's own deadline, or the one of the version the declaration moved on to
+            let due = device.deadlineOf ?? version
             add("softwareupdate.pending-version",
-                "{os-version=\(version), build-version=\(DemoAppleReleaseServer.build(of: version, mac: device.family == .mac)), target-local-date-time=\(device.family == .mac ? DemoAppleReleaseServer.macDeadline(of: version, now: now) : DemoSoftwareUpdate.deadline(now: now))}")
+                "{os-version=\(version), build-version=\(DemoAppleReleaseServer.build(of: version, mac: device.family == .mac)), target-local-date-time=\(device.family == .mac ? DemoAppleReleaseServer.macDeadline(of: due, now: now) : DemoSoftwareUpdate.deadline(now: now))}")
             add("softwareupdate.install-reason", "{reason=[{softwareupdate-reason=declaration, declaration-id=Blueprint_\(device.family == .mac ? DemoSoftwareUpdate.macBlueprintID : DemoSoftwareUpdate.iPadBlueprintID)_s1_c1_sys_cfg1}]}")
         }
         switch device.state {
@@ -684,6 +716,7 @@ public nonisolated final class DemoAppleReleaseServer: DemoServer, @unchecked Se
     private static let macReleases: [(version: String, build: String, boards: [String], daysAgo: Int)] = [
         ("27.1", "26B5060", supportedBoards, 12), ("27.0.2", "26A5350", supportedBoards, 25), ("27.0.1", "26A5341", supportedBoards, 40),
         ("26.6", "25G5060", supportedBoards, 30), ("15.7.4", "24G5420", supportedBoards + ["J132AP"], 60),
+        ("15.7.3", "24G5410", supportedBoards + ["J132AP"], 90),
     ]
     private static let supportedIPads = ["iPad13,1", "iPad13,18", "iPad14,8", "iPad15,7", "iPad16,1", "iPad16,3"]
     private static let supportedBoards = ["J413AP", "J613AP"]
