@@ -99,6 +99,21 @@ extension JamfPlatform.Client {
         throw JamfPlatform.DeviceMismatch(serial: safe, count: results.count)
     }
 
+    /// Every device in the Platform API’s inventory (`devices/v1/devices`,
+    /// every page; `devices:read`), with its Platform ID and serial number:
+    /// one paged read instead of a lookup per serial. Read only. A refusal or
+    /// a failed page is thrown, never read as an empty list.
+    ///
+    /// - Parameter pageSize: devices per page (`page-size`); Jamf’s own SDK
+    ///   reads 1,000 at a time.
+    public func devices(pageSize: Int = 500) async throws -> [JamfPlatform.Device] {
+        try await readAllPages("devices/v1/devices", pageSize: pageSize, privileges: [],
+                               permissions: [JamfPlatform.Permission.devicesRead]) { json in
+            guard let id = json["id"]?.text, !id.isEmpty else { return nil }
+            return JamfPlatform.Device(id: id, serialNumber: json["serialNumber"]?.text)
+        }
+    }
+
     /// The configuration declarations a device reported
     /// (`ddm/report/v1/devices/{id}/declarations`), at most 200. Nil when the
     /// report can’t be read here (403 or 404). Recorded, as the lookup is.

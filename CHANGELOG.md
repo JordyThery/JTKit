@@ -1,5 +1,39 @@
 # Changelog
 
+## 1.6.0 (2026-11-10)
+A minor release: read-only additions for software update reporting. Code written for 1.5 compiles unchanged, and
+existing functions behave as before, except that a declaration’s device list now sends the filter it needs.
+
+### Added
+- `JamfPlatform.Client.statusItems(managementID:kind:)`: every item of a device’s DDM status report, whatever the
+  value’s type (text, number, boolean, object or list as compact JSON), each with its `JamfPro.StatusItem.valueKind`.
+  Nil for a device without a report (404); a refusal (403) is thrown and names `devices:read`. `ddmStatusItems` is
+  unchanged.
+- `JamfPlatform.Client.devices(pageSize:)`: the Platform API’s device list (`devices/v1/devices`, every page by
+  `page` and `page-size` until `hasNext` is false; `devices:read`), each with its Platform ID and serial number: one
+  paged read instead of a lookup per serial. A refusal or a failed page is thrown, never read as an empty list.
+- `JamfPro.SoftwareUpdateStatus.supplementalBuild` and `.supplementalExtraVersion` (a Rapid Security Response,
+  `device.operating-system.supplemental.*`), `.batteryHealth` (`device.power.battery-health`) and
+  `.declarationIdentifiers` (every identifier in `management.declarations`, from nested JSON, Jamf Pro’s
+  `{key=value}` text or flattened keys, each once).
+- `JamfPro.GroupMember.diskEncryption`: a Mac’s FileVault; `members(of:)` asks for the `DISK_ENCRYPTION` section.
+  `JamfPro.Computer.DiskEncryption` has a public initializer.
+- `JTKitUITestCase.saveInTestFolder()` and `SavePanelNotInTestFolder`: an open Save panel is moved to the test’s
+  own folder and saves only once it shows that folder; otherwise it is canceled and the test fails.
+- Demo: `DemoSoftwareUpdate` answers Declaration Reporting per declaration (400 without a filter, as Jamf does);
+  the Mac Blueprint sends a configuration and activation pair per version range with its predicate
+  (`macPairs`, `iPadPairs`); an invalid and a failed declaration, devices awaiting sync and pending, an unsupervised
+  iPad, a Mac with a Rapid Security Response, battery health and FileVault, a Mac whose bootstrap token isn’t
+  escrowed, a Mac on a version no range covers and a Mac on a beta of an unreleased major (no target); each device’s
+  status report lists its declarations. `DemoSoftwareUpdate.pastRefreshes(now:)` gives earlier states for a history
+  (another rule, a pilot group in the scope). `DemoMode.appleReleaseServer` with `isUnreachable` makes the demo
+  release feeds fail. The demo answers the whole Platform device list, a page at a time, and writes
+  `passcode.is-present` as a boolean, as Apple’s item is.
+
+### Changed
+- `declarationReports(declarationIdentifier:filter:)` sends `active==true,active==false` when no filter is given:
+  the list answers 400 to a request without one.
+
 ## 1.5.0 (2026-11-09)
 A minor release: read-only calls for software update reporting, Apple’s release data, and public data sources
 in the release check. Code written for 1.4 compiles unchanged, and existing functions behave as before.

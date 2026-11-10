@@ -93,6 +93,8 @@ extension JamfPro {
         /// A Mac’s bootstrap token: `ESCROWED`, `NOT_ESCROWED` or `NOT_SUPPORTED`.
         public var bootstrapTokenEscrowedStatus: String?
         public var bootstrapTokenAllowed: Bool?
+        /// A Mac’s FileVault, from the `DISK_ENCRYPTION` section.
+        public var diskEncryption: JamfPro.Computer.DiskEncryption?
 
         public init(id: String, kind: MDMCommand.DeviceKind, name: String? = nil, serialNumber: String? = nil,
                     udid: String? = nil, managementID: String? = nil, osVersion: String? = nil, osBuild: String? = nil,
@@ -215,6 +217,7 @@ extension JamfPro {
                       mdmProfileExpiration: computer.general?.mdmProfileExpiration,
                       bootstrapTokenEscrowedStatus: computer.security?.bootstrapTokenEscrowedStatus,
                       bootstrapTokenAllowed: computer.security?.bootstrapTokenAllowed)
+            diskEncryption = computer.diskEncryption
         }
     }
 }
@@ -321,7 +324,8 @@ extension JamfPlatform.Client {
             let records: [JamfPro.Computer]
             do {
                 records = try await inventory(.computers, filter: "id=in=(\(batch.joined(separator: ",")))",
-                                              sections: [.general, .hardware, .operatingSystem, .security], recording: .results)
+                                              sections: [.general, .hardware, .operatingSystem, .security, .diskEncryption],
+                                              recording: .results)
             } catch var error as JamfPlatform.APIError where error.server == .platformAPI {
                 error.permissions = [JamfPlatform.Permission.devicesRead]
                 throw error

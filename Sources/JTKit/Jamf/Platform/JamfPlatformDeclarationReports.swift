@@ -118,6 +118,9 @@ extension JamfPlatform {
 }
 
 extension JamfPlatform.Client {
+    /// The filter that asks Declaration Reporting for every report, active or not.
+    static let everyDeclarationState = "active==true,active==false"
+
     /// The declarations a device reported (`ddm/report/v1/devices/{deviceId}/declarations`,
     /// every page; `declarations:read`). Nil when the device has no report
     /// (404); a refusal (403) is thrown.
@@ -143,7 +146,7 @@ extension JamfPlatform.Client {
         do {
             if let filter { return try await read(filter) }
             do {
-                return try await read("active==true,active==false")
+                return try await read(Self.everyDeclarationState)
             } catch let error as JamfPlatform.APIError where error.status == 400 {
                 return try await read("declarationIdentifier==Blueprint_*")
             }
@@ -155,10 +158,13 @@ extension JamfPlatform.Client {
     /// The devices that reported one declaration
     /// (`ddm/report/v1/declarations/{declarationIdentifier}/devices`, every
     /// page; `declarations:read`). Nil when nothing reported it (404).
+    ///
+    /// The list answers 400 to a request without a filter: without one,
+    /// every device is asked for (`active==true,active==false`).
     public func declarationReports(declarationIdentifier: String, filter: String? = nil) async throws -> [JamfPlatform.DeclarationReport]? {
         do {
             return try await readAllPages("ddm/report/v1/declarations/\(JamfPlatform.pathSegment(declarationIdentifier))/devices",
-                                          query: filter.map { [URLQueryItem(name: "filter", value: $0)] } ?? [],
+                                          query: [URLQueryItem(name: "filter", value: filter ?? Self.everyDeclarationState)],
                                           pageSize: 100, sizeName: "size", privileges: [],
                                           permissions: [JamfPlatform.Permission.declarationsRead],
                                           item: JamfPlatform.DeclarationReport.init(json:))

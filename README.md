@@ -38,7 +38,7 @@ A connections list and editor for several services in one list. Names, addresses
 
 ### Jamf Pro, Jamf Platform API and Jamf School
 
-Sign-in with an API client or a username and password, with tokens renewed as needed. Jamf Pro device lookups, records, PreStages, sites, recovery secrets and MDM commands through the Jamf Pro API and the Classic API; Blueprints, device groups, devices and environments through the Jamf Platform API, also as a gateway to Jamf Pro; devices, groups, locations, Automated Device Enrollment and commands in Jamf School. For software update reporting, read only: Jamf Pro groups with their members’ inventory, DDM status items typed as a software update status, Declaration Reporting, and a Blueprint’s software update enforcements.
+Sign-in with an API client or a username and password, with tokens renewed as needed. Jamf Pro device lookups, records, PreStages, sites, recovery secrets and MDM commands through the Jamf Pro API and the Classic API; Blueprints, device groups, devices and environments through the Jamf Platform API, also as a gateway to Jamf Pro; devices, groups, locations, Automated Device Enrollment and commands in Jamf School. For software update reporting, read only: Jamf Pro groups with their members’ inventory, DDM status items typed as a software update status or read raw, Declaration Reporting, and a Blueprint’s software update enforcements.
 
 ### Apple release data
 

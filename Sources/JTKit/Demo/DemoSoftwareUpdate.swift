@@ -9,7 +9,17 @@ import Foundation
 /// Every device sits in one recognizable state: on target, downloading,
 /// blocked by a passcode, on an intermediate version, failed, no report,
 /// offline, hardware that can’t run the target, no activity since the
-/// update started, not started; with a few unusual time zones.
+/// update started, not started, installing for hours, a beta of a newer
+/// major (no target), on a version the Mac Blueprint’s declarations don’t
+/// cover; with a few unusual time zones.
+///
+/// Declaration Reporting answers per device and per declaration
+/// (`ddm/report/v1/declarations/{id}/devices`, which needs a filter, as
+/// Jamf’s does). The Mac Blueprint sends one configuration and activation
+/// pair per version range, each with its predicate; the iPad Blueprint one
+/// pair per step. Among them: an invalid declaration, a failed one and
+/// devices awaiting sync. Each device’s status report lists the
+/// declarations it holds (`management.declarations`).
 public enum DemoSoftwareUpdate {
     public enum Family: String, Sendable { case iPad, mac }
 
@@ -41,6 +51,18 @@ public enum DemoSoftwareUpdate {
         public let lastContactDaysAgo: Int
         public let state: State
         public let passcodePresent: Bool
+        /// False for the one iPad that isn’t supervised.
+        public let supervised: Bool
+        /// The beta program it is enrolled in, if any.
+        public let betaEnrollment: String?
+        /// Its Rapid Security Response (`(a)`), if it has one.
+        public let rapidSecurityResponse: String?
+        /// A Mac’s battery health, as its status report writes it.
+        public let batteryHealth: String?
+        /// A Mac’s FileVault: `ENCRYPTED` or `UNENCRYPTED`.
+        public let fileVaultState: String?
+        /// A Mac’s bootstrap token: `ESCROWED` or `NOT_ESCROWED`.
+        public let bootstrapToken: String?
 
         public var id: Int { number }
         public var serial: String { String(format: "ZZDEMOU%02d%@", number % 100, family == .mac ? "M" : "D") }
@@ -86,18 +108,25 @@ public enum DemoSoftwareUpdate {
         ipad(110, "Field iPad 10", "iPad Air 11-inch (M2)", "iPad14,8", "27.0.1", "Europe/Brussels", .quietSince(days: 20)),
         ipad(111, "Field iPad 11", "iPad mini (A17 Pro)", "iPad16,1", "27.0.1", "America/St_Johns", .idle),
         ipad(112, "Field iPad 12", "iPad Pro 11-inch (3rd generation)", "iPad13,1", "27.0.1", nil, .installing("27.1")),
+        ipad(113, "Field iPad 13", "iPad Air 11-inch (M2)", "iPad14,8", "27.0.1", "Europe/Brussels", .idle, supervised: false),
     ]
 
     public static let macs: [Device] = [
-        mac(201, "Studio Mac 01", "MacBook Air (13-inch, M2, 2022)", "Mac14,2", "J413AP", "27.1", .onTarget),
-        mac(202, "Studio Mac 02", "MacBook Air (13-inch, M3, 2024)", "Mac15,12", "J613AP", "27.0.1", .downloading("27.1")),
+        mac(201, "Studio Mac 01", "MacBook Air (13-inch, M2, 2022)", "Mac14,2", "J413AP", "27.1", .onTarget, rapidSecurityResponse: "(a)"),
+        mac(202, "Studio Mac 02", "MacBook Air (13-inch, M3, 2024)", "Mac15,12", "J613AP", "27.0.1", .downloading("27.1"),
+            bootstrap: "NOT_ESCROWED"),
         mac(203, "Studio Mac 03", "MacBook Air (13-inch, M2, 2022)", "Mac14,2", "J413AP", "27.0.1",
-            .failed("27.1", reason: "InsufficientDiskSpace: Not enough free space to install the update.", count: 1)),
+            .failed("27.1", reason: "InsufficientDiskSpace: Not enough free space to install the update.", count: 1),
+            battery: "service-recommended"),
         mac(204, "Studio Mac 04", "MacBook Pro (13-inch, 2018, Four Thunderbolt 3 ports)", "MacBookPro15,2", "J132AP", "15.7.4", .idle),
-        mac(205, "Studio Mac 05", "MacBook Air (13-inch, M3, 2024)", "Mac15,12", "J613AP", "27.0.1", .idle),
+        mac(205, "Studio Mac 05", "MacBook Air (13-inch, M3, 2024)", "Mac15,12", "J613AP", "27.0.1", .idle, fileVault: "UNENCRYPTED"),
         mac(206, "Studio Mac 06", "MacBook Air (13-inch, M2, 2022)", "Mac14,2", "J413AP", "27.0.1", .quietSince(days: 40), contact: 40),
         mac(207, "Loaner Mac 01", "MacBook Air (13-inch, M3, 2024)", "Mac15,12", "J613AP", "27.1", .onTarget),
         mac(208, "Loaner Mac 02", "MacBook Air (13-inch, M2, 2022)", "Mac14,2", "J413AP", "26.6", .prepared("27.1", failure: "")),
+        mac(209, "Studio Mac 07", "MacBook Air (13-inch, M3, 2024)", "Mac15,12", "J613AP", "27.0.2", .idle),
+        // a beta of a major Apple hasn't released: the minor-updates rule gives it no target
+        mac(210, "Studio Mac 08", "MacBook Air (13-inch, M3, 2024)", "Mac15,12", "J613AP", "28.0", .idle,
+            build: "27A5016f", beta: "macOS 28 Developer Beta"),
     ]
 
     public static var devices: [Device] { iPads + macs }
@@ -116,6 +145,136 @@ public enum DemoSoftwareUpdate {
         let day = calendar.date(byAdding: .day, value: deadlineInDays, to: now) ?? now
         let parts = calendar.dateComponents([.year, .month, .day], from: day)
         return String(format: "%04d-%02d-%02dT17:00:00", parts.year ?? 2026, parts.month ?? 1, parts.day ?? 1)
+    }
+
+    // MARK: Declarations
+
+    /// One configuration and activation pair of a demo Blueprint, as Jamf
+    /// names them (`Blueprint_<id>_s1_c1_sys_cfg1`, `…_act1`).
+    public struct DeclarationPair: Sendable, Hashable {
+        public let blueprintID: String
+        public let step: Int
+        public let number: Int
+        /// The activation’s predicate, as the device reports it when it is false.
+        public let predicate: String
+        /// The demo family it is for; nil for iPhones, which the demo has none of.
+        let family: Family?
+        /// The versions it is for (a whole-text pattern); nil: every version.
+        let versions: String?
+        /// The board IDs it lists; empty: every device.
+        let boards: [String]
+
+        public var configuration: String { "Blueprint_\(blueprintID)_s\(step)_c1_sys_cfg\(number)" }
+        public var activation: String { "Blueprint_\(blueprintID)_s\(step)_c1_sys_act\(number)" }
+
+        /// Whether its predicate is true for a device running `version`.
+        func applies(to device: Device, version: String) -> Bool {
+            guard device.family == family else { return false }
+            if !boards.isEmpty && !boards.contains(device.boardID ?? "") { return false }
+            guard let versions else { return true }
+            return version.range(of: versions, options: .regularExpression) != nil
+        }
+    }
+
+    /// The Mac Blueprint’s minor updates: one pair per version range, for
+    /// the boards that run it. The range for macOS 27 stops at 27.0.1, so a
+    /// Mac on 27.0.2 gets no update from it.
+    public static let macPairs: [DeclarationPair] = [
+        macPair(1, "^27[.]0([.][0-1])?$", boards: ["J413AP", "J613AP"]),
+        macPair(2, "^26[.][0-5]([.][0-9]+)*$", boards: ["J413AP", "J613AP"]),
+        macPair(3, "^15[.]([0-6]([.][0-9]+)*|7([.][0-3])?)$", boards: ["J413AP", "J613AP", "J132AP"]),
+    ]
+
+    /// The iPad Blueprint: one pair per step, each step for its OS family.
+    public static let iPadPairs: [DeclarationPair] = [
+        DeclarationPair(blueprintID: iPadBlueprintID, step: 1, number: 1,
+                        predicate: "@status(device.operating-system.family) == 'iPadOS'", family: .iPad, versions: nil, boards: []),
+        // the iOS step: for iPhones, never for these iPads
+        DeclarationPair(blueprintID: iPadBlueprintID, step: 2, number: 1,
+                        predicate: "@status(device.operating-system.family) == 'iOS'", family: nil, versions: nil, boards: []),
+    ]
+
+    private static func macPair(_ number: Int, _ versions: String, boards: [String]) -> DeclarationPair {
+        let list = boards.map { "\"\($0)\"" }.joined(separator: ", ")
+        return DeclarationPair(
+            blueprintID: macBlueprintID, step: 1, number: number,
+            predicate: "status.device.operating-system.family == \"macOS\" AND status.device.operating-system.version MATCHES "
+                + "\"\(versions)\" AND status.softwareupdate.device-id IN {\(list)}",
+            family: .mac, versions: versions, boards: boards)
+    }
+
+    /// The Blueprint pairs a device holds: none for the Loaner Macs, which
+    /// no Blueprint reaches.
+    static func pairs(for device: Device) -> [DeclarationPair] {
+        if loanerMacNumbers.contains(device.number) { return [] }
+        return device.family == .mac ? macPairs : iPadPairs
+    }
+
+    /// The two Macs of the static Loaner Macs group.
+    static let loanerMacNumbers: Set<Int> = [207, 208]
+
+    /// How a device’s copy of a configuration stands, besides applied or
+    /// not for it: pending, awaiting sync, invalid or failed.
+    static func configurationStatus(_ device: Device) -> (status: String, valid: String, reasons: [[String: Any]]) {
+        switch device.number {
+        case 111: ("PENDING", "VALID", [])
+        // Jamf changed the declaration; the device hasn't fetched it yet
+        case 110, 205: ("AWAITING_SYNC", "VALID", [])
+        case 109:
+            ("UNSUCCESSFUL", "INVALID", [["code": "Error.ConfigurationCannotBeApplied",
+                                          "description": "The declaration isn’t valid on this OS version.",
+                                          "details": [["key": "Error", "description": "Software update enforcement isn’t supported on iPadOS 17."]]]])
+        case 113:
+            ("UNSUCCESSFUL", "VALID", [["code": "Error.ConfigurationFailed", "description": "Configuration failed.",
+                                        "details": [["key": "Error", "description": "Software update enforcement needs a supervised device."]]]])
+        default: ("SUCCESSFUL", "VALID", [])
+        }
+    }
+
+    // MARK: History
+
+    /// An earlier refresh of one demo Blueprint, for an app that keeps a
+    /// history: its software update then, a group that was in its scope
+    /// then only, and the devices on target then (by `Device.number`).
+    public struct PastRefresh: Sendable, Hashable {
+        public let daysAgo: Int
+        public let blueprintID: String
+        public let enforcement: JamfPlatform.SoftwareUpdateBlock.Enforcement
+        /// A group in the scope then, besides today’s.
+        public let extraScopeGroup: JamfPro.DeviceGroup?
+        public let onTarget: Set<Int>
+    }
+
+    /// Five earlier daily refreshes per Blueprint, oldest first. Four and
+    /// five days back the software update was another one; two and three
+    /// days back a pilot group was in the scope too. Each day back, fewer
+    /// devices were on target.
+    public static func pastRefreshes(now: Date = Date()) -> [PastRefresh] {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(identifier: "UTC") ?? .gmt
+        let earlierDeadline = calendar.date(byAdding: .day, value: -3, to: now) ?? now
+        let parts = calendar.dateComponents([.year, .month, .day], from: earlierDeadline)
+        let earlierLocal = String(format: "%04d-%02d-%02dT17:00:00", parts.year ?? 2026, parts.month ?? 1, parts.day ?? 1)
+        var refreshes: [PastRefresh] = []
+        for (blueprint, family) in [(iPadBlueprintID, Family.iPad), (macBlueprintID, Family.mac)] {
+            let current = devices.filter { $0.family == family && $0.state == .onTarget && $0.betaEnrollment == nil }.map(\.number)
+            let pilot = JamfPro.DeviceGroup(groupID: "699", name: family == .iPad ? "Pilot iPads" : "Pilot Macs", isSmart: false,
+                                            kind: family == .iPad ? .mobileDevice : .computer)
+            for daysAgo in (1...5).reversed() {
+                let earlier = daysAgo > 3
+                let enforcement: JamfPlatform.SoftwareUpdateBlock.Enforcement = switch (family, earlier) {
+                case (.iPad, true): .specific(targetOSVersion: "27.0.1", targetLocalDateTime: earlierLocal, detailsURL: nil)
+                case (.mac, true): .semantic(minorEnforceAfterDays: 14, deploymentTime: "17:00")
+                case (.iPad, false):
+                    .specific(targetOSVersion: targetVersion, targetLocalDateTime: deadline(now: now), detailsURL: "https://intranet.contoso.example/updates")
+                case (.mac, false): .semantic(minorEnforceAfterDays: macDelayDays, deploymentTime: "17:00")
+                }
+                refreshes.append(PastRefresh(daysAgo: daysAgo, blueprintID: blueprint, enforcement: enforcement,
+                                             extraScopeGroup: (2...3).contains(daysAgo) ? pilot : nil,
+                                             onTarget: Set(current.dropLast(min(daysAgo, current.count)))))
+            }
+        }
+        return refreshes
     }
 
     static func blueprints(now: Date) -> [LosslessJSON.Object] {
@@ -181,17 +340,23 @@ public enum DemoSoftwareUpdate {
     }
 
     private static func ipad(_ number: Int, _ name: String, _ model: String, _ identifier: String, _ os: String,
-                             _ zone: String?, _ state: State, contact: Int = 0, passcode: Bool = false) -> Device {
+                             _ zone: String?, _ state: State, contact: Int = 0, passcode: Bool = false,
+                             supervised: Bool = true) -> Device {
         Device(number: number, family: .iPad, name: name, model: model, modelIdentifier: identifier, boardID: nil,
                osVersion: os, osBuild: DemoAppleReleaseServer.build(of: os, mac: false), timeZone: zone,
-               lastContactDaysAgo: contact, state: state, passcodePresent: passcode)
+               lastContactDaysAgo: contact, state: state, passcodePresent: passcode, supervised: supervised,
+               betaEnrollment: nil, rapidSecurityResponse: nil, batteryHealth: nil, fileVaultState: nil, bootstrapToken: nil)
     }
 
     private static func mac(_ number: Int, _ name: String, _ model: String, _ identifier: String, _ board: String,
-                            _ os: String, _ state: State, contact: Int = 0) -> Device {
+                            _ os: String, _ state: State, contact: Int = 0, rapidSecurityResponse: String? = nil,
+                            battery: String = "normal", fileVault: String = "ENCRYPTED", bootstrap: String = "ESCROWED",
+                            build: String? = nil, beta: String? = nil) -> Device {
         Device(number: number, family: .mac, name: name, model: model, modelIdentifier: identifier, boardID: board,
-               osVersion: os, osBuild: DemoAppleReleaseServer.build(of: os, mac: true), timeZone: nil,
-               lastContactDaysAgo: contact, state: state, passcodePresent: false)
+               osVersion: os, osBuild: build ?? DemoAppleReleaseServer.build(of: os, mac: true), timeZone: nil,
+               lastContactDaysAgo: contact, state: state, passcodePresent: false, supervised: true, betaEnrollment: beta,
+               rapidSecurityResponse: rapidSecurityResponse, batteryHealth: battery, fileVaultState: fileVault,
+               bootstrapToken: bootstrap)
     }
 }
 
@@ -259,22 +424,38 @@ public nonisolated final class DemoSoftwareUpdateServer: DemoServer {
         case 6 where Array(p[0...3]) == ["ddm", "report", "v1", "devices"] && p[5] == "declarations":
             guard let device = DemoSoftwareUpdate.devices.first(where: { $0.platformID == p[4] }) else { return notFound() }
             return reportPage(device, request)
+        case 6 where Array(p[0...3]) == ["ddm", "report", "v1", "declarations"] && p[5] == "devices":
+            return declarationDevices(p[4], request)
         case 3 where p == ["devices", "v1", "devices"]:
-            let serial = (request.query["filter"] ?? "").replacingOccurrences(of: "serialNumber==", with: "")
+            func record(_ device: DemoSoftwareUpdate.Device) -> [String: Any] {
+                ["id": device.platformID, "name": device.name, "serialNumber": device.serial, "model": device.model,
+                 "modelIdentifier": device.modelIdentifier, "operatingSystemVersion": device.osVersion]
+            }
+            guard let filter = request.query["filter"], !filter.isEmpty else {
+                // the whole list, a page at a time (page, page-size), as Jamf's answers it
+                let page = Int(request.query["page"] ?? "0") ?? 0
+                let size = max(1, Int(request.query["page-size"] ?? "100") ?? 100)
+                let all = DemoSoftwareUpdate.devices
+                let slice = Array(all.dropFirst(page * size).prefix(size))
+                return DemoJSON.response(200, ["page": page, "pageSize": size, "totalCount": all.count,
+                                               "hasNext": (page + 1) * size < all.count, "results": slice.map(record)])
+            }
+            let serial = filter.replacingOccurrences(of: "serialNumber==", with: "")
                 .trimmingCharacters(in: CharacterSet(charactersIn: "\""))
             let matches = DemoSoftwareUpdate.devices.filter { $0.serial.caseInsensitiveCompare(serial) == .orderedSame }
             return DemoJSON.response(200, ["page": 0, "pageSize": 100, "totalCount": matches.count, "hasNext": false,
-                                           "results": matches.map { ["id": $0.platformID, "name": $0.name,
-                                                                     "serialNumber": $0.serial, "model": $0.model,
-                                                                     "modelIdentifier": $0.modelIdentifier,
-                                                                     "operatingSystemVersion": $0.osVersion] }])
+                                           "results": matches.map(record)])
         default:
             return notFound()
         }
     }
 
-    private var studioMacs: [DemoSoftwareUpdate.Device] { DemoSoftwareUpdate.macs.filter { $0.number <= 206 } }
-    private var loanerMacs: [DemoSoftwareUpdate.Device] { DemoSoftwareUpdate.macs.filter { $0.number > 206 } }
+    private var studioMacs: [DemoSoftwareUpdate.Device] {
+        DemoSoftwareUpdate.macs.filter { !DemoSoftwareUpdate.loanerMacNumbers.contains($0.number) }
+    }
+    private var loanerMacs: [DemoSoftwareUpdate.Device] {
+        DemoSoftwareUpdate.macs.filter { DemoSoftwareUpdate.loanerMacNumbers.contains($0.number) }
+    }
 
     // MARK: Records
 
@@ -293,7 +474,7 @@ public nonisolated final class DemoSoftwareUpdateServer: DemoServer {
             "osBuild": device.osBuild, "model": device.model, "modelIdentifier": device.modelIdentifier,
             "lastContactDate": iso(Double(device.lastContactDaysAgo) + 0.1),
             "lastInventoryUpdateDate": iso(Double(device.lastContactDaysAgo) + 0.2),
-            "managed": true, "supervised": true, "declarativeDeviceManagementEnabled": true,
+            "managed": true, "supervised": device.supervised, "declarativeDeviceManagementEnabled": true,
             "passcodePresent": device.passcodePresent, "batteryLevel": device.number == 106 ? 18 : 64 + device.number % 30,
             "batteryHealth": "NORMAL", "availableSpaceMb": device.number == 103 ? 1_900 : 41_000, "capacityMb": 128_000,
             "roaming": false, "dataRoamingEnabled": false, "building": "Contoso HQ", "department": "Field Team",
@@ -311,6 +492,13 @@ public nonisolated final class DemoSoftwareUpdateServer: DemoServer {
                         "remoteManagement": ["managed": true]],
             "hardware": ["serialNumber": device.serial, "model": device.model, "modelIdentifier": device.modelIdentifier],
             "operatingSystem": ["name": "macOS", "version": device.osVersion, "build": device.osBuild],
+            "security": ["bootstrapTokenEscrowedStatus": device.bootstrapToken ?? "NOT_SUPPORTED", "bootstrapTokenAllowed": true],
+            "diskEncryption": [
+                "individualRecoveryKeyValidityStatus": device.fileVaultState == "ENCRYPTED" ? "VALID" : "NOT_APPLICABLE",
+                "bootPartitionEncryptionDetails": ["partitionName": "Macintosh HD (Boot Partition)",
+                                                   "partitionFileVault2State": device.fileVaultState ?? "UNKNOWN",
+                                                   "partitionFileVault2Percent": device.fileVaultState == "ENCRYPTED" ? 100 : 0],
+            ],
         ]
     }
 
@@ -320,16 +508,24 @@ public nonisolated final class DemoSoftwareUpdateServer: DemoServer {
         default: 0.3
         }
         var items: [[String: Any]] = []
-        func add(_ key: String, _ value: String, _ daysAgo: Double = recent) {
+        func add(_ key: String, _ value: Any, _ daysAgo: Double = recent) {
             items.append(["key": key, "value": value, "lastUpdateTime": serverTime(daysAgo)])
         }
         let reported = device.state == .onTarget ? DemoSoftwareUpdate.targetVersion : device.osVersion
         add("device.operating-system.version", reported)
-        add("device.operating-system.build-version", DemoAppleReleaseServer.build(of: reported, mac: device.family == .mac))
+        let build = reported == device.osVersion ? device.osBuild : DemoAppleReleaseServer.build(of: reported, mac: device.family == .mac)
+        add("device.operating-system.build-version", build)
         add("device.model.identifier", device.modelIdentifier)
         if let board = device.boardID { add("softwareupdate.device-id", board) }
-        add("passcode.is-present", device.passcodePresent ? "true" : "false")
-        add("softwareupdate.beta-enrollment", "")
+        // a boolean, as Apple's item is: Jamf passes every value type on
+        add("passcode.is-present", device.passcodePresent)
+        add("softwareupdate.beta-enrollment", device.betaEnrollment ?? "")
+        if let health = device.batteryHealth { add("device.power.battery-health", health) }
+        if let extra = device.rapidSecurityResponse {
+            add("device.operating-system.supplemental.build-version", build + "a")
+            add("device.operating-system.supplemental.extra-version", extra)
+        }
+        add("management.declarations", managementDeclarations(device))
         func pending(_ version: String) {
             add("softwareupdate.pending-version",
                 "{os-version=\(version), build-version=\(DemoAppleReleaseServer.build(of: version, mac: device.family == .mac)), target-local-date-time=\(device.family == .mac ? DemoAppleReleaseServer.macDeadline(of: version, now: now) : DemoSoftwareUpdate.deadline(now: now))}")
@@ -358,32 +554,93 @@ public nonisolated final class DemoSoftwareUpdateServer: DemoServer {
         return items
     }
 
-    private func reportPage(_ device: DemoSoftwareUpdate.Device, _ request: DemoRequest) -> DemoResponse {
-        let blueprint = device.family == .mac ? DemoSoftwareUpdate.macBlueprintID : DemoSoftwareUpdate.iPadBlueprintID
-        let steps = device.family == .mac ? 1 : 2
-        var results: [[String: Any]] = []
-        for step in 1...steps {
-            // on an iPad, the iOS step’s predicate doesn’t apply
-            let applies = step == 1
-            let pending = device.number == 111 && applies
-            results.append([
-                "declarationIdentifier": "Blueprint_\(blueprint)_s\(step)_c1_sys_cfg1",
-                "deviceId": device.platformID, "channel": "SYSTEM", "type": "CONFIGURATION",
-                "status": pending ? "PENDING" : "SUCCESSFUL", "active": applies, "validityState": "VALID",
-                "reasons": [], "dateUpdated": iso(Double(DemoSoftwareUpdate.updateStartedDaysAgo)),
-                "lastReportTime": iso(Double(device.lastContactDaysAgo) + 0.3),
-            ])
+    /// The version a device’s report gives, which its declarations’ predicates see.
+    private func reportedVersion(_ device: DemoSoftwareUpdate.Device) -> String {
+        device.state == .onTarget ? DemoSoftwareUpdate.targetVersion : device.osVersion
+    }
+
+    /// Every declaration report of one device: each Blueprint pair (an
+    /// activation false for it reports `Info.Predicate` with the predicate,
+    /// its configuration `Error.ActivationFailed`), and a Wi-Fi
+    /// configuration. None for a device that never sent a status report.
+    func reports(_ device: DemoSoftwareUpdate.Device) -> [[String: Any]] {
+        guard device.state != .noReport else { return [] }
+        let reported = iso(Double(device.lastContactDaysAgo) + 0.3)
+        let changed = iso(Double(DemoSoftwareUpdate.updateStartedDaysAgo))
+        func report(_ identifier: String, _ type: String, status: String, active: Bool, valid: String = "VALID",
+                    reasons: [[String: Any]] = []) -> [String: Any] {
+            ["declarationIdentifier": identifier, "deviceId": device.platformID, "channel": "SYSTEM", "type": type,
+             "status": status, "active": active, "validityState": valid, "reasons": reasons, "dateUpdated": changed,
+             "lastReportTime": reported]
         }
-        results.append([
-            "declarationIdentifier": "com.contoso.wifi", "deviceId": device.platformID, "channel": "SYSTEM",
-            "type": "CONFIGURATION", "status": "SUCCESSFUL", "active": true, "validityState": "VALID", "reasons": [],
-        ])
+        var results: [[String: Any]] = []
+        for pair in DemoSoftwareUpdate.pairs(for: device) {
+            if pair.applies(to: device, version: reportedVersion(device)) {
+                let configuration = DemoSoftwareUpdate.configurationStatus(device)
+                results.append(report(pair.activation, "ACTIVATION", status: "SUCCESSFUL", active: true))
+                results.append(report(pair.configuration, "CONFIGURATION", status: configuration.status, active: true,
+                                      valid: configuration.valid, reasons: configuration.reasons))
+            } else {
+                results.append(report(pair.activation, "ACTIVATION", status: "UNSUCCESSFUL", active: false, reasons: [
+                    ["code": "Info.Predicate", "description": "The activation predicate evaluated to false.",
+                     "details": [["key": "Predicate", "description": pair.predicate]]],
+                ]))
+                results.append(report(pair.configuration, "CONFIGURATION", status: "UNSUCCESSFUL", active: false,
+                                      reasons: [["code": "Error.ActivationFailed", "description": "No activation is active."]]))
+            }
+        }
+        results.append(report("com.contoso.wifi", "CONFIGURATION", status: "SUCCESSFUL", active: true))
+        return results
+    }
+
+    /// `management.declarations` as Jamf Pro keeps it: `{key=value}` text
+    /// with the activations and configurations the device holds.
+    private func managementDeclarations(_ device: DemoSoftwareUpdate.Device) -> String {
+        let all = reports(device)
+        func list(_ type: String) -> String {
+            all.filter { $0["type"] as? String == type }.enumerated().map { index, report in
+                "{identifier=\(report["declarationIdentifier"] as? String ?? ""), active=\(report["active"] as? Bool ?? false), "
+                    + "valid=valid, server-token=\(String(format: "%08x", device.number * 100 + index))}"
+            }.joined(separator: ", ")
+        }
+        return "{activations=[\(list("ACTIVATION"))], assets=[], configurations=[\(list("CONFIGURATION"))], management=[]}"
+    }
+
+    /// Whether a report passes an `active==…` filter (`active==true,active==false`: every report).
+    private static func passes(_ report: [String: Any], filter: String) -> Bool {
+        let wanted = Set(filter.split(separator: ",").compactMap { part -> Bool? in
+            let clause = part.trimmingCharacters(in: .whitespaces)
+            return clause == "active==true" ? true : clause == "active==false" ? false : nil
+        })
+        if wanted.isEmpty { return true }
+        return wanted.contains(report["active"] as? Bool ?? false)
+    }
+
+    private func reportPage(_ device: DemoSoftwareUpdate.Device, _ request: DemoRequest) -> DemoResponse {
+        var results = reports(device)
         let filter = request.query["filter"] ?? ""
         if filter.hasPrefix("declarationIdentifier==") {
             let prefix = String(filter.dropFirst("declarationIdentifier==".count)).replacingOccurrences(of: "*", with: "")
             results = results.filter { ($0["declarationIdentifier"] as? String ?? "").hasPrefix(prefix) }
+        } else {
+            results = results.filter { Self.passes($0, filter: filter) }
         }
         return DemoJSON.response(200, ["deviceId": device.platformID, "totalCount": results.count, "results": results])
+    }
+
+    /// The devices that reported one declaration, a page at a time. Like
+    /// Jamf’s, the list answers 400 without a filter; nothing reported: 404.
+    private func declarationDevices(_ identifier: String, _ request: DemoRequest) -> DemoResponse {
+        guard let filter = request.query["filter"], !filter.isEmpty else {
+            return DemoJSON.response(400, ["httpStatus": 400, "errors": [["code": "INVALID_FIELD", "field": "filter",
+                                                                          "description": "filter is required"]]])
+        }
+        let results = DemoSoftwareUpdate.devices.flatMap(reports)
+            .filter { $0["declarationIdentifier"] as? String == identifier && Self.passes($0, filter: filter) }
+        guard !results.isEmpty else { return notFound() }
+        let page = Int(request.query["page"] ?? "0") ?? 0
+        let size = max(1, Int(request.query["size"] ?? "100") ?? 100)
+        return DemoJSON.response(200, ["totalCount": results.count, "results": Array(results.dropFirst(page * size).prefix(size))])
     }
 
     // MARK: Helpers
@@ -410,8 +667,9 @@ public nonisolated final class DemoSoftwareUpdateServer: DemoServer {
 }
 
 /// SOFA’s and Apple’s release feeds in demo mode, with made-up builds, on
-/// the demo network’s own hosts (never the real ones).
-public nonisolated final class DemoAppleReleaseServer: DemoServer {
+/// the demo network’s own hosts (never the real ones). `isUnreachable`
+/// makes both feeds fail, as when Apple’s data can’t be read.
+public nonisolated final class DemoAppleReleaseServer: DemoServer, @unchecked Sendable {
     public static let sofaHost = "sofa.\(DemoNetwork.reservedDomain)"
     public static let gdmfHost = "gdmf.\(DemoNetwork.reservedDomain)"
     public static var sofaURL: URL { URL(string: "https://\(sofaHost)")! }
@@ -424,7 +682,7 @@ public nonisolated final class DemoAppleReleaseServer: DemoServer {
         ("17.7.10", "21H5450", supportedIPads + ["iPad7,5", "iPad7,6"], 300),
     ]
     private static let macReleases: [(version: String, build: String, boards: [String], daysAgo: Int)] = [
-        ("27.1", "26B5060", supportedBoards, 12), ("27.0.1", "26A5341", supportedBoards, 40),
+        ("27.1", "26B5060", supportedBoards, 12), ("27.0.2", "26A5350", supportedBoards, 25), ("27.0.1", "26A5341", supportedBoards, 40),
         ("26.6", "25G5060", supportedBoards, 30), ("15.7.4", "24G5420", supportedBoards + ["J132AP"], 60),
     ]
     private static let supportedIPads = ["iPad13,1", "iPad13,18", "iPad14,8", "iPad15,7", "iPad16,1", "iPad16,3"]
@@ -452,9 +710,18 @@ public nonisolated final class DemoAppleReleaseServer: DemoServer {
     }
 
     private let now: Date
+    private let lock = NSLock()
+    private var unreachable = false
 
     public init(now: Date = Date()) {
         self.now = now
+    }
+
+    /// Both feeds fail while it is on (404, which isn’t retried), as when
+    /// Apple’s release data can’t be read. Off by default.
+    public var isUnreachable: Bool {
+        get { lock.withLock { unreachable } }
+        set { lock.withLock { unreachable = newValue } }
     }
 
     /// A release’s date: `daysAgo` days before now, at midnight UTC, as Apple dates them.
@@ -468,6 +735,7 @@ public nonisolated final class DemoAppleReleaseServer: DemoServer {
 
     public func respond(to request: DemoRequest) -> DemoResponse {
         guard request.method == "GET" else { return DemoJSON.response(405, [:]) }
+        if isUnreachable { return DemoJSON.response(404, [:]) }
         let host = request.url.host() ?? ""
         let path = request.pathSegments
         if host == Self.sofaHost, path == ["v2", "ios_data_feed.json"] { return DemoJSON.response(200, sofaIOS()) }

@@ -133,6 +133,21 @@ extension JamfPro {
         public var newestUpdate: String?
         /// How many status items the report had.
         public var itemCount: Int
+        /// `device.operating-system.supplemental.build-version`: the build
+        /// with a Rapid Security Response (Apple’s Background Security
+        /// Improvement), e.g. `24A346a`.
+        public var supplementalBuild: String?
+        /// `device.operating-system.supplemental.extra-version`: the Rapid
+        /// Security Response’s letter, e.g. `(a)`.
+        public var supplementalExtraVersion: String?
+        /// `device.power.battery-health`, as the device writes it, e.g. `normal`.
+        public var batteryHealth: String?
+        /// The identifiers of the declarations the device reports it holds
+        /// (`management.declarations`: its activations, configurations,
+        /// assets and management declarations), in the order given, each
+        /// once. Read from one item with a nested value (JSON or Jamf Pro’s
+        /// `{key=value}` text) or from flattened keys.
+        public var declarationIdentifiers: [String] = []
 
         public init(installState: InstallState? = nil, pendingVersion: PendingVersion? = nil, failure: Failure? = nil,
                     installReasons: [String] = [], betaEnrollment: String? = nil, osVersion: String? = nil,
@@ -207,6 +222,26 @@ extension JamfPro {
                 // the same fixed-width format, so the largest text is the newest
                 newestUpdate: times.max(),
                 itemCount: items.count)
+            supplementalBuild = value("device.operating-system.supplemental.build-version")
+            supplementalExtraVersion = value("device.operating-system.supplemental.extra-version")
+            batteryHealth = value("device.power.battery-health")
+            declarationIdentifiers = Self.declarationIdentifiers(in: items)
+        }
+
+        /// Every `identifier` under `management.declarations`, each once:
+        /// a flattened `….identifier` key’s value, or each `identifier` in a
+        /// nested value.
+        static func declarationIdentifiers(in items: [StatusItem]) -> [String] {
+            var seen = Set<String>()
+            var found: [String] = []
+            for item in items where item.key == "management.declarations" || item.key.hasPrefix("management.declarations.") {
+                guard let text = item.value?.trimmingCharacters(in: .whitespacesAndNewlines), !text.isEmpty else { continue }
+                let identifiers = item.key.hasSuffix(".identifier") ? [text] : allFields("identifier", in: text)
+                for identifier in identifiers where identifier != "null" && seen.insert(identifier).inserted {
+                    found.append(identifier)
+                }
+            }
+            return found
         }
 
         /// `sub=value` in a `{key=value, …}` text, or `"sub": value` in JSON.
@@ -268,6 +303,16 @@ extension JamfPlatform.Client {
     /// report for the device (404). Unlike `ddmStatusItems`, a refusal (403)
     /// is thrown, naming `devices:read` on the Platform API.
     public func softwareUpdateStatus(managementID: String, kind: MDMCommand.DeviceKind) async throws -> JamfPro.SoftwareUpdateStatus? {
+        try await statusItems(managementID: managementID, kind: kind).map(JamfPro.SoftwareUpdateStatus.init(items:))
+    }
+
+    /// Every item of a device’s DDM status report
+    /// (`v1/ddm/{managementId}/status-items`), whatever its value’s type:
+    /// a string, a number, a boolean, an object or a list (as compact JSON),
+    /// each with its `valueKind`. Nil when Jamf Pro has no report for the
+    /// device (404). Unlike `ddmStatusItems`, a refusal (403) is thrown,
+    /// naming `devices:read` on the Platform API.
+    public func statusItems(managementID: String, kind: MDMCommand.DeviceKind) async throws -> [JamfPro.StatusItem]? {
         let request = HTTPRequest(path: "pro/v1/ddm/\(JamfPlatform.pathSegment(managementID))/status-items", recordsBodies: true)
         let response: HTTPResponse
         do {
@@ -281,12 +326,25 @@ extension JamfPlatform.Client {
         } catch {
             throw failure(JamfPlatform.APIError(.invalidResponse("\(request.path) couldn’t be read: \(error.localizedDescription)")))
         }
-        let items = (json["statusItems"]?.arrayValue ?? []).compactMap { item -> JamfPro.StatusItem? in
+        return (json["statusItems"]?.arrayValue ?? []).compactMap { item -> JamfPro.StatusItem? in
             guard let key = item["key"]?.stringValue else { return nil }
-            return JamfPro.StatusItem(key: key, value: item["value"].flatMap(Self.statusText),
-                                      lastUpdateTime: item["lastUpdateTime"]?.stringValue)
+            var read = JamfPro.StatusItem(key: key, value: item["value"].flatMap(Self.statusText),
+                                          lastUpdateTime: item["lastUpdateTime"]?.stringValue)
+            read.valueKind = Self.valueKind(item["value"])
+            return read
         }
-        return JamfPro.SoftwareUpdateStatus(items: items)
+    }
+
+    /// The JSON type of a status item’s value; a missing value is null.
+    static func valueKind(_ value: LosslessJSON?) -> JamfPro.StatusItem.ValueKind {
+        switch value {
+        case .string?: .string
+        case .number?: .number
+        case .bool?: .boolean
+        case .object?: .object
+        case .array?: .array
+        case .null?, nil: .null
+        }
     }
 
     /// A status item’s value as text: Jamf documents a string, but a number,

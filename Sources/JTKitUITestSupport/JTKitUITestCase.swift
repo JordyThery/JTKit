@@ -466,6 +466,31 @@ open class JTKitUITestCase: XCTestCase {
         }
     }
 
+    /// Saves from an open Save panel into `testFolder`, and only there. A
+    /// sandboxed app’s panel opens in its own last folder, so this goes to
+    /// `testFolder` first and saves only once the panel shows it (its name,
+    /// `JTKitUITest-…`, in the Where menu). Otherwise the panel is
+    /// canceled, the test fails and nothing lands among the user’s files.
+    ///
+    /// - Throws: `SavePanelNotInTestFolder` when the panel doesn’t show it.
+    public func saveInTestFolder(file: StaticString = #filePath, line: UInt = #line) throws {
+        XCTAssertTrue(app.buttons["OKButton"].firstMatch.waitForExistence(timeout: 15), "No Save panel opened", file: file, line: line)
+        goToFolder(testFolder.path)
+        let name = testFolder.lastPathComponent
+        let shown = app.descendants(matching: .any).matching(Self.showsFolder(named: name)).firstMatch
+        guard shown.waitForExistence(timeout: 5) else {
+            app.buttons["CancelButton"].firstMatch.click()
+            XCTFail("The Save panel doesn’t show the test’s folder: canceled, nothing saved", file: file, line: line)
+            throw SavePanelNotInTestFolder(folder: name)
+        }
+        saveInChosenFolder()
+    }
+
+    /// An element that names the folder: its value, label or title.
+    static func showsFolder(named name: String) -> NSPredicate {
+        NSPredicate(format: "value == %@ OR label == %@ OR title == %@", name, name, name)
+    }
+
     /// Types a path into an open file panel’s Go to Folder field (⌘⇧G).
     public func goToFolder(_ path: String) {
         app.typeKey("g", modifierFlags: [.command, .shift])
@@ -473,4 +498,13 @@ open class JTKitUITestCase: XCTestCase {
         app.typeText(path + "\n")
         sleep(1)
     }
+}
+
+/// A Save panel didn’t show the test’s own folder, so nothing was saved
+/// (`JTKitUITestCase.saveInTestFolder()`).
+public struct SavePanelNotInTestFolder: Error, CustomStringConvertible {
+    /// The folder’s name it should have shown.
+    public var folder: String
+
+    public var description: String { "The Save panel didn’t show \(folder)" }
 }

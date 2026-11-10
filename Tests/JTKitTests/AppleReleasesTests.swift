@@ -239,7 +239,7 @@ struct DemoSoftwareUpdateTests {
         let groups = try await client.computerGroups()
         let studio = try await client.members(of: try #require(groups.first { $0.isSmart }))
         let loaners = try await client.members(of: try #require(groups.first { !$0.isSmart }))
-        #expect(studio.count == 6 && loaners.count == 2)
+        #expect(studio.count == 8 && loaners.count == 2)
         let old = try #require(studio.first { $0.modelIdentifier == "MacBookPro15,2" })
         let status = try await client.softwareUpdateStatus(managementID: old.managementID ?? "", kind: .computer)
         #expect(status?.deviceID == "J132AP")
@@ -258,8 +258,9 @@ struct DemoSoftwareUpdateTests {
         #expect(found?.id == device.platformID)
         let reports = try #require(try await client.declarationReports(deviceID: device.platformID,
                                                                          filter: "declarationIdentifier==Blueprint_*"))
-        #expect(reports.count == 2)
-        #expect(reports.first { $0.active == true }?.status == .pending)
+        // a configuration and its activation per step
+        #expect(reports.count == 4)
+        #expect(reports.first { $0.active == true && $0.type == "CONFIGURATION" }?.status == .pending)
         #expect(reports.allSatisfy { $0.blueprintID == DemoSoftwareUpdate.iPadBlueprintID })
     }
 
@@ -312,5 +313,146 @@ struct DemoSoftwareUpdateTests {
         let blueprints = try await JamfPlatform.Blueprints(client: client).list()
         #expect(!blueprints.contains { $0.id == DemoSoftwareUpdate.iPadBlueprintID })
         #expect(DemoWorld.devices.count == 42)
+    }
+}
+
+@Suite("1.6.0: demo declarations, details and history")
+@MainActor
+struct DemoSoftwareUpdateDetailsTests {
+    private func demo() throws -> (DemoMode, JamfPlatform.Client, DemoSource) {
+        let defaults = UserDefaults(suiteName: "jtkit-demo-sw16-\(UUID().uuidString)")!
+        let demo = DemoMode(key: "demoMode", defaults: defaults, arguments: ["app"])
+        DemoSoftwareUpdate.install(on: demo.jamfPlatformServer)
+        let source = try #require(demo.source(for: .demoJamfPlatform))
+        let client = try JamfPlatform.Client(connection: source.connection, secret: source.secret,
+                                             recorder: RequestRecorder(session: source.session, log: nil), sleep: { _ in })
+        return (demo, client, source)
+    }
+
+    private func device(_ number: Int) throws -> DemoSoftwareUpdate.Device {
+        try #require(DemoSoftwareUpdate.devices.first { $0.number == number })
+    }
+
+    @Test("Each device lists the declarations it holds; per declaration, every device that reported it")
+    func perDeclaration() async throws {
+        let (_, client, _) = try demo()
+        let mac = try device(202)
+        let status = try #require(try await client.softwareUpdateStatus(managementID: mac.managementID, kind: .computer))
+        let mine = status.declarationIdentifiers.filter { $0.hasPrefix("Blueprint_\(DemoSoftwareUpdate.macBlueprintID)") }
+        #expect(Set(mine) == Set(DemoSoftwareUpdate.macPairs.flatMap { [$0.configuration, $0.activation] }))
+        #expect(status.declarationIdentifiers.contains("com.contoso.wifi"))
+
+        let first = try #require(DemoSoftwareUpdate.macPairs.first)
+        let reports = try #require(try await client.declarationReports(declarationIdentifier: first.configuration))
+        // every Mac the Blueprint reaches (not the Loaner Macs), each once
+        #expect(reports.count == DemoSoftwareUpdate.macs.count - 2)
+        let syncing = try device(205).platformID, uncovered = try device(209).platformID
+        #expect(reports.first { $0.deviceID == mac.platformID }?.status == .successful)
+        #expect(reports.first { $0.deviceID == syncing }?.status == .awaitingSync)
+        let activations = try #require(try await client.declarationReports(declarationIdentifier: first.activation))
+        // a predicate false for the device: Info.Predicate with the predicate
+        let other = try #require(activations.first { $0.deviceID == uncovered })
+        #expect(other.reasons.first?.code == "Info.Predicate")
+        #expect(other.reasons.first?.details.first?.description?.contains(#"MATCHES "^27[.]0([.][0-1])?$""#) == true)
+        #expect(try await client.declarationReports(declarationIdentifier: "Blueprint_unknown_s1_c1_sys_cfg9") == nil)
+    }
+
+    @Test("The Platform device list, every device, a page at a time")
+    func deviceList() async throws {
+        let (_, client, _) = try demo()
+        let devices = try await client.devices(pageSize: 5)
+        #expect(devices.count == DemoSoftwareUpdate.devices.count)
+        #expect(Set(devices.compactMap(\.serialNumber)) == Set(DemoSoftwareUpdate.devices.map(\.serial)))
+        #expect(devices.first { $0.serialNumber == DemoSoftwareUpdate.devices[0].serial }?.id == DemoSoftwareUpdate.devices[0].platformID)
+    }
+
+    @Test("Like Jamf’s, the declaration’s device list answers 400 without a filter")
+    func needsFilter() {
+        let server = DemoSoftwareUpdateServer()
+        let url = URL(string: "https://x.demo.invalid/ddm/report/v1/declarations/\(DemoSoftwareUpdate.macPairs[0].configuration)/devices")!
+        #expect(server.respond(to: DemoRequest(method: "GET", url: url)).status == 400)
+        let filtered = URL(string: url.absoluteString + "?filter=active%3D%3Dtrue")!
+        #expect(server.respond(to: DemoRequest(method: "GET", url: filtered)).status == 200)
+    }
+
+    @Test("An invalid and a failed declaration, awaiting sync, and the iPhone step not for iPads")
+    func iPadDeclarations() async throws {
+        let (_, client, _) = try demo()
+        let step1 = DemoSoftwareUpdate.iPadPairs[0], step2 = DemoSoftwareUpdate.iPadPairs[1]
+        let reports = try #require(try await client.declarationReports(declarationIdentifier: step1.configuration))
+        func report(_ number: Int) throws -> JamfPlatform.DeclarationReport? {
+            let id = try device(number).platformID
+            return reports.first { $0.deviceID == id }
+        }
+        #expect(try report(109)?.validity == .invalid)
+        #expect(try report(113)?.reasons.first?.code == "Error.ConfigurationFailed")
+        #expect(try report(110)?.status == .awaitingSync)
+        #expect(try report(111)?.status == .pending)
+        #expect(try report(107) == nil, "a device without a status report reports no declarations")
+        let iPhone = try #require(try await client.declarationReports(declarationIdentifier: step2.activation))
+        #expect(iPhone.allSatisfy { $0.active == false && $0.reasons.first?.code == "Info.Predicate" })
+    }
+
+    @Test("Details: unsupervised, a beta, a Rapid Security Response, battery health, FileVault and the bootstrap token")
+    func details() async throws {
+        let (_, client, _) = try demo()
+        let groups = try await client.jamfProGroups()
+        let iPads = try await client.members(of: groups[0])
+        #expect(iPads.first { $0.name == "Field iPad 13" }?.supervised == false)
+        let beta = try #require(try await client.softwareUpdateStatus(managementID: device(210).managementID, kind: .computer))
+        #expect(beta.osVersion == "28.0" && beta.betaEnrollment == "macOS 28 Developer Beta")
+
+        let rsr = try #require(try await client.softwareUpdateStatus(managementID: device(201).managementID, kind: .computer))
+        #expect(rsr.supplementalExtraVersion == "(a)" && rsr.supplementalBuild == "26B5060a")
+        #expect(rsr.batteryHealth == "normal")
+        let battery = try await client.softwareUpdateStatus(managementID: device(203).managementID, kind: .computer)
+        #expect(battery?.batteryHealth == "service-recommended")
+
+        let computers = try await client.computerGroups()
+        var macs = try await client.members(of: try #require(computers.first { $0.isSmart }))
+        macs += try await client.members(of: try #require(computers.first { !$0.isSmart }))
+        #expect(macs.first { $0.name == "Studio Mac 05" }?.diskEncryption?.bootPartitionFileVault2State == "UNENCRYPTED")
+        #expect(macs.first { $0.name == "Studio Mac 01" }?.diskEncryption?.bootPartitionFileVault2State == "ENCRYPTED")
+        #expect(macs.first { $0.name == "Studio Mac 02" }?.bootstrapTokenEscrowedStatus == "NOT_ESCROWED")
+        #expect(macs.first { $0.name == "Studio Mac 07" }?.osVersion == "27.0.2")
+
+        let items = try #require(try await client.statusItems(managementID: device(201).managementID, kind: .computer))
+        #expect(items.contains { $0.key == "management.declarations" && $0.valueKind == .string })
+        #expect(items.allSatisfy { $0.valueKind != nil })
+    }
+
+    @Test("Earlier refreshes: another rule four and five days back, a pilot group two and three days back")
+    func pastRefreshes() {
+        let past = DemoSoftwareUpdate.pastRefreshes()
+        #expect(past.count == 10)
+        let mac = past.filter { $0.blueprintID == DemoSoftwareUpdate.macBlueprintID }
+        #expect(mac.map(\.daysAgo) == [5, 4, 3, 2, 1])
+        #expect(mac.filter { $0.enforcement == .semantic(minorEnforceAfterDays: 14, deploymentTime: "17:00") }.map(\.daysAgo) == [5, 4])
+        #expect(mac.filter { $0.extraScopeGroup != nil }.map(\.daysAgo) == [3, 2])
+        #expect(mac.first { $0.extraScopeGroup != nil }?.extraScopeGroup?.kind == .computer)
+        // fewer devices on target each day back
+        #expect(mac.map(\.onTarget.count) == mac.map(\.onTarget.count).sorted())
+        let iPad = past.filter { $0.blueprintID == DemoSoftwareUpdate.iPadBlueprintID }
+        #expect(iPad.first?.enforcement.isSpecific(version: "27.0.1") == true)
+        #expect(iPad.last?.enforcement.isSpecific(version: DemoSoftwareUpdate.targetVersion) == true)
+    }
+
+    @Test("Apple’s release data can be made unreachable, and back")
+    func unreachable() async throws {
+        let (demo, _, source) = try demo()
+        let client = AppleReleases.Client(recorder: RequestRecorder(session: source.session, log: nil), userAgent: "Demo",
+                                          sofaURL: DemoAppleReleaseServer.sofaURL, gdmfURL: DemoAppleReleaseServer.gdmfURL)
+        demo.appleReleaseServer.isUnreachable = true
+        let failed = try? await client.catalog()
+        #expect(failed == nil || failed?.releases.isEmpty == true)
+        demo.appleReleaseServer.isUnreachable = false
+        #expect(try await client.catalog().releases.isEmpty == false)
+    }
+}
+
+private extension JamfPlatform.SoftwareUpdateBlock.Enforcement {
+    func isSpecific(version: String) -> Bool {
+        if case .specific(let target, _, _) = self { return target == version }
+        return false
     }
 }
