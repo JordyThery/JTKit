@@ -1,6 +1,6 @@
 # Changelog
 
-## 1.6.0 (not released yet)
+## 1.6.0 (2026-11-10)
 A minor release: read-only additions for software update reporting. Code written for 1.5 compiles unchanged, and
 existing functions behave as before, except that a declaration’s device list now sends the filter it needs.
 
