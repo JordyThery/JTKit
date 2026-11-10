@@ -1,6 +1,6 @@
 # Changelog
 
-## 1.7.0 (not released)
+## 1.7.0 (2026-11-10)
 A minor release: read-only additions. Code written for 1.6 compiles unchanged.
 
 ### Added
