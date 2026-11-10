@@ -247,9 +247,11 @@ public enum DemoSoftwareUpdate {
             ("UNSUCCESSFUL", "INVALID", [["code": "Error.ConfigurationCannotBeApplied",
                                           "description": "The declaration isn’t valid on this OS version.",
                                           "details": [["key": "Error", "description": "Software update enforcement isn’t supported on iPadOS 17."]]]])
+        // a failure that has nothing to do with how the iPad enrolled: Apple allows the
+        // enforcement on device-enrolled (unsupervised) iPhones and iPads
         case 113:
             ("UNSUCCESSFUL", "VALID", [["code": "Error.ConfigurationFailed", "description": "Configuration failed.",
-                                        "details": [["key": "Error", "description": "Software update enforcement needs a supervised device."]]]])
+                                        "details": [["key": "Error", "description": "Software update enforcement couldn’t start: the device couldn’t reach Apple’s software update service."]]]])
         default: ("SUCCESSFUL", "VALID", [])
         }
     }

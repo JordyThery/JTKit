@@ -414,6 +414,9 @@ struct DemoSoftwareUpdateDetailsTests {
         }
         #expect(try report(109)?.validity == .invalid)
         #expect(try report(113)?.reasons.first?.code == "Error.ConfigurationFailed")
+        // a true reason: nothing about supervision, which a device-enrolled iPad doesn't need
+        let detail = try report(113)?.reasons.first?.details.compactMap(\.description).joined() ?? ""
+        #expect(detail.contains("couldn’t reach Apple’s software update service") && !detail.contains("supervised"))
         #expect(try report(110)?.status == .awaitingSync)
         #expect(try report(111)?.status == .pending)
         #expect(try report(107) == nil, "a device without a status report reports no declarations")

@@ -13,6 +13,11 @@ A minor release: read-only additions. Code written for 1.6 compiles unchanged.
   release), an iPad enrolled with User Enrollment and a Mac that isn’t supervised. The demo inventory gives each
   device’s supervision and enrollment.
 
+### Changed
+- `DemoSoftwareUpdate`: the unsupervised iPad’s failed declaration gives a reason that holds for its enrollment (the
+  device couldn’t reach Apple’s software update service) instead of a supervision requirement, which Apple doesn’t
+  have for device-enrolled iPhones and iPads.
+
 ## 1.6.0 (2026-11-10)
 A minor release: read-only additions for software update reporting. Code written for 1.5 compiles unchanged, and
 existing functions behave as before, except that a declaration’s device list now sends the filter it needs.
