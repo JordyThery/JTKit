@@ -9,6 +9,9 @@ existing functions behave as before, except that a declaration’s device list n
   value’s type (text, number, boolean, object or list as compact JSON), each with its `JamfPro.StatusItem.valueKind`.
   Nil for a device without a report (404); a refusal (403) is thrown and names `devices:read`. `ddmStatusItems` is
   unchanged.
+- `JamfPlatform.Client.devices(pageSize:)`: the Platform API’s device list (`devices/v1/devices`, every page by
+  `page` and `page-size` until `hasNext` is false; `devices:read`), each with its Platform ID and serial number: one
+  paged read instead of a lookup per serial. A refusal or a failed page is thrown, never read as an empty list.
 - `JamfPro.SoftwareUpdateStatus.supplementalBuild` and `.supplementalExtraVersion` (a Rapid Security Response,
   `device.operating-system.supplemental.*`), `.batteryHealth` (`device.power.battery-health`) and
   `.declarationIdentifiers` (every identifier in `management.declarations`, from nested JSON, Jamf Pro’s
@@ -24,7 +27,8 @@ existing functions behave as before, except that a declaration’s device list n
   escrowed, a Mac on a version no range covers and a Mac on a beta of an unreleased major (no target); each device’s
   status report lists its declarations. `DemoSoftwareUpdate.pastRefreshes(now:)` gives earlier states for a history
   (another rule, a pilot group in the scope). `DemoMode.appleReleaseServer` with `isUnreachable` makes the demo
-  release feeds fail.
+  release feeds fail. The demo answers the whole Platform device list, a page at a time, and writes
+  `passcode.is-present` as a boolean, as Apple’s item is.
 
 ### Changed
 - `declarationReports(declarationIdentifier:filter:)` sends `active==true,active==false` when no filter is given:

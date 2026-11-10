@@ -253,3 +253,56 @@ struct ManagementDeclarationsTests {
         #expect(JamfPro.SoftwareUpdateStatus().declarationIdentifiers.isEmpty)
     }
 }
+
+@Suite("1.6.0: the Platform device list, read once")
+struct PlatformDeviceListTests {
+    @Test("Every page (page, page-size) until hasNext is false; ID and serial number")
+    func pages() async throws {
+        let server = MockServer { request in
+            let page = Int(request.queryValue("page") ?? "0") ?? 0
+            let ids = page == 0 ? ["d-1", "d-2"] : ["d-3"]
+            let results = ids.map { #"{"id":"\#($0)","serialNumber":"ZZTEST\#($0.dropFirst(2))","name":"Device"}"# }
+            return .json(200, #"{"page":\#(page),"pageSize":2,"hasNext":\#(page == 0),"results":[\#(results.joined(separator: ","))]}"#)
+        }
+        let devices = try await platform(server).devices(pageSize: 2)
+        #expect(devices.map(\.id) == ["d-1", "d-2", "d-3"])
+        #expect(devices.map(\.serialNumber) == ["ZZTEST1", "ZZTEST2", "ZZTEST3"])
+        #expect(server.requests.map(\.path) == ["/devices/v1/devices", "/devices/v1/devices"])
+        #expect(server.requests.map { $0.queryValue("page") } == ["0", "1"])
+        #expect(server.requests.allSatisfy { $0.queryValue("page-size") == "2" && $0.method == "GET" && $0.queryValue("filter") == nil })
+    }
+
+    @Test("A refusal is thrown and names devices:read; a failed page is never an empty list")
+    func failures() async throws {
+        let refused = MockServer { _ in .json(403, #"{"httpStatus":403,"errors":[]}"#) }
+        await #expect {
+            try await platform(refused).devices()
+        } throws: { hints($0).contains("“devices:read” permission") }
+        let broken = MockServer { request in
+            request.queryValue("page") == "0"
+                ? .json(200, #"{"hasNext":true,"results":[{"id":"d-1","serialNumber":"ZZTEST1"}]}"#)
+                : .json(400, #"{"httpStatus":400,"errors":[]}"#)
+        }
+        await #expect(throws: JamfPlatform.APIError.self) { try await platform(broken).devices() }
+    }
+
+    @Test("A busy answer (503) to a declaration’s device list is retried")
+    func busyDeclarationList() async throws {
+        let calls = CallCounter()
+        let server = MockServer { _ in
+            calls.increment() == 1
+                ? .json(503, #"{"httpStatus":503,"errors":[]}"#)
+                : .json(200, #"{"totalCount":1,"results":[{"declarationIdentifier":"cfg1","deviceId":"P-1","status":"SUCCESSFUL"}]}"#)
+        }
+        let reports = try await platform(server).declarationReports(declarationIdentifier: "cfg1")
+        #expect(reports?.map(\.deviceID) == ["P-1"])
+        #expect(server.requests.count == 2)
+    }
+}
+
+/// A thread-safe call counter for a mock server’s handler.
+private final class CallCounter: @unchecked Sendable {
+    private let lock = NSLock()
+    private var value = 0
+    func increment() -> Int { lock.withLock { value += 1; return value } }
+}

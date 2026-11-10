@@ -357,6 +357,15 @@ struct DemoSoftwareUpdateDetailsTests {
         #expect(try await client.declarationReports(declarationIdentifier: "Blueprint_unknown_s1_c1_sys_cfg9") == nil)
     }
 
+    @Test("The Platform device list, every device, a page at a time")
+    func deviceList() async throws {
+        let (_, client, _) = try demo()
+        let devices = try await client.devices(pageSize: 5)
+        #expect(devices.count == DemoSoftwareUpdate.devices.count)
+        #expect(Set(devices.compactMap(\.serialNumber)) == Set(DemoSoftwareUpdate.devices.map(\.serial)))
+        #expect(devices.first { $0.serialNumber == DemoSoftwareUpdate.devices[0].serial }?.id == DemoSoftwareUpdate.devices[0].platformID)
+    }
+
     @Test("Like Jamf’s, the declaration’s device list answers 400 without a filter")
     func needsFilter() {
         let server = DemoSoftwareUpdateServer()

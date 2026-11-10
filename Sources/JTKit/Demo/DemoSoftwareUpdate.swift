@@ -427,14 +427,24 @@ public nonisolated final class DemoSoftwareUpdateServer: DemoServer {
         case 6 where Array(p[0...3]) == ["ddm", "report", "v1", "declarations"] && p[5] == "devices":
             return declarationDevices(p[4], request)
         case 3 where p == ["devices", "v1", "devices"]:
-            let serial = (request.query["filter"] ?? "").replacingOccurrences(of: "serialNumber==", with: "")
+            func record(_ device: DemoSoftwareUpdate.Device) -> [String: Any] {
+                ["id": device.platformID, "name": device.name, "serialNumber": device.serial, "model": device.model,
+                 "modelIdentifier": device.modelIdentifier, "operatingSystemVersion": device.osVersion]
+            }
+            guard let filter = request.query["filter"], !filter.isEmpty else {
+                // the whole list, a page at a time (page, page-size), as Jamf's answers it
+                let page = Int(request.query["page"] ?? "0") ?? 0
+                let size = max(1, Int(request.query["page-size"] ?? "100") ?? 100)
+                let all = DemoSoftwareUpdate.devices
+                let slice = Array(all.dropFirst(page * size).prefix(size))
+                return DemoJSON.response(200, ["page": page, "pageSize": size, "totalCount": all.count,
+                                               "hasNext": (page + 1) * size < all.count, "results": slice.map(record)])
+            }
+            let serial = filter.replacingOccurrences(of: "serialNumber==", with: "")
                 .trimmingCharacters(in: CharacterSet(charactersIn: "\""))
             let matches = DemoSoftwareUpdate.devices.filter { $0.serial.caseInsensitiveCompare(serial) == .orderedSame }
             return DemoJSON.response(200, ["page": 0, "pageSize": 100, "totalCount": matches.count, "hasNext": false,
-                                           "results": matches.map { ["id": $0.platformID, "name": $0.name,
-                                                                     "serialNumber": $0.serial, "model": $0.model,
-                                                                     "modelIdentifier": $0.modelIdentifier,
-                                                                     "operatingSystemVersion": $0.osVersion] }])
+                                           "results": matches.map(record)])
         default:
             return notFound()
         }
@@ -498,7 +508,7 @@ public nonisolated final class DemoSoftwareUpdateServer: DemoServer {
         default: 0.3
         }
         var items: [[String: Any]] = []
-        func add(_ key: String, _ value: String, _ daysAgo: Double = recent) {
+        func add(_ key: String, _ value: Any, _ daysAgo: Double = recent) {
             items.append(["key": key, "value": value, "lastUpdateTime": serverTime(daysAgo)])
         }
         let reported = device.state == .onTarget ? DemoSoftwareUpdate.targetVersion : device.osVersion
@@ -507,7 +517,8 @@ public nonisolated final class DemoSoftwareUpdateServer: DemoServer {
         add("device.operating-system.build-version", build)
         add("device.model.identifier", device.modelIdentifier)
         if let board = device.boardID { add("softwareupdate.device-id", board) }
-        add("passcode.is-present", device.passcodePresent ? "true" : "false")
+        // a boolean, as Apple's item is: Jamf passes every value type on
+        add("passcode.is-present", device.passcodePresent)
         add("softwareupdate.beta-enrollment", device.betaEnrollment ?? "")
         if let health = device.batteryHealth { add("device.power.battery-health", health) }
         if let extra = device.rapidSecurityResponse {
