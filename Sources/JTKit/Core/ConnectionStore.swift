@@ -24,7 +24,27 @@ public nonisolated enum ConnectionStoreError: LocalizedError, Equatable, Sendabl
     case unreadable(detail: String, copy: String?)
     case couldNotSave(String)
     /// The Keychain refused a secret; `status` is its error code, when known.
-    case keychainRefused(status: OSStatus?)
+    /// `deletion` is set when it refused to delete a connection’s secret
+    /// (`ConnectionStore.delete(id:)`): the connection was kept.
+    case keychainRefused(status: OSStatus?, deletion: RefusedDeletion? = nil)
+
+    /// A delete the Keychain refused. The connection stays in the list, so
+    /// it can be deleted again; secrets deleted before the refusal stay
+    /// deleted (putting them back would mean reading them first).
+    public struct RefusedDeletion: Equatable, Sendable {
+        /// The connection’s name.
+        public let connection: String
+        /// The secret the Keychain refused to delete, e.g. "client secret".
+        public let secret: String
+        /// Its secrets deleted before the refusal, e.g. ["client secret"].
+        public let alreadyDeleted: [String]
+
+        public init(connection: String, secret: String, alreadyDeleted: [String] = []) {
+            self.connection = connection
+            self.secret = secret
+            self.alreadyDeleted = alreadyDeleted
+        }
+    }
 
     public var errorDescription: String? {
         switch self {
@@ -33,8 +53,14 @@ public nonisolated enum ConnectionStoreError: LocalizedError, Equatable, Sendabl
             return "The saved connections couldn’t be read, so changes aren’t saved until this is fixed (\(detail)).\(copyNote)"
         case .couldNotSave(let detail):
             return "The connections couldn’t be saved: \(detail)"
-        case .keychainRefused(let status):
+        case .keychainRefused(let status, nil):
             return SecretWriteError(status: status).errorDescription ?? ""
+        case .keychainRefused(let status, let deletion?):
+            let code = status.map { " (error \($0))" } ?? ""
+            let deleted = deletion.alreadyDeleted.isEmpty ? ""
+                : " Its \(deletion.alreadyDeleted.formatted(.list(type: .and))) "
+                    + (deletion.alreadyDeleted.count == 1 ? "was" : "were") + " already deleted."
+            return "The Keychain refused to delete the \(deletion.secret) of “\(deletion.connection)”\(code), so the connection was kept.\(deleted) If the Keychain is locked, unlock it, then delete the connection again."
         }
     }
 }
@@ -180,13 +206,37 @@ public final class ConnectionStore<Record: ConnectionRecord> {
         }
     }
 
-    /// Removes the record and all its secrets.
+    /// Removes the record and all its secrets. The secrets are deleted
+    /// first, so a secret is never left behind with no connection pointing
+    /// at it: a secret that isn’t there counts as deleted. When the Keychain
+    /// refuses one (locked, access refused), the record stays and
+    /// `ConnectionStoreError.keychainRefused` says which secret, and which
+    /// were already deleted (they stay deleted). A demo connection’s secrets
+    /// are never in the Keychain.
     public func delete(id: UUID) throws {
         guard let record = record(id: id) else { return }
-        try write(records.filter { $0.id != id })
-        for kind in secretLocations.keys {
-            setSecret(nil, kind, for: record.connection)
+        if let problem { throw problem }
+        if !record.connection.isDemo {
+            var deleted = [String]()
+            for kind in ConnectionSecretKind.allCases where secretLocations[kind] != nil {
+                do {
+                    try writeSecret(nil, kind, for: record.connection)
+                } catch {
+                    log?("[Connections] the Keychain refused to delete the \(kind.rawValue) secret: \(error)")
+                    throw ConnectionStoreError.keychainRefused(
+                        status: (error as? SecretWriteError)?.status,
+                        deletion: .init(connection: ConnectionMenuText.name(of: record.connection),
+                                        secret: Self.secretName(kind, of: record.connection), alreadyDeleted: deleted))
+                }
+                deleted.append(Self.secretName(kind, of: record.connection))
+            }
         }
+        try write(records.filter { $0.id != id })
+    }
+
+    /// e.g. "client secret", "Jamf Protect client secret".
+    private static func secretName(_ kind: ConnectionSecretKind, of connection: Connection) -> String {
+        kind == .protect ? "Jamf Protect client secret" : (connection.signIn.secretName ?? "secret").lowercased()
     }
 
     // MARK: Secrets
