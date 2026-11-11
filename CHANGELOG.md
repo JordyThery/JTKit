@@ -1,5 +1,30 @@
 # Changelog
 
+## 1.8.0 (2026-11-11)
+A minor release. Code written for 1.7 compiles unchanged; deleting a saved connection now stops when the Keychain
+refuses.
+
+### Changed
+- `ConnectionStore.delete(id:)` deletes the connection’s secrets first and removes the record only when they are all
+  gone; a secret that isn’t there counts as deleted. When the Keychain refuses one (locked, access refused), it throws
+  `ConnectionStoreError.keychainRefused` and the record stays in the list, so the connection can be deleted again.
+  Secrets deleted before the refusal stay deleted, and the error says which. Before, the record was removed first and a
+  refused delete left the secret in the Keychain with no connection pointing at it. Demo connections never touch the
+  Keychain, as before.
+- `ConnectionStoreError.keychainRefused` has a second associated value, `deletion` (nil by default, so
+  `.keychainRefused(status:)` still builds and compares as before): a `ConnectionStoreError.RefusedDeletion` with the
+  connection’s name, the refused secret and those already deleted. Its message says the connection was kept.
+
+### What an app needs to do
+- Settings › Connections without its own `delete` closure: nothing; the error shows below the list.
+- An app that calls `delete(id:)` itself: show the thrown error, and don’t treat the connection as gone when it
+  throws.
+- An app that removes a connection or its secrets by its own path: delete the secrets first with the throwing
+  `writeSecret(nil, for:)` (not `setSecret(nil, for:)`, whose result is easy to ignore), and remove the record only
+  when they are all gone.
+- A `switch` that names `.keychainRefused(status: let status)` with its label needs the second value
+  (`.keychainRefused(let status, _)`).
+
 ## 1.7.0 (2026-11-10)
 A minor release: read-only additions. Code written for 1.6 compiles unchanged.
 
