@@ -71,7 +71,7 @@ Bump `JTKit.version`, add a CHANGELOG entry (it’s for developers using the pac
 
 The README is public and describes the package to other developers. When a change makes a statement in it untrue (products, areas, principles, requirements), update it in the same commit.
 
-**Before tagging any JTKit version, build every app that uses it** in `Apps.xcworkspace`, against the local JTKit: AppSettings2Blueprint, Blueprint Managed Preferences Editor, Checkpoint, Intune Deployer, Jamf Deployer, JamfMigrator, Profile2Blueprint, Serial Number Reader, Software Update Dashboard. Report any that fail and don’t tag until they all build. JTKit’s own tests can’t catch a change that breaks how an app calls it (0.4.2 broke Serial Number Reader’s Settings preview).
+**Before tagging any JTKit version, build every app that uses it** in `Apps.xcworkspace`, against the local JTKit: AppSettings2Blueprint, Checkpoint, Intune Deployer, Jamf Deployer, JamfMigrator, Serial Number Reader, Software Update Dashboard (Profile2Blueprint and Blueprint Managed Preferences Editor were archived on 2026-11-11 and are no longer built). Report any that fail and don’t tag until they all build. JTKit’s own tests can’t catch a change that breaks how an app calls it (0.4.2 broke Serial Number Reader’s Settings preview).
 
 ## Order and sources
 
