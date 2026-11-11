@@ -1,6 +1,6 @@
 # Changelog
 
-## 1.8.0 (not released)
+## 1.8.0 (2026-11-11)
 A minor release. Code written for 1.7 compiles unchanged; deleting a saved connection now stops when the Keychain
 refuses.
 
