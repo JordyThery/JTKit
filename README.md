@@ -34,7 +34,7 @@ One About window, opened from the app menu, with the version, a copyright line J
 
 ### Connections and Keychain
 
-A connections list and editor for several services in one list. Names, addresses and IDs are saved in the app’s settings or its own connections file; client secrets, passwords, API keys and private keys go to the Keychain (`KeychainSecretStore`), under each app’s own service name.
+A connections list and editor for several services in one list. Names, addresses and IDs are saved in the app’s settings or its own connections file; client secrets, passwords, API keys and private keys go to the Keychain (`KeychainSecretStore`), under each app’s own service name. Since 1.8.0, deleting a connection removes its Keychain secrets first; when the Keychain refuses, the connection is kept and the message says why.
 
 ### Jamf Pro, Jamf Platform API and Jamf School
 
@@ -63,6 +63,7 @@ Every request to Jamf, Microsoft Graph and Apple is recorded in an activity log 
 ### Principles the code enforces
 
 - **Secrets are never logged or written to disk.** They live in the Keychain. Request bodies are never recorded unless an app marks a request as safe, sensitive calls are recorded without headers or bodies, and everything else is redacted before it is shown or exported.
+- **A secret is never left in the Keychain without a connection pointing at it.** A connection is deleted only after its secrets are; if the Keychain refuses, the connection stays.
 - **Every request to a service goes through one place.** `RequestRecorder` sends, times, redacts and logs each request to Jamf, Microsoft Graph and Apple, sign-in included; `HTTPClient` adds the shared retry rules on top. The only requests outside it are the update check and download from GitHub, and Microsoft’s own sign-in window.
 - **Demo Mode never reaches a tenant.** Demo clients get a private network that answers only from the servers inside the app, and a request for a demo connection on any other session is refused before it is sent.
 - **The release check’s live tests deny by default.** Every request is checked before it is sent: only tenants on a local allow-list are reached, read-only tenants get reads and sign-in only, plus commands to the devices listed for testing, and elsewhere only test objects are created, changed or deleted. Public data sources the allow-list names get a GET without credentials or cookies, nothing else.
@@ -70,13 +71,12 @@ Every request to Jamf, Microsoft Graph and Apple is recorded in an activity log 
 ## Used by
 
 - [AppSettings2Blueprint](https://github.com/JordyThery/AppSettings2Blueprint)
-- [Blueprint Managed Preferences Editor](https://github.com/JordyThery/Blueprint-Managed-Preferences-Editor)
 - [Checkpoint](https://github.com/JordyThery/Checkpoint)
 - [Intune Deployer](https://github.com/JordyThery/intune-deployer)
 - [Jamf Deployer](https://github.com/JordyThery/jamf-deployer)
 - [Jamf Migrator](https://github.com/JordyThery/JamfMigrator)
-- [Profile2Blueprint](https://github.com/JordyThery/Profile2Blueprint)
 - [Serial Number Reader](https://github.com/JordyThery/Serial-Number-Reader)
+- [Software Update Dashboard](https://github.com/JordyThery/Software-Update-Dashboard)
 
 All of them are listed at [jordythery.be/apps.html](https://jordythery.be/apps.html).
 
@@ -84,7 +84,7 @@ All of them are listed at [jordythery.be/apps.html](https://jordythery.be/apps.h
 
 - macOS 14 or later
 - Swift 6 tools
-- Xcode 27 or later
+- Xcode 16.3 or later; developed and tested with Xcode 27
 
 ## Add it to an app
 

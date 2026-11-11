@@ -4,7 +4,7 @@ import PackageDescription
 let package = Package(
     name: "JTKit",
     platforms: [
-        .macOS(.v14),   // lowest target among the apps (Profile2Blueprint, Serial Number Reader); macOS only
+        .macOS(.v14),   // lowest target among the apps (Serial Number Reader); macOS only
     ],
     products: [
         .library(name: "JTKit", targets: ["JTKit"]),
