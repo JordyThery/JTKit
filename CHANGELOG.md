@@ -1,6 +1,6 @@
 # Changelog
 
-## 1.8.1 (not released)
+## 1.8.1 (2026-11-17)
 A patch release: no crash in Release builds made with Swift 6.4 when several reads run at once. Code written for 1.8
 compiles unchanged and behaves the same.
 
