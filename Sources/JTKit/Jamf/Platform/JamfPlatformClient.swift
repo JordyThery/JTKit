@@ -147,13 +147,17 @@ extension JamfPlatform {
         /// privileges, all named when Jamf Pro refuses it.
         public func send(_ request: HTTPRequest, privileges: [JamfPro.Privilege]) async throws -> HTTPResponse {
             observePrivileges?(request.path, request.method, privileges)
+            // task-group children call this: the answer goes into a local and is returned from one place, as
+            // Swift 6.4’s optimizer can lose a value returned from inside a do/catch (swiftlang/swift#93208)
+            let response: HTTPResponse
             do {
-                return try await sendFallingBack(request)
+                response = try await sendFallingBack(request)
             } catch let error as HTTPError {
                 var error = JamfPlatform.APIError(error)
                 error.privileges = privileges
                 throw failure(error)
             }
+            return response
         }
 
         /// Sends the request; a computer request to `v4` goes to the `v1`

@@ -233,8 +233,12 @@ public nonisolated enum Graph {
             let request = HTTPRequest(method: method, path: parts.path, body: body,
                                       headers: ["client-request-id": requestID()],
                                       repeating: repeating, recordsBodies: recordsBodies, encodedQuery: parts.query)
+            // task-group children call this: the answer goes into a local and is returned from one place, as
+            // Swift 6.4’s optimizer can lose a value returned from inside a do/catch (swiftlang/swift#93208)
+
+            let response: HTTPResponse
             do {
-                return try await http.send(request)
+                response = try await http.send(request)
             } catch let error as HTTPError {
                 throw Graph.APIError(error, access: access, permission: permission, appHints: hints)
             } catch var error as Graph.APIError {
@@ -242,6 +246,7 @@ public nonisolated enum Graph {
                 error.appHints = hints + error.appHints
                 throw error
             }
+            return response
         }
 
         /// A path as shown in messages: without the query.

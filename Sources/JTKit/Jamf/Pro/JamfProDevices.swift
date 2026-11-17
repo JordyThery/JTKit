@@ -489,15 +489,19 @@ extension JamfPlatform.Client {
     ///
     /// - Throws: `CancellationError` only.
     private func classicAssetTag(id: String) async throws -> String? {
+        // runs in a task-group child (`mobileDevices(serials:)`): the tag goes into a local and is returned from one
+        // place, as Swift 6.4’s optimizer can lose a value returned from both a do and a catch (swiftlang/swift#93208)
+        let assetTag: String?
         do {
             let response = try await send(Self.classicGeneral(id), privilege: .readMobileDevices)
-            return (try? JSONDecoder().decode(JamfPro.ClassicMobileDeviceGeneral.self, from: response.data))?.assetTag
+            assetTag = (try? JSONDecoder().decode(JamfPro.ClassicMobileDeviceGeneral.self, from: response.data))?.assetTag
         } catch is CancellationError {
             throw CancellationError()
         } catch {
             try Task.checkCancellation()
-            return nil
+            assetTag = nil
         }
+        return assetTag
     }
 
     /// One mobile device by ID, without the unlock token.
@@ -546,13 +550,17 @@ extension JamfPlatform.Client {
                 next += 1
                 let id = incomplete[key]?.id ?? ""
                 group.addTask {
+                    // the record goes into a local first and the pair is returned from one place: Swift 6.4’s
+                    // optimizer can lose a pair returned from both a do and a catch (swiftlang/swift#93208)
+                    let general: JamfPro.MobileDevice.General?
                     do {
-                        return (key, try await self.completedGeneral(id: id))
+                        general = try await self.completedGeneral(id: id)
                     } catch is CancellationError {
                         throw CancellationError()
                     } catch {
-                        return (key, nil)
+                        general = nil
                     }
+                    return (key, general)
                 }
             }
             for _ in 0..<JamfPro.batchWindow { startNext() }
@@ -649,31 +657,35 @@ extension JamfPlatform.Client {
                 return found
             }
             let filter = "\(list.serialField)=in=(\(chunk.map { "\"\($0)\"" }.joined(separator: ",")))"
+            // runs in a task-group child: the result is built in locals and returned from one place, as Swift 6.4’s
+            // optimizer can lose a value returned from both a do and a catch (swiftlang/swift#93208)
+            var found = [String: Record]()
+            var failed = [String: JamfPlatform.APIError]()
             do {
                 let records: [Record] = try await inventory(list, filter: filter, sections: sections, recording: recording)
-                return (keyed(records), [:])
+                found = keyed(records)
             } catch let error as JamfPlatform.APIError where error.status == 400 {
                 // The list filter was refused: one serial at a time. The first
                 // is a probe: when it fails too, the 400 wasn’t about the list
                 // filter, and the others fail with it without being sent.
-                var found = [String: Record]()
-                var failed = [String: JamfPlatform.APIError]()
                 for (index, one) in chunk.enumerated() {
                     do {
                         let records: [Record] = try await inventory(list, filter: "\(list.serialField)==\"\(one)\"",
                                                                     sections: sections, recording: recording)
                         found.merge(keyed(records)) { first, _ in first }
                     } catch let error as JamfPlatform.APIError {
-                        guard index > 0 else {
-                            return ([:], Dictionary(uniqueKeysWithValues: chunk.map { ($0, error) }))
+                        if index == 0 {
+                            // nothing was found yet, so only the failures change
+                            failed = Dictionary(uniqueKeysWithValues: chunk.map { ($0, error) })
+                            break
                         }
                         failed[one] = error
                     }
                 }
-                return (found, failed)
             } catch let error as JamfPlatform.APIError {
-                return ([:], Dictionary(uniqueKeysWithValues: chunk.map { ($0, error) }))
+                failed = Dictionary(uniqueKeysWithValues: chunk.map { ($0, error) })
             }
+            return (found, failed)
         }
 
         try await withThrowingTaskGroup(of: ChunkResult.self) { group in

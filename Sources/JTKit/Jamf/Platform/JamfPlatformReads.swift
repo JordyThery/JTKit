@@ -21,12 +21,17 @@ extension JamfPlatform.Client {
     /// the error names `permissions` (the gateway asks for its own
     /// permissions, not Jamf Pro privileges).
     func send(_ request: HTTPRequest, privileges: [JamfPro.Privilege], permissions: [String]) async throws -> HTTPResponse {
+        // task-group children call this: the answer goes into a local and is returned from one place, as
+        // Swift 6.4’s optimizer can lose a value returned from inside a do/catch (swiftlang/swift#93208)
+
+        let response: HTTPResponse
         do {
-            return try await send(request, privileges: privileges)
+            response = try await send(request, privileges: privileges)
         } catch var error as JamfPlatform.APIError where error.server == .platformAPI && !permissions.isEmpty {
             error.permissions = permissions
             throw error
         }
+        return response
     }
 
     /// A GET read as lossless JSON, naming `privileges` and `permissions`
