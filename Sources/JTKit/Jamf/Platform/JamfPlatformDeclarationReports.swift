@@ -143,16 +143,24 @@ extension JamfPlatform.Client {
                                    permissions: [JamfPlatform.Permission.declarationsRead],
                                    item: JamfPlatform.DeclarationReport.init(json:))
         }
+        // task-group children call this: the reports go into a local and are returned from one place, as
+        // Swift 6.4’s optimizer can lose a value returned from inside a do/catch (swiftlang/swift#93208)
+
+        let reports: [JamfPlatform.DeclarationReport]?
         do {
-            if let filter { return try await read(filter) }
-            do {
-                return try await read(Self.everyDeclarationState)
-            } catch let error as JamfPlatform.APIError where error.status == 400 {
-                return try await read("declarationIdentifier==Blueprint_*")
+            if let filter {
+                reports = try await read(filter)
+            } else {
+                do {
+                    reports = try await read(Self.everyDeclarationState)
+                } catch let error as JamfPlatform.APIError where error.status == 400 {
+                    reports = try await read("declarationIdentifier==Blueprint_*")
+                }
             }
         } catch let error as JamfPlatform.APIError where error.status == 404 {
-            return nil
+            reports = nil
         }
+        return reports
     }
 
     /// The devices that reported one declaration
@@ -162,14 +170,17 @@ extension JamfPlatform.Client {
     /// The list answers 400 to a request without a filter: without one,
     /// every device is asked for (`active==true,active==false`).
     public func declarationReports(declarationIdentifier: String, filter: String? = nil) async throws -> [JamfPlatform.DeclarationReport]? {
+        // as above: one return (swiftlang/swift#93208)
+        let reports: [JamfPlatform.DeclarationReport]?
         do {
-            return try await readAllPages("ddm/report/v1/declarations/\(JamfPlatform.pathSegment(declarationIdentifier))/devices",
-                                          query: [URLQueryItem(name: "filter", value: filter ?? Self.everyDeclarationState)],
-                                          pageSize: 100, sizeName: "size", privileges: [],
-                                          permissions: [JamfPlatform.Permission.declarationsRead],
-                                          item: JamfPlatform.DeclarationReport.init(json:))
+            reports = try await readAllPages("ddm/report/v1/declarations/\(JamfPlatform.pathSegment(declarationIdentifier))/devices",
+                                             query: [URLQueryItem(name: "filter", value: filter ?? Self.everyDeclarationState)],
+                                             pageSize: 100, sizeName: "size", privileges: [],
+                                             permissions: [JamfPlatform.Permission.declarationsRead],
+                                             item: JamfPlatform.DeclarationReport.init(json:))
         } catch let error as JamfPlatform.APIError where error.status == 404 {
-            return nil
+            reports = nil
         }
+        return reports
     }
 }

@@ -1,5 +1,29 @@
 # Changelog
 
+## 1.8.1 (not released)
+A patch release: no crash in Release builds made with Swift 6.4 when several reads run at once. Code written for 1.8
+compiles unchanged and behaves the same.
+
+### Fixed
+- Swift 6.4’s optimizer can miscompile a task-group child that returns its value from both a `do` and a `catch`
+  around a `try await` (swiftlang/swift#93208). In Release builds only, a result could be lost or arrive under the
+  wrong key, and the app could crash. Each place a JTKit task-group child runs, and each JTKit function such a
+  child calls, now keeps its result in a local and returns it from one place:
+  - `JamfPlatform.Client.mobileDevices(serials:sections:recording:)`: the second read of records that never
+    enrolled, and the Classic asset tag read behind it.
+  - `computers(serials:)` and `mobileDevices(serials:)`: each 50-serial read, including the one-serial-at-a-time
+    reads after a refused list filter (the first one still decides, as before).
+  - `checkPermissions(_:maxConcurrent:)` (also `testConnection(checks:summary:)`): each check’s result.
+  - `JamfPlatform.Client.send(_:privileges:)` and the Platform API read under the Declaration Reporting and
+    software update status reads; `declarationReports(deviceID:filter:)` and
+    `declarationReports(declarationIdentifier:filter:)`.
+  - `ABM.Client`’s requests (also the ones that answer nil for a 404), and `Graph.Client`’s requests.
+
+### What an app needs to do
+- Nothing to compile. An app’s own task-group or `async let` children that return from both a `do` and a `catch`
+  around a `try await` have the same problem: store the result in a local inside the `do`/`catch` and return once at
+  the end.
+
 ## 1.8.0 (2026-11-11)
 A minor release. Code written for 1.7 compiles unchanged; deleting a saved connection now stops when the Keychain
 refuses.

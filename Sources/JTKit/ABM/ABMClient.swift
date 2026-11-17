@@ -499,17 +499,23 @@ extension ABM {
 
         /// Nil for a 404 answer (not for a refused sign-in).
         private func sendUnlessNotFound(_ request: HTTPRequest) async throws -> HTTPResponse? {
+            // task-group children call this and `send(_:)`: the answer goes into a local and is returned from one
+            // place, as Swift 6.4’s optimizer can lose a value returned from inside a do/catch (swiftlang/swift#93208)
+
+            let response: HTTPResponse?
             do {
-                return try await send(request)
+                response = try await send(request)
             } catch let error as ABM.APIError {
-                if case .status(404, _, _, _) = error.kind { return nil }
-                throw error
+                guard case .status(404, _, _, _) = error.kind else { throw error }
+                response = nil
             }
+            return response
         }
 
         private func send(_ request: HTTPRequest) async throws -> HTTPResponse {
+            let response: HTTPResponse
             do {
-                return try await http.send(request)
+                response = try await http.send(request)
             } catch let error as HTTPError {
                 throw ABM.APIError(error, service: service, appHints: hints)
             } catch var error as ABM.APIError {
@@ -517,6 +523,7 @@ extension ABM {
                 error.appHints = hints + error.appHints
                 throw error
             }
+            return response
         }
 
         private func decode<T: Decodable>(_ type: T.Type, from data: Data) throws -> T {

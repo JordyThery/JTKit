@@ -168,17 +168,28 @@ extension JamfPlatform.Client {
         return zip(checks, results).map { ($0, $1 ?? .unreachable("Not checked.")) }
     }
 
+    /// Runs in a task-group child: the outcome goes into a local and is
+    /// returned from one place, as Swift 6.4’s optimizer can lose a value
+    /// returned from both a do and a catch (swiftlang/swift#93208).
     private func result(of check: JamfPlatform.PermissionCheck) async -> JamfPlatform.PermissionResult {
+        let outcome: JamfPlatform.PermissionResult
         do {
             let response = try await send(HTTPRequest(path: check.path, query: check.query))
-            return Self.result(status: response.status)
+            outcome = Self.result(status: response.status)
         } catch let error as JamfPlatform.APIError {
-            guard let status = error.status else { return .unreachable(error.message()) }
-            if case .signIn = error.kind { return .failed(status: status) }
-            return Self.result(status: status)
+            if let status = error.status {
+                if case .signIn = error.kind {
+                    outcome = .failed(status: status)
+                } else {
+                    outcome = Self.result(status: status)
+                }
+            } else {
+                outcome = .unreachable(error.message())
+            }
         } catch {
-            return .unreachable(Redaction.text(error.localizedDescription))
+            outcome = .unreachable(Redaction.text(error.localizedDescription))
         }
+        return outcome
     }
 
     private static func result(status: Int) -> JamfPlatform.PermissionResult {
