@@ -63,6 +63,13 @@ Open `~/Developer/Apps.xcworkspace`. Because JTKit is in that workspace as a loc
 
 Follow the release gate in ROADMAP.md: release check passes (including live sandbox checks), a full apple-design review of the app, an independent code review of the app, then Jordy’s check by hand. Only then tag and release. Build the release from the app’s own project, so it uses the published JTKit version.
 
+**Signing and notarization are Jordy’s** (decided by Jordy on 2026-11-23). Jordy archives, signs with Developer ID, notarizes and staples every release himself in Xcode, and supplies the notarized app. Claude never signs or notarizes, never runs a notarization script and never suggests a notary profile. This applies to every app released as a notarized download (not to the App Store and TestFlight apps). Claude’s steps, with the app Jordy supplies:
+
+1. Check it: its `CFBundleShortVersionString` matches the tag, `codesign --verify --deep --strict`, `spctl -a`, `xcrun stapler validate`. Stop and tell Jordy if any check fails.
+2. Zip it with `ditto -c -k --keepParent`, under the zip name in the app’s CLAUDE.md.
+3. Unzip a copy elsewhere (outside the repo) and run the same checks on it.
+4. Attach the zip to the GitHub release after Jordy approves the release notes.
+
 ## Releasing JTKit
 
 From 1.0, JTKit follows semantic versioning (patch: fixes, minor: additions, major: breaking changes). A tag is created only after Jordy’s approval; until then the work waits on a branch.
