@@ -1,6 +1,6 @@
 # Changelog
 
-## 1.10.0 (unreleased)
+## 1.10.0 (2026-11-25)
 A minor release: a faster Blueprint health step in the software update reader, with the same results. Code written
 for 1.9 compiles unchanged.
 
