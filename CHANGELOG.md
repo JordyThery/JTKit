@@ -1,5 +1,17 @@
 # Changelog
 
+## 1.9.1 (2026-11-25)
+A patch release: Inspect can read through two clients, as the reader does. Code written for 1.9 compiles unchanged and
+behaves the same.
+
+### Added
+- `SoftwareUpdateRules.InspectWorkflow(jamfPro:platform:parallel:)`: the status reports go to `jamfPro`, the device and
+  its declaration reports to `platform`, so an app can give each its own request limits. `jamfPro` and `platform` are
+  public; `client` is now the Platform client.
+
+### What an app needs to do
+- Nothing. `InspectWorkflow(client:parallel:)` sends every read to its one client, as before.
+
 ## 1.9.0 (2026-11-25)
 A minor release: the software update rules of Software Update Dashboard, shared, and request limits on the Platform
 API client. Code written for 1.8 compiles unchanged.
