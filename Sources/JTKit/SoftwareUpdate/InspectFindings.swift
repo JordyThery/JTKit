@@ -814,7 +814,7 @@ extension SoftwareUpdateRules {
             var byKey: [String: DeclarationPair] = [:]
             for report in reports {
                 let match = report.declarationIdentifier.firstMatch(of: #/^(.*_s[0-9]+_c[0-9]+_[A-Za-z]+_)(?:cfg|act)([0-9]+)$/#)
-                let key = match.map { "\($0.output.1)\($0.output.2)" } ?? report.declarationIdentifier
+                let key = BlueprintHealth.pairKey(report.declarationIdentifier)
                 if byKey[key] == nil {
                     order.append(key)
                     byKey[key] = DeclarationPair(key: key, number: match.map { String($0.output.2) }, reports: [])

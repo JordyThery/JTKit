@@ -1,5 +1,28 @@
 # Changelog
 
+## 1.10.0 (2026-11-25)
+A minor release: a faster Blueprint health step in the software update reader, with the same results. Code written
+for 1.9 compiles unchanged.
+
+### Added
+- `SoftwareUpdateRules.Reader.pageReads` (16): page reads of the Blueprint’s declaration reports in flight at a time,
+  shared by every declaration. After a declaration’s first page, the pages its `totalCount` announces are read at
+  once; more pages follow one after another, as before, should devices have been added meanwhile or when the answer
+  carries no count. The 5xx and `Retry-After` handling is unchanged.
+- `SoftwareUpdateRules.BlueprintHealth.reads(blueprintID:statuses:blocks:)` and `Reads`: which of the Blueprint’s
+  update declarations a refresh reads in full and which once. Devices keep reporting every declaration they ever
+  received, so a cfg/act pair no device in scope holds active is read once, by its activation: its newest inactive
+  report, which carries the predicate Jamf last gave the pair, as the catalogue would pick it from every report.
+  `pairKey(_:)` names a pair. `Reader.declarationReports(_ reads:inputs:progress:)` returns `DeclarationReadings`
+  (the reports, the samples, a problem); the `[String]` form reads everything in full, as before.
+- `JamfPro.SoftwareUpdateStatus.activeDeclarationIdentifiers`: the declarations the device reports as active.
+- `Reader.groupKinds(platformGroupIDs:platformGroups:)`: the reader lists only the Jamf Pro group kinds the
+  Blueprint’s scope holds, so an iPhone-only Blueprint doesn’t list computer groups.
+
+### What an app needs to do
+- Nothing. The rows, the “others don’t apply” count, Inspect’s list of the Blueprint’s declarations and the
+  coverage of each device are as before.
+
 ## 1.9.1 (2026-11-25)
 A patch release: Inspect can read through two clients, as the reader does. Code written for 1.9 compiles unchanged and
 behaves the same.

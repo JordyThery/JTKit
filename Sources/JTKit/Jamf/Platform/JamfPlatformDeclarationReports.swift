@@ -163,6 +163,30 @@ extension JamfPlatform.Client {
         return reports
     }
 
+    /// One page of the devices that reported one declaration
+    /// (`ddm/report/v1/declarations/{declarationIdentifier}/devices`, `size`
+    /// per page; the answer carries a `totalCount`). Nil when nothing reported
+    /// it (404). Jamf answers at most 100 a page, whatever size is asked.
+    ///
+    /// - Parameter sort: `dateUpdated,desc` for the newest first (the form
+    ///   this list takes; `field:desc` is refused).
+    func declarationReportPage(declarationIdentifier: String, page: Int, pageSize: Int,
+                               filter: String? = nil, sort: String? = nil) async throws -> JamfPlatform.Page<JamfPlatform.DeclarationReport>? {
+        let path = "ddm/report/v1/declarations/\(JamfPlatform.pathSegment(declarationIdentifier))/devices"
+        let query = [URLQueryItem(name: "page", value: String(page)), URLQueryItem(name: "size", value: String(pageSize)),
+                     URLQueryItem(name: "filter", value: filter ?? Self.everyDeclarationState)]
+            + (sort.map { [URLQueryItem(name: "sort", value: $0)] } ?? [])
+        // task-group children call this: one return (swiftlang/swift#93208)
+        let result: JamfPlatform.Page<JamfPlatform.DeclarationReport>?
+        do {
+            let json = try await readJSON(path, query: query, privileges: [], permissions: [JamfPlatform.Permission.declarationsRead])
+            result = try JamfPlatform.Page(json: json, item: JamfPlatform.DeclarationReport.init(json:))
+        } catch let error as JamfPlatform.APIError where error.status == 404 {
+            result = nil
+        }
+        return result
+    }
+
     /// The devices that reported one declaration
     /// (`ddm/report/v1/declarations/{declarationIdentifier}/devices`, every
     /// page; `declarations:read`). Nil when nothing reported it (404).

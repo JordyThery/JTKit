@@ -196,6 +196,10 @@ extension JamfPro {
         /// once. Read from one item with a nested value (JSON or Jamf Pro’s
         /// `{key=value}` text) or from flattened keys.
         public var declarationIdentifiers: [String] = []
+        /// Of `declarationIdentifiers`, those the device reports as active:
+        /// the `active` field beside the identifier in the same entry (or the
+        /// flattened `….active` key beside `….identifier`).
+        public var activeDeclarationIdentifiers: Set<String> = []
 
         public init(installState: InstallState? = nil, pendingVersion: PendingVersion? = nil, failure: Failure? = nil,
                     installReasons: [String] = [], betaEnrollment: String? = nil, osVersion: String? = nil,
@@ -274,6 +278,7 @@ extension JamfPro {
             supplementalExtraVersion = value("device.operating-system.supplemental.extra-version")
             batteryHealth = value("device.power.battery-health")
             declarationIdentifiers = Self.declarationIdentifiers(in: items)
+            activeDeclarationIdentifiers = Self.activeDeclarationIdentifiers(in: items)
         }
 
         /// Every `identifier` under `management.declarations`, each once:
@@ -290,6 +295,81 @@ extension JamfPro {
                 }
             }
             return found
+        }
+
+        /// The identifiers under `management.declarations` whose entry says
+        /// `active=true` (or `"active": true`): an `identifier` and an
+        /// `active` field belong together when both are direct fields of the
+        /// same `{…}` entry, whatever their order and whatever nested text
+        /// (reasons, predicates) the entry holds. A flattened `….identifier`
+        /// key goes with its sibling `….active` key.
+        static func activeDeclarationIdentifiers(in items: [StatusItem]) -> Set<String> {
+            var active = Set<String>()
+            var values: [String: String] = [:]
+            for item in items { values[item.key] = values[item.key] ?? item.value ?? "" }
+            for item in items where item.key == "management.declarations" || item.key.hasPrefix("management.declarations.") {
+                guard let text = item.value?.trimmingCharacters(in: .whitespacesAndNewlines), !text.isEmpty, text != "null" else { continue }
+                if item.key.hasSuffix(".identifier") {
+                    let sibling = String(item.key.dropLast(".identifier".count)) + ".active"
+                    if values[sibling].flatMap(bool) == true { active.insert(text) }
+                    continue
+                }
+                for entry in declarationEntries(in: text) where entry.active == true {
+                    if let identifier = entry.identifier { active.insert(identifier) }
+                }
+            }
+            return active
+        }
+
+        /// The direct `identifier` and `active` fields of each `{…}` object in a
+        /// nested value (JSON, or Jamf Pro’s `{key=value}` text), in the order
+        /// the objects open. Braces decide which object a field belongs to;
+        /// in JSON, braces inside strings don’t count.
+        static func declarationEntries(in text: String) -> [(identifier: String?, active: Bool?)] {
+            let isJSON = text.range(of: "\"identifier\"\\s*:", options: .regularExpression) != nil
+            let pattern = isJSON
+                ? "\"(identifier|active)\"\\s*:\\s*(?:\"((?:[^\"\\\\]|\\\\.)*)\"|([^,}\\]\"]+))"
+                : "(?:^|[{\\[ ,])(identifier|active)=([^,}\\]]*)"
+            guard let regex = try? NSRegularExpression(pattern: pattern) else { return [] }
+            // the object open at each position, numbered in opening order
+            let units = Array(text.utf16)
+            var owner = [Int](repeating: 0, count: units.count + 1)
+            var open: [Int] = []
+            var number = 0
+            var inString = false
+            var escaped = false
+            let brace = UInt16(UnicodeScalar("{").value), close = UInt16(UnicodeScalar("}").value)
+            let quote = UInt16(UnicodeScalar("\"").value), backslash = UInt16(UnicodeScalar("\\").value)
+            for (index, unit) in units.enumerated() {
+                owner[index] = open.last ?? 0
+                if isJSON && inString {
+                    if escaped { escaped = false } else if unit == backslash { escaped = true } else if unit == quote { inString = false }
+                    continue
+                }
+                if isJSON && unit == quote { inString = true; continue }
+                if unit == brace {
+                    number += 1
+                    open.append(number)
+                } else if unit == close {
+                    _ = open.popLast()
+                }
+            }
+            var entries: [Int: (identifier: String?, active: Bool?)] = [:]
+            for match in regex.matches(in: text, range: NSRange(location: 0, length: units.count)) {
+                guard let keyRange = Range(match.range(at: 1), in: text) else { continue }
+                let valueNS = match.range(at: 2).location != NSNotFound ? match.range(at: 2) : match.range(at: 3)
+                guard let valueRange = Range(valueNS, in: text) else { continue }
+                let value = text[valueRange].trimmingCharacters(in: .whitespaces)
+                let object = owner[match.range(at: 1).location]
+                var entry = entries[object] ?? (nil, nil)
+                if text[keyRange] == "identifier" {
+                    entry.identifier = value.isEmpty || value == "null" ? nil : value
+                } else {
+                    entry.active = bool(value)
+                }
+                entries[object] = entry
+            }
+            return entries.keys.sorted().compactMap { entries[$0] }
         }
 
         /// `sub=value` in a `{key=value, …}` text, or `"sub": value` in JSON.

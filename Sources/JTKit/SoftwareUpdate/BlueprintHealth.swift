@@ -159,6 +159,65 @@ extension SoftwareUpdateRules {
             }
         }
 
+        /// The identifier’s pair: `…_cfg12` and `…_act12` share one; an
+        /// identifier without a number is a pair of its own.
+        public static func pairKey(_ identifier: String) -> String {
+            guard let match = identifier.firstMatch(of: #/^(.*_s[0-9]+_c[0-9]+_[A-Za-z]+_)(?:cfg|act)([0-9]+)$/#) else { return identifier }
+            return "\(match.output.1)\(match.output.2)"
+        }
+
+        /// What a refresh reads of the Blueprint’s update declarations. Devices
+        /// keep reporting every declaration they ever received, so most of the
+        /// identifiers are pairs no device in scope holds active; every device
+        /// reports those as “not for this device”, and they decide nothing per
+        /// device. Each is read once instead: its newest report, which carries
+        /// the predicate Jamf last gave it, enough for the catalogue (its name,
+        /// its range, whether it covers a device’s version). The pairs some
+        /// device in scope holds active are read in full.
+        public struct Reads: Sendable, Hashable {
+            /// Read in full: every device’s report, every page.
+            public var full: [String]
+            /// Read once (the newest report): one identifier per pair no device
+            /// in scope holds active, its activation’s when the devices list one.
+            public var sampled: [String]
+            public var count: Int { full.count + sampled.count }
+            public var isEmpty: Bool { full.isEmpty && sampled.isEmpty }
+
+            public init(full: [String], sampled: [String] = []) {
+                self.full = full
+                self.sampled = sampled
+            }
+        }
+
+        /// The reads for the Blueprint’s update declarations the devices list
+        /// (`identifiers`): a pair is read in full when any device’s status
+        /// report holds its configuration or activation active
+        /// (`SoftwareUpdateStatus.activeDeclarationIdentifiers`), and so is
+        /// an identifier without a number; every other pair is sampled.
+        public static func reads(blueprintID: String, statuses: [JamfPro.SoftwareUpdateStatus?],
+                                 blocks: [JamfPlatform.SoftwareUpdateBlock]) -> Reads {
+            let identifiers = identifiers(blueprintID: blueprintID, statuses: statuses, blocks: blocks)
+            let active = statuses.reduce(into: Set<String>()) { $0.formUnion($1?.activeDeclarationIdentifiers ?? []) }
+            let activePairs = Set(identifiers.filter(active.contains).map(pairKey))
+            func isActivation(_ identifier: String) -> Bool { identifier.range(of: "_act[0-9]+$", options: .regularExpression) != nil }
+            var full: [String] = []
+            var order: [String] = []
+            var sample: [String: String] = [:]
+            for identifier in identifiers {
+                let key = pairKey(identifier)
+                if key == identifier || activePairs.contains(key) {
+                    full.append(identifier)
+                } else if let chosen = sample[key] {
+                    // the activation carries the predicate
+                    if isActivation(identifier) && !isActivation(chosen) { sample[key] = identifier }
+                } else {
+                    sample[key] = identifier
+                    order.append(key)
+                }
+            }
+            return Reads(full: full, sampled: order.compactMap { sample[$0] })
+        }
+
         /// Each device’s reports, by `DeviceStatus.id`; a report whose device
         /// isn’t in `deviceIDs` (Platform device ID → `DeviceStatus.id`) is left
         /// out and counted.
