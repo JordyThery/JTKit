@@ -54,6 +54,11 @@ extension JamfPlatform {
         ///   - hints: the app’s own hints for an error, shown before the
         ///     standard ones (e.g. what its allow-list allows).
         ///   - headers: sent with every request, e.g. a header of the app’s own.
+        ///   - maxConcurrent: at most this many requests at a time (e.g. 5 to
+        ///     Jamf Pro, 25 to the Platform API); the others wait in order. Nil:
+        ///     no limit, as before 1.9.0.
+        ///   - rateLimit: at most so many requests in a rolling window (e.g.
+        ///     100 a second to the Platform API). Nil: no limit.
         ///   - sleep, random, now: injectable for tests.
         /// - Throws: `JamfPlatform.APIError` `.invalidEnvironmentID` when the
         ///   Environment ID isn’t a UUID, `.invalidResponse` when the
@@ -67,6 +72,8 @@ extension JamfPlatform {
             hints: @escaping @Sendable (JamfPlatform.APIError) -> [String] = { _ in [] },
             headers: [String: String] = [:],
             writeSpacing: Duration = .zero,
+            maxConcurrent: Int? = nil,
+            rateLimit: RateLimit? = nil,
             sleep: @escaping @Sendable (Duration) async throws -> Void = { try await Task.sleep(for: $0) },
             random: @escaping @Sendable () -> Double = { Double.random(in: 0...1) },
             now: @escaping @Sendable () -> Date = { Date() }
@@ -85,14 +92,18 @@ extension JamfPlatform {
                           scope: scope ?? (server == .jamfPro ? .organization : .environment(connection.environmentID)),
                           server: server, signIn: connection.signIn,
                           tokens: tokens, recorder: recorder, permits: permits, hints: hints,
-                          headers: headers, writeSpacing: writeSpacing, sleep: sleep, random: random, now: now)
+                          headers: headers, writeSpacing: writeSpacing, maxConcurrent: maxConcurrent,
+                          rateLimit: rateLimit, sleep: sleep, random: random, now: now)
         }
 
         /// A client with its own token source, e.g. for tests or credentials
         /// that aren’t saved as a connection.
         ///
-        /// - Parameter server: `.jamfPro` for a Jamf Pro server reached
-        ///   directly; give it `.organization` scope.
+        /// - Parameters:
+        ///   - server: `.jamfPro` for a Jamf Pro server reached directly;
+        ///     give it `.organization` scope.
+        ///   - maxConcurrent, rateLimit: the app’s request limits, as in
+        ///     `init(connection:…)`; nil: none.
         public init(
             baseURL: URL,
             scope: Scope,
@@ -104,6 +115,8 @@ extension JamfPlatform {
             hints: @escaping @Sendable (JamfPlatform.APIError) -> [String] = { _ in [] },
             headers extraHeaders: [String: String] = [:],
             writeSpacing: Duration = .zero,
+            maxConcurrent: Int? = nil,
+            rateLimit: RateLimit? = nil,
             sleep: @escaping @Sendable (Duration) async throws -> Void = { try await Task.sleep(for: $0) },
             random: @escaping @Sendable () -> Double = { Double.random(in: 0...1) },
             now: @escaping @Sendable () -> Date = { Date() }
@@ -129,6 +142,7 @@ extension JamfPlatform {
             http = HTTPClient(baseURL: baseURL, tokens: tokens, recorder: recorder, headers: headers,
                               permits: permits, pathMapping: server == .jamfPro ? .jamfProDirect : .none,
                               redirects: .sameHostHTTPSOnly, writeSpacing: writeSpacing,
+                              maxConcurrent: maxConcurrent, rateLimit: rateLimit,
                               sleep: sleep, random: random, now: now)
         }
 

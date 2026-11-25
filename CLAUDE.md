@@ -12,6 +12,7 @@ One library product, `JTKit` (macOS 14+ only, Swift 6 language mode). Organize `
 - `Jamf/`: token providers (OAuth client credentials, basic auth), Jamf Pro API, Classic API, Platform API (Blueprints, device groups), Jamf School
 - `Intune/`: Entra ID / Microsoft Graph auth and Intune device endpoints
 - `ABM/`: Apple Business or Apple School Manager API
+- `SoftwareUpdate/`: the software update rules (`SoftwareUpdateRules`, from Software Update Dashboard in 1.9.0): targets and deadlines per device, classification, readiness, Blueprint health, Inspect, and the reader of a refresh. Saves nothing: apps pass in what they remember
 - `Demo/`: demo mode (switch, private network, fake servers, Contoso sample data)
 
 Test helpers (MockURLProtocol, fixtures) are in the separate library product `JTKitTestSupport`, never in `JTKit` itself. `JTKitMSAL` is Microsoft’s sign-in window (the only product that depends on MSAL). For the release checks: `JTKitUITestSupport` (UI test targets only, XCTest, doesn’t link JTKit; Swift 5 language mode), `JTKitLiveCheck` (apps’ unit test targets only, never shipped; the allow-list, rules, ledger and guarded network of the live checks) and `Scripts/release-check-lib.sh` with `release-check-setup.sh` (the release-check template each app’s `Scripts/release-check.sh` loads). `Scripts/check-versions.sh` is the start-of-conversation check each app’s CLAUDE.md runs: its JTKit version against the latest tag, and its commits since its latest release.

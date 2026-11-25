@@ -38,7 +38,11 @@ A connections list and editor for several services in one list. Names, addresses
 
 ### Jamf Pro, Jamf Platform API and Jamf School
 
-Sign-in with an API client or a username and password, with tokens renewed as needed. Jamf Pro device lookups, records, PreStages, sites, recovery secrets and MDM commands through the Jamf Pro API and the Classic API; Blueprints, device groups, devices and environments through the Jamf Platform API, also as a gateway to Jamf Pro; devices, groups, locations, Automated Device Enrollment and commands in Jamf School. For software update reporting, read only: Jamf Pro groups with their members’ inventory, DDM status items typed as a software update status or read raw, Declaration Reporting, and a Blueprint’s software update enforcements.
+Sign-in with an API client or a username and password, with tokens renewed as needed. Jamf Pro device lookups, records, PreStages, sites, recovery secrets and MDM commands through the Jamf Pro API and the Classic API; Blueprints, device groups, devices and environments through the Jamf Platform API, also as a gateway to Jamf Pro; devices, groups, locations, Automated Device Enrollment and commands in Jamf School. For software update reporting, read only: Jamf Pro groups with their members’ inventory, DDM status items typed as a software update status or read raw, Declaration Reporting, and a Blueprint’s software update enforcements. Requests to the Platform API can be limited per app: so many at a time, so many a second.
+
+### Software update rules
+
+What a Blueprint’s software update means for each iPhone, iPad and Mac it reaches, and why a device isn’t on target: its target and deadline from the Blueprint’s rule and Apple’s release data, what Jamf actually sent it, a category with a plain diagnosis, readiness, Blueprint health and Inspect’s list of reasons. A reader does a refresh’s requests, read only. The app keeps what earlier refreshes remembered; the package saves nothing.
 
 ### Apple release data
 
@@ -54,7 +58,7 @@ One client for both: devices, MDM servers, assignments, AppleCare coverage, Acti
 
 ### Demo Mode
 
-Fake Jamf Pro, Jamf Platform API, Jamf School, Intune and Apple servers inside the app, with sample data, so an app can be tried without a tenant. An app can add sample iPads and Macs in the middle of a software update, with Apple’s release data, to the demo Platform API.
+Fake Jamf Pro, Jamf Platform API, Jamf School, Intune and Apple servers inside the app, with sample data, so an app can be tried without a tenant. An app can add sample iPads and Macs in the middle of a software update, with Apple’s release data, to the demo Platform API, including Macs that missed the deadline, installs that hang and devices that left a Blueprint’s scope.
 
 ### Activity log and redaction
 
