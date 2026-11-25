@@ -307,7 +307,7 @@ extension SoftwareUpdateRules {
             }
             known.reported = TargetRules.reportedPostings(reports)
             let reportedDeadlines = seedsDemoDeadlines && self.reportedDeadlines.isEmpty
-                ? demoReportedDeadlines(blocks: blocks, now: now) : self.reportedDeadlines
+                ? demoReportedDeadlines(blocks: blocks, now: now, blueprintChanged: blueprint.overview.updatedDate) : self.reportedDeadlines
             let earlier = reportedDeadlines.basis(targets: targets, blueprintChanged: blueprint.overview.updatedDate)
             let minutes = Self.newDeadlineMinutes(candidates, known: earlier.minutes)
             known.rememberedReported = earlier.postings
@@ -338,14 +338,26 @@ extension SoftwareUpdateRules {
         /// Demo Mode’s made-up earlier refreshes: Jamf’s deadline for every
         /// macOS version Apple’s data lists, as the rule counts it, written as a
         /// moment in UTC at the Blueprint’s time (as JTKit’s demo Macs write it).
-        public func demoReportedDeadlines(blocks: [JamfPlatform.SoftwareUpdateBlock], now: Date) -> ReportedDeadlines {
+        /// A version Apple posted publicly again after its release counts from
+        /// its first posting, and that posting is remembered as the one the
+        /// Blueprint’s devices reported (seen the day after the Blueprint’s
+        /// last change), as Jamf keeps the deadline it sent.
+        public func demoReportedDeadlines(blocks: [JamfPlatform.SoftwareUpdateBlock], now: Date,
+                                          blueprintChanged: Date? = nil) -> ReportedDeadlines {
             var seeded = ReportedDeadlines()
             guard let catalog, let block = Self.block(for: "macOS", in: blocks) else { return seeded }
             for release in catalog.releases where release.platform == .macOS && release.version.extra == nil {
+                let key = PostingBasis.key(.macOS, release.version)
+                var known = PostingBasis()
+                if let first = release.postings.compactMap(\.date).min(),
+                   let posted = catalog.publicPosting(of: release, model: nil, boardID: nil)?.date, posted > first {
+                    known.rememberedReported[key] = first
+                    seeded.postings[key] = .init(posted: first, seen: (blueprintChanged ?? first).addingTimeInterval(86_400))
+                }
                 guard let local = TargetRules.ruleDeadline(for: release.version, block: block, catalog: catalog, platform: .macOS,
-                                                           model: nil, boardID: nil),
+                                                           model: nil, boardID: nil, known: known),
                       let moment = JamfPlatform.SoftwareUpdateBlock.deadline(local, in: .gmt) else { continue }
-                seeded.moments[PostingBasis.key(.macOS, release.version)] = [.init(minute: PostingBasis.minute(moment), seen: now)]
+                seeded.moments[key] = [.init(minute: PostingBasis.minute(moment), seen: now)]
             }
             return seeded
         }

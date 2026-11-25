@@ -15,7 +15,13 @@ import Foundation
 /// version reported with the newer version’s deadline, a failed Mac past
 /// its earlier step’s deadline, a Mac that can’t run the newest major on an
 /// older release of its own, an iPad enrolled with User Enrollment and a
-/// Mac that isn’t supervised.
+/// Mac that isn’t supervised. From 1.9.0 also: status times that line up
+/// with the last contact (for a check of the server time zone setting), two
+/// Macs that missed the deadline and report their next install attempt (one
+/// at :29 after a 22:59 deadline), a Mac installing for hours with no contact
+/// since, a failure to get the bootstrap token, update files Apple no longer
+/// has, macOS 15.7.4 publicly re-posted after its release, and a pilot iPad
+/// and Mac that were in scope two and three days back only (`formerDevices`).
 ///
 /// Declaration Reporting answers per device and per declaration
 /// (`ddm/report/v1/declarations/{id}/devices`, which needs a filter, as
@@ -74,12 +80,32 @@ public enum DemoSoftwareUpdate {
         public let fileVaultState: String?
         /// A Mac’s bootstrap token: `ESCROWED` or `NOT_ESCROWED`.
         public let bootstrapToken: String?
+        /// Its status report was written by its last check-in, so its newest
+        /// status time is its last contact (as Jamf Pro writes both in UTC).
+        public let statusAtContact: Bool
+        /// Its last contact in days, when it isn’t `lastContactDaysAgo` and a little.
+        public let contactOverride: Double?
+        /// After a missed deadline: when a Mac tries to install next, which
+        /// it reports instead of the Blueprint’s deadline.
+        public let nextAttempt: NextAttempt?
+        /// Why it installs (`softwareupdate.install-reason`): `declaration`, `install-tonight`, …
+        public let installReason: String
+
+        /// When Jamf Pro last heard from it, in days.
+        public var contactDaysAgo: Double { contactOverride ?? Double(lastContactDaysAgo) + 0.1 }
 
         public var id: Int { number }
         public var serial: String { String(format: "ZZDEMOU%02d%@", number % 100, family == .mac ? "M" : "D") }
         public var managementID: String { DemoSamples.uuid(0x7500 + number) }
         public var platformID: String { DemoSamples.uuid(0x9500 + number) }
         public var udid: String { DemoSamples.uuid(0x5500 + number).uppercased() }
+    }
+
+    /// A Mac’s next install attempt after a missed deadline: so many days
+    /// after the deadline’s day, at a time of day in UTC (`HH:mm:ss`).
+    public struct NextAttempt: Sendable, Hashable {
+        public let daysAfterDeadline: Int
+        public let time: String
     }
 
     /// The version both Blueprints ask for.
@@ -100,12 +126,14 @@ public enum DemoSoftwareUpdate {
     public static let updateStartedDaysAgo = 10
     /// The deadline, in days from now, at 17:00 in each device’s local time.
     public static let deadlineInDays = 7
-    /// The Mac Blueprint enforces minor updates this many days after Apple releases them, at 17:00.
+    /// The Mac Blueprint enforces minor updates this many days after Apple releases them, at 22:59 (`macDeploymentTime`).
     public static let macDelayDays = 7
+    /// The Mac Blueprint’s time of day: a Mac writes its deadline in UTC, at this time.
+    public static let macDeploymentTime = "22:59"
 
     public static let iPads: [Device] = [
-        ipad(101, "Field iPad 01", "iPad Air 11-inch (M2)", "iPad14,8", "27.1", "Europe/Brussels", .onTarget),
-        ipad(102, "Field iPad 02", "iPad Air (5th generation)", "iPad13,18", "27.1", "Europe/Brussels", .onTarget),
+        ipad(101, "Field iPad 01", "iPad Air 11-inch (M2)", "iPad14,8", "27.1", "Europe/Brussels", .onTarget, statusAtContact: true),
+        ipad(102, "Field iPad 02", "iPad Air (5th generation)", "iPad13,18", "27.1", "Europe/Brussels", .onTarget, statusAtContact: true),
         ipad(103, "Field iPad 03", "iPad Pro 11-inch (M4)", "iPad16,3", "27.0.1", "Europe/Brussels", .downloading("27.1")),
         ipad(104, "Field iPad 04", "iPad Air (5th generation)", "iPad13,18", "27.0.1", "Europe/Brussels",
              .prepared("27.1", failure: "PasscodeRequired: Passcode is required to install the update"), passcode: true),
@@ -115,7 +143,7 @@ public enum DemoSoftwareUpdate {
         ipad(107, "Field iPad 07", "iPad Pro 11-inch (M4)", "iPad16,3", "27.0.1", "Asia/Tokyo", .noReport),
         ipad(108, "Field iPad 08", "iPad Air (5th generation)", "iPad13,18", "27.0.1", "Europe/Brussels", .quietSince(days: 45),
              contact: 45),
-        ipad(109, "Field iPad 09", "iPad (6th generation)", "iPad7,5", "17.7.10", "Europe/Brussels", .idle),
+        ipad(109, "Field iPad 09", "iPad (6th generation)", "iPad7,5", "17.7.10", "Europe/Brussels", .idle, statusAtContact: true),
         ipad(110, "Field iPad 10", "iPad Air 11-inch (M2)", "iPad14,8", "27.0.1", "Europe/Brussels", .quietSince(days: 20)),
         ipad(111, "Field iPad 11", "iPad mini (A17 Pro)", "iPad16,1", "27.0.1", "America/St_Johns", .idle),
         ipad(112, "Field iPad 12", "iPad Pro 11-inch (3rd generation)", "iPad13,1", "27.0.1", nil, .installing("27.1")),
@@ -126,16 +154,18 @@ public enum DemoSoftwareUpdate {
     ]
 
     public static let macs: [Device] = [
-        mac(201, "Studio Mac 01", "MacBook Air (13-inch, M2, 2022)", "Mac14,2", "J413AP", "27.1", .onTarget, rapidSecurityResponse: "(a)"),
+        mac(201, "Studio Mac 01", "MacBook Air (13-inch, M2, 2022)", "Mac14,2", "J413AP", "27.1", .onTarget, rapidSecurityResponse: "(a)",
+            statusAtContact: true),
         mac(202, "Studio Mac 02", "MacBook Air (13-inch, M3, 2024)", "Mac15,12", "J613AP", "27.0.1", .downloading("27.1"),
             bootstrap: "NOT_ESCROWED"),
         mac(203, "Studio Mac 03", "MacBook Air (13-inch, M2, 2022)", "Mac14,2", "J413AP", "27.0.1",
             .failed("27.1", reason: "InsufficientDiskSpace: Not enough free space to install the update.", count: 1),
             battery: "service-recommended"),
         mac(204, "Studio Mac 04", "MacBook Pro (13-inch, 2018, Four Thunderbolt 3 ports)", "MacBookPro15,2", "J132AP", "15.7.4", .idle),
-        mac(205, "Studio Mac 05", "MacBook Air (13-inch, M3, 2024)", "Mac15,12", "J613AP", "27.0.1", .idle, fileVault: "UNENCRYPTED"),
+        mac(205, "Studio Mac 05", "MacBook Air (13-inch, M3, 2024)", "Mac15,12", "J613AP", "27.0.1", .idle, fileVault: "UNENCRYPTED",
+            statusAtContact: true),
         mac(206, "Studio Mac 06", "MacBook Air (13-inch, M2, 2022)", "Mac14,2", "J413AP", "27.0.1", .quietSince(days: 40), contact: 40),
-        mac(207, "Loaner Mac 01", "MacBook Air (13-inch, M3, 2024)", "Mac15,12", "J613AP", "27.1", .onTarget),
+        mac(207, "Loaner Mac 01", "MacBook Air (13-inch, M3, 2024)", "Mac15,12", "J613AP", "27.1", .onTarget, statusAtContact: true),
         mac(208, "Loaner Mac 02", "MacBook Air (13-inch, M2, 2022)", "Mac14,2", "J413AP", "26.6", .prepared("27.1", failure: "")),
         mac(209, "Studio Mac 07", "MacBook Air (13-inch, M3, 2024)", "Mac15,12", "J613AP", "27.0.2", .idle),
         // a beta of a major Apple hasn't released: the minor-updates rule gives it no target
@@ -150,6 +180,27 @@ public enum DemoSoftwareUpdate {
         // can't run macOS 27, but can run the newest macOS 15 the Blueprint asks for; not supervised
         mac(213, "Studio Mac 11", "MacBook Pro (13-inch, 2018, Four Thunderbolt 3 ports)", "MacBookPro15,2", "J132AP", "15.7.3", .idle,
             supervised: false),
+        // missed the deadline: reports when it tries next, the day after at 06:02:31 UTC
+        mac(214, "Studio Mac 12", "MacBook Air (13-inch, M3, 2024)", "Mac15,12", "J613AP", "27.0.1", .downloading("27.1"),
+            nextAttempt: NextAttempt(daysAfterDeadline: 1, time: "06:02:31")),
+        // downloaded, missed the deadline: tries again half an hour after it, at :29, “install tonight”
+        mac(215, "Studio Mac 13", "MacBook Air (13-inch, M2, 2022)", "Mac14,2", "J413AP", "27.0.1", .prepared("27.1", failure: ""),
+            nextAttempt: NextAttempt(daysAfterDeadline: 0, time: "23:29:00"), installReason: "install-tonight"),
+        // reported installing at its last check-in, more than a day ago, and hasn't checked in since
+        mac(216, "Studio Mac 14", "MacBook Air (13-inch, M2, 2022)", "Mac14,2", "J413AP", "27.0.1", .installing("27.1"),
+            statusAtContact: true, contactOverride: 1.2),
+        mac(217, "Studio Mac 15", "MacBook Air (13-inch, M3, 2024)", "Mac15,12", "J613AP", "27.0.1",
+            .failed("27.1", reason: "Update failed due to failure to get Bootstrap Token.", count: 1), bootstrap: "NOT_ESCROWED"),
+        mac(218, "Studio Mac 16", "MacBook Air (13-inch, M2, 2022)", "Mac14,2", "J413AP", "27.0.1",
+            .failed("27.1", reason: "[kSUCoreErrorAssetReloadNotFound] The update asset is no longer available.", count: 1)),
+    ]
+
+    /// Devices that were in the pilot groups of `pastRefreshes` two and
+    /// three days back and are in no group today: they have left the
+    /// Blueprints’ scope. Jamf doesn’t answer for them.
+    public static let formerDevices: [Device] = [
+        ipad(199, "Pilot iPad 01", "iPad Air 11-inch (M2)", "iPad14,8", "27.0.1", "Europe/Brussels", .idle),
+        mac(299, "Pilot Mac 01", "MacBook Air (13-inch, M3, 2024)", "Mac15,12", "J613AP", "27.0.1", .idle),
     ]
 
     public static var devices: [Device] { iPads + macs }
@@ -268,11 +319,14 @@ public enum DemoSoftwareUpdate {
         /// A group in the scope then, besides today’s.
         public let extraScopeGroup: JamfPro.DeviceGroup?
         public let onTarget: Set<Int>
+        /// Devices in the scope then only, through `extraScopeGroup` (`formerDevices`).
+        public let formerMembers: [Device]
     }
 
     /// Five earlier daily refreshes per Blueprint, oldest first. Four and
     /// five days back the software update was another one; two and three
-    /// days back a pilot group was in the scope too. Each day back, fewer
+    /// days back a pilot group was in the scope too, with a device of its
+    /// own that has left the scope since (`formerMembers`). Each day back, fewer
     /// devices were on target.
     public static func pastRefreshes(now: Date = Date()) -> [PastRefresh] {
         var calendar = Calendar(identifier: .gregorian)
@@ -292,11 +346,13 @@ public enum DemoSoftwareUpdate {
                 case (.mac, true): .semantic(minorEnforceAfterDays: 14, deploymentTime: "17:00")
                 case (.iPad, false):
                     .specific(targetOSVersion: targetVersion, targetLocalDateTime: deadline(now: now), detailsURL: "https://intranet.contoso.example/updates")
-                case (.mac, false): .semantic(minorEnforceAfterDays: macDelayDays, deploymentTime: "17:00")
+                case (.mac, false): .semantic(minorEnforceAfterDays: macDelayDays, deploymentTime: macDeploymentTime)
                 }
+                let piloting = (2...3).contains(daysAgo)
                 refreshes.append(PastRefresh(daysAgo: daysAgo, blueprintID: blueprint, enforcement: enforcement,
-                                             extraScopeGroup: (2...3).contains(daysAgo) ? pilot : nil,
-                                             onTarget: Set(current.dropLast(min(daysAgo, current.count)))))
+                                             extraScopeGroup: piloting ? pilot : nil,
+                                             onTarget: Set(current.dropLast(min(daysAgo, current.count))),
+                                             formerMembers: piloting ? formerDevices.filter { $0.family == family } : []))
             }
         }
         return refreshes
@@ -328,7 +384,7 @@ public enum DemoSoftwareUpdate {
                 "configuration": .object(LosslessJSON.Object([
                     "enforcementType": .string("AUTOMATIC"), "strategy": .string("SEMANTIC"),
                     "rules": .object(LosslessJSON.Object(["minor": .object(LosslessJSON.Object([
-                        "enforceAfterDays": .number(.init(macDelayDays)), "deploymentTime": .string("17:00")]))])),
+                        "enforceAfterDays": .number(.init(macDelayDays)), "deploymentTime": .string(macDeploymentTime)]))])),
                 ])),
             ])), .object(LosslessJSON.Object([
                 "identifier": .string("com.jamf.ddm.software-update-settings"),
@@ -366,25 +422,30 @@ public enum DemoSoftwareUpdate {
 
     private static func ipad(_ number: Int, _ name: String, _ model: String, _ identifier: String, _ os: String,
                              _ zone: String?, _ state: State, contact: Int = 0, passcode: Bool = false,
-                             supervised: Bool = true, ownership: String = "Institutional", appleType: String? = nil) -> Device {
+                             supervised: Bool = true, ownership: String = "Institutional", appleType: String? = nil,
+                             statusAtContact: Bool = false) -> Device {
         Device(number: number, family: .iPad, name: name, model: model, modelIdentifier: identifier, boardID: nil,
                osVersion: os, osBuild: DemoAppleReleaseServer.build(of: os, mac: false), timeZone: zone,
                lastContactDaysAgo: contact, state: state, passcodePresent: passcode, supervised: supervised,
                deviceOwnershipType: ownership, appleEnrollmentType: appleType ?? (supervised ? "supervised" : "device"),
                deadlineOf: nil, betaEnrollment: nil, rapidSecurityResponse: nil, batteryHealth: nil, fileVaultState: nil,
-               bootstrapToken: nil)
+               bootstrapToken: nil, statusAtContact: statusAtContact, contactOverride: nil, nextAttempt: nil,
+               installReason: "declaration")
     }
 
     private static func mac(_ number: Int, _ name: String, _ model: String, _ identifier: String, _ board: String,
                             _ os: String, _ state: State, contact: Int = 0, rapidSecurityResponse: String? = nil,
                             battery: String = "normal", fileVault: String = "ENCRYPTED", bootstrap: String = "ESCROWED",
-                            build: String? = nil, beta: String? = nil, supervised: Bool = true, deadlineOf: String? = nil) -> Device {
+                            build: String? = nil, beta: String? = nil, supervised: Bool = true, deadlineOf: String? = nil,
+                            statusAtContact: Bool = false, contactOverride: Double? = nil, nextAttempt: NextAttempt? = nil,
+                            installReason: String = "declaration") -> Device {
         Device(number: number, family: .mac, name: name, model: model, modelIdentifier: identifier, boardID: board,
                osVersion: os, osBuild: build ?? DemoAppleReleaseServer.build(of: os, mac: true), timeZone: nil,
                lastContactDaysAgo: contact, state: state, passcodePresent: false, supervised: supervised,
                deviceOwnershipType: nil, appleEnrollmentType: nil, deadlineOf: deadlineOf, betaEnrollment: beta,
                rapidSecurityResponse: rapidSecurityResponse, batteryHealth: battery, fileVaultState: fileVault,
-               bootstrapToken: bootstrap)
+               bootstrapToken: bootstrap, statusAtContact: statusAtContact, contactOverride: contactOverride, nextAttempt: nextAttempt,
+               installReason: installReason)
     }
 }
 
@@ -500,8 +561,8 @@ public nonisolated final class DemoSoftwareUpdateServer: DemoServer {
             "mobileDeviceId": String(device.number), "displayName": device.name, "serialNumber": device.serial,
             "udid": device.udid, "managementId": device.managementID, "osVersion": device.osVersion,
             "osBuild": device.osBuild, "model": device.model, "modelIdentifier": device.modelIdentifier,
-            "lastContactDate": iso(Double(device.lastContactDaysAgo) + 0.1),
-            "lastInventoryUpdateDate": iso(Double(device.lastContactDaysAgo) + 0.2),
+            "lastContactDate": iso(device.contactDaysAgo),
+            "lastInventoryUpdateDate": iso(device.contactDaysAgo + 0.1),
             "managed": true, "supervised": device.supervised, "declarativeDeviceManagementEnabled": true,
             "deviceOwnershipType": device.deviceOwnershipType ?? "Institutional",
             "appleEnrollmentType": device.appleEnrollmentType ?? "supervised",
@@ -517,8 +578,8 @@ public nonisolated final class DemoSoftwareUpdateServer: DemoServer {
         [
             "id": String(device.number), "udid": device.udid,
             "general": ["name": device.name, "managementId": device.managementID,
-                        "lastContactTime": iso(Double(device.lastContactDaysAgo) + 0.1),
-                        "reportDate": iso(Double(device.lastContactDaysAgo) + 0.2), "supervised": device.supervised,
+                        "lastContactTime": iso(device.contactDaysAgo),
+                        "reportDate": iso(device.contactDaysAgo + 0.1), "supervised": device.supervised,
                         "remoteManagement": ["managed": true]],
             "hardware": ["serialNumber": device.serial, "model": device.model, "modelIdentifier": device.modelIdentifier],
             "operatingSystem": ["name": "macOS", "version": device.osVersion, "build": device.osBuild],
@@ -535,7 +596,8 @@ public nonisolated final class DemoSoftwareUpdateServer: DemoServer {
     private func statusItems(_ device: DemoSoftwareUpdate.Device) -> [[String: Any]] {
         let recent: Double = switch device.state {
         case .quietSince(let days): Double(days)
-        default: 0.3
+        // written by its last check-in: the same moment as its last contact
+        default: device.statusAtContact ? device.contactDaysAgo : 0.3
         }
         var items: [[String: Any]] = []
         func add(_ key: String, _ value: Any, _ daysAgo: Double = recent) {
@@ -559,9 +621,17 @@ public nonisolated final class DemoSoftwareUpdateServer: DemoServer {
         func pending(_ version: String) {
             // the pending version's own deadline, or the one of the version the declaration moved on to
             let due = device.deadlineOf ?? version
+            // a Mac that missed the deadline reports its next install attempt instead
+            let target = device.family == .mac
+                ? device.nextAttempt.map { DemoAppleReleaseServer.macNextAttempt(of: due, $0, now: now) }
+                    ?? DemoAppleReleaseServer.macDeadline(of: due, now: now)
+                : DemoSoftwareUpdate.deadline(now: now)
             add("softwareupdate.pending-version",
-                "{os-version=\(version), build-version=\(DemoAppleReleaseServer.build(of: version, mac: device.family == .mac)), target-local-date-time=\(device.family == .mac ? DemoAppleReleaseServer.macDeadline(of: due, now: now) : DemoSoftwareUpdate.deadline(now: now))}")
-            add("softwareupdate.install-reason", "{reason=[{softwareupdate-reason=declaration, declaration-id=Blueprint_\(device.family == .mac ? DemoSoftwareUpdate.macBlueprintID : DemoSoftwareUpdate.iPadBlueprintID)_s1_c1_sys_cfg1}]}")
+                "{os-version=\(version), build-version=\(DemoAppleReleaseServer.build(of: version, mac: device.family == .mac)), target-local-date-time=\(target)}")
+            let reason = device.installReason == "declaration"
+                ? "{softwareupdate-reason=declaration, declaration-id=Blueprint_\(device.family == .mac ? DemoSoftwareUpdate.macBlueprintID : DemoSoftwareUpdate.iPadBlueprintID)_s1_c1_sys_cfg1}"
+                : "{softwareupdate-reason=\(device.installReason)}"
+            add("softwareupdate.install-reason", "{reason=[\(reason)]}")
         }
         switch device.state {
         case .onTarget, .idle, .quietSince, .noReport:
@@ -597,7 +667,7 @@ public nonisolated final class DemoSoftwareUpdateServer: DemoServer {
     /// configuration. None for a device that never sent a status report.
     func reports(_ device: DemoSoftwareUpdate.Device) -> [[String: Any]] {
         guard device.state != .noReport else { return [] }
-        let reported = iso(Double(device.lastContactDaysAgo) + 0.3)
+        let reported = iso(device.contactDaysAgo + 0.2)
         let changed = iso(Double(DemoSoftwareUpdate.updateStartedDaysAgo))
         func report(_ identifier: String, _ type: String, status: String, active: Bool, valid: String = "VALID",
                     reasons: [[String: Any]] = []) -> [String: Any] {
@@ -723,19 +793,44 @@ public nonisolated final class DemoAppleReleaseServer: DemoServer, @unchecked Se
 
     /// The deadline a Mac reports for a pending version, as a moment with
     /// an offset (as Macs write it): the Mac Blueprint’s delay after the
-    /// release, at 17:00 UTC.
+    /// release, at its time of day in UTC (22:59).
     static func macDeadline(of version: String, now: Date) -> String {
+        macText(macDeadlineDay(of: version, now: now).addingTimeInterval(seconds(DemoSoftwareUpdate.macDeploymentTime + ":00")))
+    }
+
+    /// A Mac’s next install attempt after the deadline of `version`, as it writes it.
+    static func macNextAttempt(of version: String, _ attempt: DemoSoftwareUpdate.NextAttempt, now: Date) -> String {
+        let day = macDeadlineDay(of: version, now: now).addingTimeInterval(Double(attempt.daysAfterDeadline) * 86_400)
+        return macText(day.addingTimeInterval(seconds(attempt.time)))
+    }
+
+    /// The day (midnight UTC) of the Mac Blueprint’s deadline for `version`.
+    private static func macDeadlineDay(of version: String, now: Date) -> Date {
         var calendar = Calendar(identifier: .gregorian)
         calendar.timeZone = TimeZone(identifier: "UTC") ?? .gmt
         let daysAgo = macReleases.first { $0.version == version }?.daysAgo ?? 0
         let day = calendar.startOfDay(for: now.addingTimeInterval(-Double(daysAgo) * 86_400))
-        let deadline = (calendar.date(byAdding: .day, value: DemoSoftwareUpdate.macDelayDays, to: day) ?? day).addingTimeInterval(17 * 3_600)
+        return calendar.date(byAdding: .day, value: DemoSoftwareUpdate.macDelayDays, to: day) ?? day
+    }
+
+    /// `HH:mm:ss` as seconds after midnight.
+    private static func seconds(_ time: String) -> TimeInterval {
+        let parts = time.split(separator: ":").compactMap { Double($0) }
+        return parts.enumerated().reduce(0) { $0 + $1.element * [3_600, 60, 1][min($1.offset, 2)] }
+    }
+
+    private static func macText(_ moment: Date) -> String {
         let formatter = DateFormatter()
         formatter.locale = Locale(identifier: "en_US_POSIX")
-        formatter.timeZone = calendar.timeZone
+        formatter.timeZone = TimeZone(identifier: "UTC") ?? .gmt
         formatter.dateFormat = "yyyy-MM-dd HH:mm:ss Z"
-        return formatter.string(from: deadline)
+        return formatter.string(from: moment)
     }
+
+    /// Releases Apple posted publicly again later, after their release:
+    /// version and the days ago of the later public posting. Their first
+    /// posting stays in GDMF’s other list (`AssetSets`).
+    private static let rePosted: [(version: String, daysAgo: Int)] = [("15.7.4", 3)]
 
     /// The made-up build of a demo version (`unknown` for one it doesn’t have).
     public static func build(of version: String, mac: Bool) -> String {
@@ -825,8 +920,15 @@ public nonisolated final class DemoAppleReleaseServer: DemoServer, @unchecked Se
             "iOS": Self.iOSReleases.map { ["ProductVersion": $0.version, "Build": $0.build, "PostingDate": released($0.daysAgo).day,
                                            "SupportedDevices": $0.devices] }
                 + [["ProductVersion": "8.8.2", "Build": "19U5526", "PostingDate": released(12).day, "SupportedDevices": ["Watch3,1"]]],
-            "macOS": Self.macReleases.map { ["ProductVersion": $0.version, "Build": $0.build, "PostingDate": released($0.daysAgo).day,
-                                             "SupportedDevices": $0.boards] },
+            "macOS": Self.macReleases.map { release in
+                ["ProductVersion": release.version, "Build": release.build,
+                 "PostingDate": released(Self.rePosted.first { $0.version == release.version }?.daysAgo ?? release.daysAgo).day,
+                 "SupportedDevices": release.boards]
+            },
+        ], "AssetSets": [
+            "macOS": Self.macReleases.filter { release in Self.rePosted.contains { $0.version == release.version } }.map {
+                ["ProductVersion": $0.version, "Build": $0.build, "PostingDate": released($0.daysAgo).day, "SupportedDevices": $0.boards]
+            },
         ]]
     }
 }

@@ -239,7 +239,7 @@ struct DemoSoftwareUpdateTests {
         let groups = try await client.computerGroups()
         let studio = try await client.members(of: try #require(groups.first { $0.isSmart }))
         let loaners = try await client.members(of: try #require(groups.first { !$0.isSmart }))
-        #expect(studio.count == 11 && loaners.count == 2)
+        #expect(studio.count == 16 && loaners.count == 2)
         let old = try #require(studio.first { $0.modelIdentifier == "MacBookPro15,2" })
         let status = try await client.softwareUpdateStatus(managementID: old.managementID ?? "", kind: .computer)
         #expect(status?.deviceID == "J132AP")
@@ -314,7 +314,7 @@ struct DemoSoftwareUpdateTests {
     func macBlueprintAndDates() async throws {
         let (_, client, source) = try demo()
         let update = try await JamfPlatform.Blueprints(client: client).softwareUpdate(blueprintID: DemoSoftwareUpdate.macBlueprintID)
-        #expect(update.blocks.map(\.enforcement) == [.semantic(minorEnforceAfterDays: DemoSoftwareUpdate.macDelayDays, deploymentTime: "17:00")])
+        #expect(update.blocks.map(\.enforcement) == [.semantic(minorEnforceAfterDays: DemoSoftwareUpdate.macDelayDays, deploymentTime: "22:59")])
         #expect(update.blueprint.softwareUpdateSettings.first?.automaticDownload == .alwaysOn)
         let catalog = try await AppleReleases.Client(recorder: RequestRecorder(session: source.session, log: nil), userAgent: "Demo",
                                                      sofaURL: DemoAppleReleaseServer.sofaURL, gdmfURL: DemoAppleReleaseServer.gdmfURL).catalog()
