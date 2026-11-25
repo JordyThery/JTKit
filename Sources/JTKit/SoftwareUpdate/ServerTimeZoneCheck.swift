@@ -10,9 +10,9 @@ extension SoftwareUpdateRules {
     /// is never changed.
     public nonisolated enum ServerTimeZoneCheck {
         /// A check-in writes both within this of each other.
-        public static let tolerance: TimeInterval = 120
+        static let tolerance: TimeInterval = 120
         /// Devices that line up in UTC before anything is said.
-        public static let minimumDevices = 3
+        static let minimumDevices = 3
 
         /// `samples`: each device’s last contact and its newest status time as
         /// Jamf Pro wrote it. False for UTC, or when the setting and UTC give

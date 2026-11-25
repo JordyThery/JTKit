@@ -256,7 +256,7 @@ extension SoftwareUpdateRules {
 
         /// The deadline as a moment: reported, or the local deadline in the
         /// device’s zone (this Mac’s for a device without one, as Macs).
-        public var deadlineMoment: Date? {
+        var deadlineMoment: Date? {
             deadlineDate ?? TargetRules.deadlineDate(deadlineLocal, timeZone: timeZone ?? TimeZone.current.identifier)
         }
 
@@ -264,7 +264,7 @@ extension SoftwareUpdateRules {
         /// downloaded update that still hasn’t installed is stuck. Without a
         /// moment to measure from, past is past. A late earlier step is past
         /// its own deadline by the grace already.
-        public func pastDeadlineByGrace(now: Date) -> Bool {
+        func pastDeadlineByGrace(now: Date) -> Bool {
             if earlierStepLapsed == true { return true }
             return pastDeadline == true && (deadlineMoment.map { now >= $0.addingTimeInterval(TargetRules.installGrace) } ?? true)
         }
@@ -273,7 +273,7 @@ extension SoftwareUpdateRules {
         public var osName: String { Classifier.osName(isComputer: isComputer, modelIdentifier: modelIdentifier) }
 
         /// The diagnoses that need someone to look (summary, Inspect’s default selection).
-        public static let attentionPattern = "too old for update declarations|^Download declined|passcode has to be entered|^Downloaded.*not installed after|downloaded but not installed after|[Ii]nstall blocked|^Update failed|^Download problem|^No update offered|^Other error|^Online, update not started|^On [A-Za-z]+ [0-9]+: check|^Installing .*for more than|^Installing .*since .*no contact since|^Jamf’s update doesn’t cover|^Hasn’t fetched Jamf’s|^Update declaration (failed|invalid)|^Update files no longer available"
+        static let attentionPattern = "too old for update declarations|^Download declined|passcode has to be entered|^Downloaded.*not installed after|downloaded but not installed after|[Ii]nstall blocked|^Update failed|^Download problem|^No update offered|^Other error|^Online, update not started|^On [A-Za-z]+ [0-9]+: check|^Installing .*for more than|^Installing .*since .*no contact since|^Jamf’s update doesn’t cover|^Hasn’t fetched Jamf’s|^Update declaration (failed|invalid)|^Update files no longer available"
 
         public var needsAttention: Bool { diagnosis.range(of: Self.attentionPattern, options: .regularExpression) != nil }
 
@@ -666,7 +666,7 @@ extension SoftwareUpdateRules {
             return result == "(null)" ? "No update found" : result
         }
 
-        public static func matches(_ text: String, _ pattern: String) -> Bool {
+        static func matches(_ text: String, _ pattern: String) -> Bool {
             !text.isEmpty && text.range(of: pattern, options: .regularExpression) != nil
         }
     }
@@ -676,7 +676,7 @@ extension JamfPro.GroupMember {
     /// When Jamf Pro last heard from the device: its last contact or its
     /// last inventory update, whichever is newer. Jamf Pro has no last
     /// contact for some devices that do send inventory.
-    nonisolated var lastSeen: Date? {
+    public nonisolated var lastSeen: Date? {
         switch (lastContact, lastInventoryUpdate) {
         case let (contact?, inventory?): max(contact, inventory)
         case let (contact, inventory): contact ?? inventory

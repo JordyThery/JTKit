@@ -1,4 +1,4 @@
-import JTKit
+@testable import JTKit
 
 // The rule types by the names Software Update Dashboard gives them, so the
 // tests moved from it read exactly as they did there.

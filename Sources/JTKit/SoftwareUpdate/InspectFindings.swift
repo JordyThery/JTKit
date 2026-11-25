@@ -145,7 +145,7 @@ extension SoftwareUpdateRules {
         public var otherDeclarations = 0
 
         /// The likely cause: the first finding that isn’t from before the update started.
-        public var likely: Finding? { findings.first { $0.earlier != true } }
+        var likely: Finding? { findings.first { $0.earlier != true } }
         public var cause: String { onTarget ? "On target" : likely?.cause ?? "No cause found" }
         public var detail: String {
             onTarget ? "Already on the target version"
@@ -547,7 +547,7 @@ extension SoftwareUpdateRules {
         /// of it); those that don’t apply to it are counted instead. Pairs for the
         /// same range (one per hardware group) are one line. Without the current
         /// declarations, the device’s own report is listed the same way.
-        public static func declarationLines(current: [BlueprintHealth.Current]?, mine: [DeclarationPair], osName: String, version: OSVersion?,
+        static func declarationLines(current: [BlueprintHealth.Current]?, mine: [DeclarationPair], osName: String, version: OSVersion?,
                                      ids: [String], names: [String: String],
                                      label: (DeclarationPair) -> String) -> (lines: [DeclarationLine], others: Int) {
             var lines: [DeclarationLine] = []
@@ -589,14 +589,14 @@ extension SoftwareUpdateRules {
         /// A declaration that isn’t the tracked Blueprint’s, without its ID: “A
         /// declaration from another Blueprint”, else its readable name, else
         /// “Another declaration”.
-        public static func otherName(_ report: JamfPlatform.DeclarationReport) -> String {
+        static func otherName(_ report: JamfPlatform.DeclarationReport) -> String {
             if report.blueprintID != nil { return "A declaration from another Blueprint" }
             let readable = readableName(report.declarationIdentifier, names: [:])
             return readable.contains("‹ID›") || readable.isEmpty ? "Another declaration" : readable
         }
 
         /// The device’s update error when it is from before the update started.
-        public static func earlierError(_ status: JamfPro.SoftwareUpdateStatus?, since: Date?,
+        static func earlierError(_ status: JamfPro.SoftwareUpdateStatus?, since: Date?,
                                  serverTimeZone: TimeZone) -> (reason: String, when: String)? {
             guard let failure = status?.failure, let since, let time = failure.timestamp,
                   let at = JamfPro.serverDate(time, timeZone: serverTimeZone), at < since else { return nil }
@@ -608,7 +608,7 @@ extension SoftwareUpdateRules {
         /// Blueprint declaration is named by its Blueprint (`names`, by
         /// lowercased Blueprint ID) and number; identifiers, server tokens and
         /// predicates in the details are left out.
-        public static func why(_ report: JamfPlatform.DeclarationReport, names: [String: String] = [:]) -> String {
+        static func why(_ report: JamfPlatform.DeclarationReport, names: [String: String] = [:]) -> String {
             let skipped: Set<String> = ["identifier", "servertoken", "predicate"]
             let parts = report.reasons.map { reason -> String in
                 var text = reason.code ?? ""
@@ -626,7 +626,7 @@ extension SoftwareUpdateRules {
         /// Text with every Blueprint declaration identifier
         /// (`Blueprint_<id>_s1_c1_sys_act12:<hash>`) replaced by “‹Blueprint›,
         /// update declaration 12” and other hashes removed.
-        public static func readableName(_ text: String, names: [String: String]) -> String {
+        static func readableName(_ text: String, names: [String: String]) -> String {
             let pattern = #/Blueprint_([0-9A-Fa-f-]{36})_s([0-9]+)_c[0-9]+_[A-Za-z]+_(cfg|act)?([0-9]*)(:[0-9A-Fa-f]+)?/#
             var out = text.replacing(pattern) { match in
                 let name = names[String(match.output.1).lowercased()] ?? "another Blueprint"
@@ -638,7 +638,7 @@ extension SoftwareUpdateRules {
             return out
         }
 
-        public static func ago(_ date: Date, now: Date) -> String {
+        static func ago(_ date: Date, now: Date) -> String {
             let minutes = Int((now.timeIntervalSince(date) / 60).rounded(.down))
             if minutes < 0 { return "just now" }
             if minutes < 120 { return "\(minutes) min ago" }
@@ -648,7 +648,7 @@ extension SoftwareUpdateRules {
         }
 
         /// Megabytes as gigabytes with one decimal, as Jamf Pro counts them (1024).
-        public static func gigabytes(_ megabytes: Int) -> String {
+        static func gigabytes(_ megabytes: Int) -> String {
             ((Double(megabytes) / 1024 * 10).rounded() / 10).formatted(.number.precision(.fractionLength(1)).locale(Locale(identifier: "en_US_POSIX")))
         }
 
@@ -658,7 +658,7 @@ extension SoftwareUpdateRules {
         }
 
         /// A local date-time without a zone (“2026-11-19T23:59:00”) as its day: “19 Nov 2026”.
-        public static func localDay(_ local: String) -> String? {
+        static func localDay(_ local: String) -> String? {
             guard let date = JamfPlatform.SoftwareUpdateBlock.deadline(local, in: .gmt) else { return nil }
             var style = Date.FormatStyle(date: .abbreviated, time: .omitted)
             style.timeZone = .gmt
@@ -678,23 +678,23 @@ extension SoftwareUpdateRules {
 
     /// A Blueprint declaration’s configuration with its own activation
     /// (`…_sys_cfg12` with `…_sys_act12`), as the device reports them.
-    public nonisolated struct DeclarationPair: Sendable, Hashable {
+    nonisolated struct DeclarationPair: Sendable, Hashable {
         public var key: String
         public var number: String?
         public var reports: [JamfPlatform.DeclarationReport]
 
-        public var activation: JamfPlatform.DeclarationReport? { reports.first { $0.type == "ACTIVATION" } }
+        var activation: JamfPlatform.DeclarationReport? { reports.first { $0.type == "ACTIVATION" } }
 
         /// Its activation’s predicate is false for this device (Info.Predicate):
         /// meant for other versions or models, by design.
-        public var isNotForThisDevice: Bool {
+        var isNotForThisDevice: Bool {
             activation?.reasons.contains { ($0.code ?? "").hasPrefix("Info.Predicate") } == true
         }
 
         public var isActive: Bool { reports.contains { $0.active == true } }
 
         /// Whether its predicate lists this device ID or model (`IN {"J313AP", …}`).
-        public func lists(_ id: String) -> Bool {
+        func lists(_ id: String) -> Bool {
             predicate?.contains("\"\(id)\"") == true
         }
 
@@ -709,10 +709,10 @@ extension SoftwareUpdateRules {
         }
 
         /// The newest version the predicate’s version condition takes; nil without one.
-        public var upperBound: OSVersion? { predicate.flatMap(Self.covered)?.max() }
+        var upperBound: OSVersion? { predicate.flatMap(Self.covered)?.max() }
 
         /// The predicate’s text, from the activation’s Info.Predicate reason.
-        public var predicate: String? {
+        var predicate: String? {
             activation?.reasons.flatMap(\.details).first { $0.key?.lowercased() == "predicate" }?.description
                 ?? activation?.reasons.compactMap(\.description).first { $0.contains("predicate") }
         }
@@ -753,7 +753,7 @@ extension SoftwareUpdateRules {
         /// minor takes every patch; “26.7.x” for one minor; “26.7.1” for one
         /// version; “26.7 and later” without an upper end; “27” for a whole
         /// major. Read by trying versions against the condition itself.
-        public static func versionRange(_ predicate: String) -> String? {
+        static func versionRange(_ predicate: String) -> String? {
             guard let covered = covered(predicate) else {
                 // the older form: version BEGINSWITH "27." AND version < "27.0.1" (or <=)
                 guard let major = predicate.firstMatch(of: #/BEGINSWITH\s*"([0-9]+)\./#)?.output.1 else { return nil }
@@ -781,7 +781,7 @@ extension SoftwareUpdateRules {
         private static let maxPatch = 30
 
         /// Whether a version text meets a predicate’s `MATCHES "…"` condition; nil without one.
-        public static func matcher(_ predicate: String) -> ((String) -> Bool)? {
+        static func matcher(_ predicate: String) -> ((String) -> Bool)? {
             guard let pattern = predicate.firstMatch(of: #/MATCHES\s*"([^"]+)"/#)?.output.1,
                   let regex = try? NSRegularExpression(pattern: String(pattern)) else { return nil }
             // MATCHES takes the whole text, as in a predicate
@@ -793,7 +793,7 @@ extension SoftwareUpdateRules {
 
         /// Every version (major.minor and major.minor.patch) the condition
         /// takes in its major; nil without a `MATCHES` condition.
-        public static func covered(_ predicate: String) -> [OSVersion]? {
+        static func covered(_ predicate: String) -> [OSVersion]? {
             guard let matches = matcher(predicate),
                   let pattern = predicate.firstMatch(of: #/MATCHES\s*"([^"]+)"/#)?.output.1,
                   let major = pattern.firstMatch(of: #/([0-9]+)/#).flatMap({ Int($0.output.1) }) else { return nil }
@@ -809,7 +809,7 @@ extension SoftwareUpdateRules {
 
         /// The reports grouped into pairs, in number order; a declaration whose
         /// identifier has no number is a pair of its own.
-        public static func pairs(_ reports: [JamfPlatform.DeclarationReport]) -> [DeclarationPair] {
+        static func pairs(_ reports: [JamfPlatform.DeclarationReport]) -> [DeclarationPair] {
             var order: [String] = []
             var byKey: [String: DeclarationPair] = [:]
             for report in reports {

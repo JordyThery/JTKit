@@ -3,9 +3,10 @@ import Foundation
 extension SoftwareUpdateRules {
     /// What a tracked Blueprint’s devices reported about Jamf’s deadlines,
     /// remembered between refreshes, per platform and version
-    /// (`PostingBasis.key`). Stored next to the Blueprint’s history
-    /// (`History/<tracked Blueprint ID>/reported-deadlines.plist`, through
-    /// `StatusHistory`); Demo Mode’s in memory only.
+    /// (`PostingBasis.key`). The app saves it, e.g. next to the Blueprint’s
+    /// history (JTKit saves nothing): it comes in as `Reader.reportedDeadlines`
+    /// and what to keep goes back in `Reader.Reading.reportedDeadlines`. Its
+    /// Codable field names never change.
     ///
     /// - The posting date Jamf counted from (`TargetRules.reportedPosting`):
     ///   kept while the version is the rule’s target and the Blueprint hasn’t
@@ -50,7 +51,7 @@ extension SoftwareUpdateRules {
         public var postings: [String: Posting] = [:]
         public var moments: [String: [Moment]] = [:]
 
-        public static let retentionDays = 180
+        static let retentionDays = 180
 
         public var isEmpty: Bool { postings.isEmpty && moments.isEmpty }
 

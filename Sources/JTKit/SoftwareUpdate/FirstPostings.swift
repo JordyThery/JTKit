@@ -1,11 +1,11 @@
 import Foundation
 
 extension SoftwareUpdateRules {
-    /// The first public posting date this app saw of each build, per platform,
+    /// The first public posting date an app saw of each build, per platform,
     /// version and build (`PostingBasis.key`), kept from then on: Apple can
     /// re-date a build that is already public, and Jamf keeps the deadline it
-    /// counted from the first. Stored under `firstPublicPostings`; Demo Mode’s
-    /// in memory only.
+    /// counted from the first. The app saves the dates where it keeps its
+    /// settings (JTKit saves nothing) and passes them to `Reader.firstPosted`.
     public nonisolated enum FirstPostings {
 
         /// `known` with the public postings of `catalog` it doesn’t have yet;

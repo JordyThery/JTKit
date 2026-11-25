@@ -63,12 +63,12 @@ extension SoftwareUpdateRules {
         }
 
         /// The most basic reason the update can’t reach the device; nil when none fits.
-        public static func reason(for device: DeviceStatus) -> ReadinessCheck? {
+        static func reason(for device: DeviceStatus) -> ReadinessCheck? {
             allCases.first { $0.fits(device) }
         }
 
         /// Whether this reason fits the device, whatever other reasons fit too.
-        public func fits(_ device: DeviceStatus) -> Bool {
+        func fits(_ device: DeviceStatus) -> Bool {
             switch self {
             // Apple’s enforced update (com.apple.configuration.softwareupdate.enforcement.specific)
             // allows supervised and device enrollments on iOS and iPadOS, supervised Macs only on macOS
@@ -81,7 +81,7 @@ extension SoftwareUpdateRules {
         }
 
         /// Below the first version Apple’s software update enforcement declaration supports.
-        public static func isTooOldForDeclarations(_ version: OSVersion, isComputer: Bool) -> Bool {
+        static func isTooOldForDeclarations(_ version: OSVersion, isComputer: Bool) -> Bool {
             version.major < (isComputer ? 14 : 17)
         }
 

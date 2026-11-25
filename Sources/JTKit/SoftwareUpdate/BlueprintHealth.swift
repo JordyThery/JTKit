@@ -35,10 +35,10 @@ extension SoftwareUpdateRules {
             public var range: String?
 
             /// Whether the predicate lists this device ID or model.
-            public func lists(_ id: String) -> Bool { predicate?.contains("\"\(id)\"") == true }
+            func lists(_ id: String) -> Bool { predicate?.contains("\"\(id)\"") == true }
 
             /// Whether its condition names hardware at all.
-            public var listsHardware: Bool {
+            var listsHardware: Bool {
                 predicate?.range(of: #"(device-id|model\.identifier)[^=]*IN\s*\{"#, options: .regularExpression) != nil
             }
 
@@ -88,9 +88,9 @@ extension SoftwareUpdateRules {
             public var commonReason: String?
             public var commonReasonCount = 0
 
-            public var hasProblems: Bool { failed > 0 || invalid > 0 }
+            var hasProblems: Bool { failed > 0 || invalid > 0 }
             /// Whether a device in scope reports it for itself.
-            public var appliesToSomeDevice: Bool { applied + pending + awaitingSync + failed + invalid > 0 }
+            var appliesToSomeDevice: Bool { applied + pending + awaitingSync + failed + invalid > 0 }
 
             /// Every stored property, in order, with the same defaults as the memberwise initializer.
             public init(
@@ -162,7 +162,7 @@ extension SoftwareUpdateRules {
         /// Each device’s reports, by `DeviceStatus.id`; a report whose device
         /// isn’t in `deviceIDs` (Platform device ID → `DeviceStatus.id`) is left
         /// out and counted.
-        public static func byDevice(_ reports: [JamfPlatform.DeclarationReport],
+        static func byDevice(_ reports: [JamfPlatform.DeclarationReport],
                              deviceIDs: [String: String]) -> (reports: [String: [JamfPlatform.DeclarationReport]], unmatched: Int) {
             var byDevice: [String: [JamfPlatform.DeclarationReport]] = [:]
             var unmatched = Set<String>()
@@ -222,7 +222,7 @@ extension SoftwareUpdateRules {
         /// Whether the device’s report of one of the Blueprint’s update
         /// declarations for its own OS says awaiting sync: Jamf sent a new one
         /// the device hasn’t fetched. Another OS family’s declaration says nothing.
-        public static func isAwaitingSync(_ reports: [JamfPlatform.DeclarationReport], osName: String, current: [Current]) -> Bool {
+        static func isAwaitingSync(_ reports: [JamfPlatform.DeclarationReport], osName: String, current: [Current]) -> Bool {
             let families = Dictionary(current.map { ($0.key, $0.family) }, uniquingKeysWith: { first, _ in first })
             return DeclarationPair.pairs(reports).contains { pair in
                 let family = families[pair.key] ?? nil
@@ -284,7 +284,7 @@ extension SoftwareUpdateRules {
 
         /// One device’s state for a row of several pairs: the one that is for
         /// it (the worst, should two be), else not for it; nil without a report.
-        public static func deviceState(_ states: [String]) -> String? {
+        static func deviceState(_ states: [String]) -> String? {
             guard !states.isEmpty else { return nil }
             let forDevice = states.filter { $0 != "Not for this device" }
             guard !forDevice.isEmpty else { return "Not for this device" }
@@ -339,7 +339,7 @@ extension SoftwareUpdateRules {
 
         /// A failed or invalid update declaration for the device’s own OS, as
         /// its list diagnosis: “Update declaration failed: …”; nil without one.
-        public static func declarationProblem(_ reports: [JamfPlatform.DeclarationReport], osName: String, current: [Current],
+        static func declarationProblem(_ reports: [JamfPlatform.DeclarationReport], osName: String, current: [Current],
                                        names: [String: String]) -> String? {
             let families = Dictionary(current.map { ($0.key, $0.family) }, uniquingKeysWith: { first, _ in first })
             let states = DeclarationPair.pairs(reports)
@@ -367,7 +367,7 @@ extension SoftwareUpdateRules {
 
         /// The categories whose diagnosis the cause replaces: the device isn’t
         /// updating and nothing else explains it better.
-        public static let explainedCategories: Set<StatusCategory> = [.notStarted, .noActivity]
+        static let explainedCategories: Set<StatusCategory> = [.notStarted, .noActivity]
 
         /// The dashboard’s line, nil when no device is affected.
         public static func dashboardLine(_ count: Int) -> String? {

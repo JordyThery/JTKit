@@ -29,6 +29,8 @@ extension SoftwareUpdateRules {
     /// Apple’s release data couldn’t be read at all: no device’s target is
     /// known, so the refresh stops and the previous one is kept.
     public nonisolated struct AppleDataUnavailable: LocalizedError, Equatable {
+        public init() {}
+
         public var errorDescription: String? {
             "Apple’s release data couldn’t be read, so no device’s target is known."
         }
@@ -342,7 +344,7 @@ extension SoftwareUpdateRules {
         /// its first posting, and that posting is remembered as the one the
         /// Blueprint’s devices reported (seen the day after the Blueprint’s
         /// last change), as Jamf keeps the deadline it sent.
-        public func demoReportedDeadlines(blocks: [JamfPlatform.SoftwareUpdateBlock], now: Date,
+        func demoReportedDeadlines(blocks: [JamfPlatform.SoftwareUpdateBlock], now: Date,
                                           blueprintChanged: Date? = nil) -> ReportedDeadlines {
             var seeded = ReportedDeadlines()
             guard let catalog, let block = Self.block(for: "macOS", in: blocks) else { return seeded }

@@ -44,7 +44,7 @@ extension SoftwareUpdateRules {
         }
 
         /// One device’s reads; what can’t be read is written into the input.
-        public func inspectInput(_ member: JamfPro.GroupMember, row: DeviceStatus?, serverTimeZone: TimeZone = .gmt) async -> InspectInput {
+        func inspectInput(_ member: JamfPro.GroupMember, row: DeviceStatus?, serverTimeZone: TimeZone = .gmt) async -> InspectInput {
             var input = InspectInput(member: member, device: row)
             do {
                 if let managementID = member.managementID,

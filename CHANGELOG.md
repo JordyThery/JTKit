@@ -1,5 +1,37 @@
 # Changelog
 
+## 1.9.0 (unreleased)
+A minor release: the software update rules of Software Update Dashboard, shared, and request limits on the Platform
+API client. Code written for 1.8 compiles unchanged.
+
+### Added
+- `SoftwareUpdateRules` (new area `SoftwareUpdate/`): what a Blueprint’s software update means for each iPhone, iPad and
+  Mac it reaches, and why a device isn’t on target. `TargetRules` gives a device its target and deadline from the
+  Blueprint’s rule and Apple’s release data, and reads what Jamf sent it; `Classifier` sorts each device into a
+  `StatusCategory` with a plain diagnosis (`DeviceStatus`, Codable); `ReadinessCheck`, `BlueprintHealth`,
+  `DeadlineZones` and `ServerTimeZoneCheck`; Inspect (`InspectFindings`, `InspectWorkflow`). `Reader` does a refresh’s
+  reads (GET only) and measures every device: Jamf Pro reads go to one client and Platform API reads to another, so an
+  app can give each its own limits. Nothing is saved by JTKit: what earlier refreshes remembered (`ReportedDeadlines`,
+  the first public postings) comes in from the app, and what to keep goes back to it.
+- `JamfPlatform.Client`: `maxConcurrent` and `rateLimit` on both initializers (nil: no limit, as before). With a
+  window of a second or less, a rate-limit wait under a second isn’t written to the activity log or shown in
+  `RequestWaits`; a per-minute limit logs every wait, as before.
+- `JamfPro.SoftwareUpdateStatus.PendingVersion.targetLocal`: the deadline as a local date-time without an offset.
+- `JamfPro.GroupMember.lastSeen`: the newer of the last contact and the last inventory update.
+- `DemoSoftwareUpdate`: status times that line up with the last contact, two Macs that report their next install
+  attempt after a missed deadline, a Mac installing with no contact since, a failure to get the bootstrap token,
+  update files Apple no longer has, macOS 15.7.4 posted publicly again after its release, and a pilot iPad and Mac
+  that were in scope two and three days back only (`formerDevices`, `PastRefresh.formerMembers`).
+
+### Changed
+- `PendingVersion.targetDate` and `targetOffset` also read a deadline written with a 12-hour clock
+  (`2026-11-23 10:59:11 PM +0000`, any space before AM or PM; 12 AM is midnight). 24-hour texts read as before.
+- `DemoSoftwareUpdate`: the Mac Blueprint’s time of day is 22:59 (`macDeploymentTime`), and the Studio Macs group has
+  16 Macs.
+
+### What an app needs to do
+- Nothing to compile. An app that counts the demo Macs sees 16 Studio Macs instead of 11.
+
 ## 1.8.1 (2026-11-17)
 A patch release: no crash in Release builds made with Swift 6.4 when several reads run at once. Code written for 1.8
 compiles unchanged and behaves the same.

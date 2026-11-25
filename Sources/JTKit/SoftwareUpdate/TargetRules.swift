@@ -164,7 +164,7 @@ extension SoftwareUpdateRules {
         /// the device detail: “Sent by Jamf, matches the Blueprint’s rule”,
         /// “From Apple’s data and the Blueprint’s rule”. Nil without a target
         /// (the reason says why).
-        public var source: String? {
+        var source: String? {
             guard version != nil, unknown == nil else { return nil }
             if fromDevice {
                 return differsFromRule ? "Sent by Jamf: the device reports it pending from a declaration"
@@ -477,7 +477,7 @@ extension SoftwareUpdateRules {
         /// one they reported in an earlier refresh, then the first public
         /// posting date this app saw of the build, and only then Apple’s public
         /// posting date of today.
-        public static func basis(_ release: AppleReleases.Release, _ catalog: AppleReleases.Catalog, model: String?,
+        static func basis(_ release: AppleReleases.Release, _ catalog: AppleReleases.Catalog, model: String?,
                           boardID: String?, known: PostingBasis = PostingBasis()) -> (date: Date, source: DeadlineSource)? {
             let key = PostingBasis.key(release.platform, release.version)
             if let reported = known.reported[key] { return (reported, .otherDevices) }
@@ -508,7 +508,7 @@ extension SoftwareUpdateRules {
 
         /// A local date-time a device reports for its pending update’s
         /// deadline, without an offset (`2026-11-16T23:59:00`); nil otherwise.
-        public static func reportedLocal(_ text: String?) -> String? {
+        static func reportedLocal(_ text: String?) -> String? {
             JamfPro.SoftwareUpdateStatus.PendingVersion(targetLocalDateTime: text).targetLocal
         }
 
@@ -517,7 +517,7 @@ extension SoftwareUpdateRules {
         /// written with a 12-hour clock (`2026-11-23 10:59:11 PM +0000`, a
         /// narrow no-break space before PM, seen on a Mac). Nil for a local
         /// time without an offset.
-        public static func reportedMoment(_ pending: JamfPro.SoftwareUpdateStatus.PendingVersion?) -> (date: Date, offset: Int)? {
+        static func reportedMoment(_ pending: JamfPro.SoftwareUpdateStatus.PendingVersion?) -> (date: Date, offset: Int)? {
             guard let pending, let date = pending.targetDate, let offset = pending.targetOffset else { return nil }
             return (date, offset)
         }
@@ -526,12 +526,12 @@ extension SoftwareUpdateRules {
         /// without an offset: as a 24-hour local date-time (`2026-11-23T22:59:11`)
         /// and the offset in seconds. Any space before AM or PM counts, also a
         /// (narrow) no-break space. Nil for anything else.
-        public static func twelveHour(_ text: String?) -> (local: String, offset: Int?)? {
+        static func twelveHour(_ text: String?) -> (local: String, offset: Int?)? {
             JamfPro.SoftwareUpdateStatus.PendingVersion.twelveHour(text)
         }
 
         /// Whether the device names a declaration as the reason it installs.
-        public static func fromDeclaration(_ status: JamfPro.SoftwareUpdateStatus) -> Bool {
+        static func fromDeclaration(_ status: JamfPro.SoftwareUpdateStatus) -> Bool {
             status.installReasons.contains { $0.caseInsensitiveCompare("declaration") == .orderedSame }
         }
 
@@ -569,7 +569,7 @@ extension SoftwareUpdateRules {
         /// The posting date the Blueprint’s devices report Jamf counted from,
         /// per platform and version: the one most of them report, the earliest
         /// of those when as many report another.
-        public static func reportedPostings(_ reports: [(platform: AppleReleases.Platform, version: OSVersion, posted: Date)]) -> [String: Date] {
+        static func reportedPostings(_ reports: [(platform: AppleReleases.Platform, version: OSVersion, posted: Date)]) -> [String: Date] {
             var counts: [String: [Date: Int]] = [:]
             for report in reports { counts[PostingBasis.key(report.platform, report.version), default: [:]][report.posted, default: 0] += 1 }
             return counts.compactMapValues { dates in
@@ -582,7 +582,7 @@ extension SoftwareUpdateRules {
         /// its target is unknown rather than lower than what it runs. A newer
         /// version that isn’t such a release (too new for the delay, a beta)
         /// is simply ahead.
-        public static func runsNewer(_ current: OSVersion?, than pick: AppleReleases.Release, _ catalog: AppleReleases.Catalog,
+        static func runsNewer(_ current: OSVersion?, than pick: AppleReleases.Release, _ catalog: AppleReleases.Catalog,
                               _ platform: AppleReleases.Platform, days: Int, now: Date, osName: String) -> DeviceTarget? {
             guard let current, current > pick.version,
                   releases(catalog, platform, days: days, now: now).contains(where: { $0.version == current }) else { return nil }
@@ -876,7 +876,7 @@ extension SoftwareUpdateRules {
 
         /// Apple’s posting dates of a release, public or not, for any build and
         /// device, oldest first; empty when its list has none.
-        public static func postings(of release: AppleReleases.Release) -> [Date] {
+        static func postings(of release: AppleReleases.Release) -> [Date] {
             Set(release.postings.compactMap(\.date)).sorted()
         }
 
@@ -885,7 +885,7 @@ extension SoftwareUpdateRules {
         /// known, by its full date and clock time; otherwise a moment, which can
         /// be any zone’s local time (a Mac writes UTC), by its minutes only
         /// (zones are whole quarter hours apart).
-        public static func sameClock(reported: Date?, reportedLocal: String?, expected: String, timeZone: String? = nil) -> Bool {
+        static func sameClock(reported: Date?, reportedLocal: String?, expected: String, timeZone: String? = nil) -> Bool {
             let expectedClock = expected.dropFirst(11).prefix(5)
             if let reported, let zone = timeZone.flatMap(TimeZone.init(identifier:)) {
                 return localText(reported, offset: zone.secondsFromGMT(for: reported)).prefix(16) == expected.prefix(16)
@@ -926,7 +926,7 @@ extension SoftwareUpdateRules {
         /// Whether the model can run a release: by the release’s own device
         /// list when Apple’s data has one for this device (some releases are
         /// for some devices only), else by its major.
-        public static func runs(_ release: AppleReleases.Release, model: String?, boardID: String?, _ catalog: AppleReleases.Catalog,
+        static func runs(_ release: AppleReleases.Release, model: String?, boardID: String?, _ catalog: AppleReleases.Catalog,
                          _ platform: AppleReleases.Platform) -> Bool {
             catalog.supports(release: release, model: model, boardID: boardID)
                 ?? (catalog.supports(model: model, boardID: boardID, major: release.version.major, platform) != false)
@@ -934,7 +934,7 @@ extension SoftwareUpdateRules {
 
         /// The platform’s releases at least `days` old, newest first (no Rapid
         /// Security Responses).
-        public static func releases(_ catalog: AppleReleases.Catalog, _ platform: AppleReleases.Platform, days: Int, now: Date,
+        static func releases(_ catalog: AppleReleases.Catalog, _ platform: AppleReleases.Platform, days: Int, now: Date,
                              model: String? = nil, boardID: String? = nil) -> [AppleReleases.Release] {
             catalog.releases
                 .filter { $0.platform == platform && $0.version.extra == nil }
@@ -953,7 +953,7 @@ extension SoftwareUpdateRules {
         /// only). A release first seen outside the public catalog and newer than
         /// every public one isn’t offered yet, so it can’t be a target, and its
         /// deadline can’t fall back to a date before Apple offered it.
-        public static func isOffered(_ release: AppleReleases.Release, _ catalog: AppleReleases.Catalog,
+        static func isOffered(_ release: AppleReleases.Release, _ catalog: AppleReleases.Catalog,
                               model: String? = nil, boardID: String? = nil, now: Date = .distantFuture) -> Bool {
             if let posted = catalog.publicPosting(of: release, model: model, boardID: boardID)?.date { return posted <= now }
             guard !release.postings.isEmpty else { return true }
@@ -965,7 +965,7 @@ extension SoftwareUpdateRules {
 
         /// Apple’s release day plus `days`, at `HH:MM`, in the device’s local
         /// time (`2026-11-23T17:00:00`). Apple dates a release by its day.
-        public static func deadline(released: Date, days: Int, time: String?) -> String {
+        static func deadline(released: Date, days: Int, time: String?) -> String {
             var calendar = Calendar(identifier: .gregorian)
             calendar.timeZone = TimeZone(identifier: "UTC") ?? .gmt
             let day = calendar.date(byAdding: .day, value: days, to: calendar.startOfDay(for: released)) ?? released
@@ -982,7 +982,7 @@ extension SoftwareUpdateRules {
 
         /// Whether the deadline has passed: in the device’s zone, or, for a
         /// device without one (Macs), in this Mac’s.
-        public static func isPastDeadline(_ local: String?, timeZone: String?, now: Date) -> Bool? {
+        static func isPastDeadline(_ local: String?, timeZone: String?, now: Date) -> Bool? {
             guard let local else { return nil }
             let zone = timeZone.flatMap(TimeZone.init(identifier:)) ?? .current
             return JamfPlatform.SoftwareUpdateBlock.deadline(local, in: zone).map { $0 <= now }
