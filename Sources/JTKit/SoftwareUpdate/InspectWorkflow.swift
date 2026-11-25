@@ -4,8 +4,16 @@ extension SoftwareUpdateRules {
     /// Inspect: for the devices chosen, reads each one’s status report, its
     /// Platform API device and its declaration reports (all GETs, through
     /// JTKit), and lists every reason it may not update.
+    ///
+    /// The status reports go to `jamfPro`, the device and its declaration
+    /// reports to `platform`, as the `Reader` splits them: the same gateway
+    /// client twice for an app on the Platform API alone, or a Jamf Pro
+    /// client and a Platform client, each with the app’s own request limits.
     public nonisolated struct InspectWorkflow: Sendable {
-        public let client: JamfPlatform.Client
+        public let jamfPro: JamfPlatform.Client
+        public let platform: JamfPlatform.Client
+        /// The Platform client; with the one-client initializer, the only client.
+        public var client: JamfPlatform.Client { platform }
         /// Devices read at the same time.
         public var parallel = 4
 
@@ -48,7 +56,7 @@ extension SoftwareUpdateRules {
             var input = InspectInput(member: member, device: row)
             do {
                 if let managementID = member.managementID,
-                   let items = try await client.statusItems(managementID: managementID, kind: member.kind) {
+                   let items = try await jamfPro.statusItems(managementID: managementID, kind: member.kind) {
                     // the raw items, for when the install state last changed; one request, as before
                     input.status = JamfPro.SoftwareUpdateStatus(items: items)
                     input.installStateChanged = items.last { $0.key == "softwareupdate.install-state" }?.lastUpdateTime
@@ -56,10 +64,10 @@ extension SoftwareUpdateRules {
                     input.osVersionChanged = items.last { $0.key == "device.operating-system.version" }?.lastUpdateTime
                         .flatMap { JamfPro.serverDate($0, timeZone: serverTimeZone) }
                 }
-                guard let serial = member.serialNumber, let device = try await client.device(serial: serial) else { return input }
+                guard let serial = member.serialNumber, let device = try await platform.device(serial: serial) else { return input }
                 input.platformDeviceID = device.id
                 do {
-                    input.reports = try await client.declarationReports(deviceID: device.id) ?? []
+                    input.reports = try await platform.declarationReports(deviceID: device.id) ?? []
                 } catch is CancellationError {
                     input.problem = "Stopped"
                 } catch {
@@ -73,12 +81,21 @@ extension SoftwareUpdateRules {
             return input
         }
 
-        /// Every stored property, in order, with the same defaults as the memberwise initializer.
+        /// One client for everything: the Platform API, also as the gateway to Jamf Pro.
         public init(
             client: JamfPlatform.Client,
             parallel: Int = 4
         ) {
-            self.client = client
+            self.init(jamfPro: client, platform: client, parallel: parallel)
+        }
+
+        public init(
+            jamfPro: JamfPlatform.Client,
+            platform: JamfPlatform.Client,
+            parallel: Int = 4
+        ) {
+            self.jamfPro = jamfPro
+            self.platform = platform
             self.parallel = parallel
         }
     }
