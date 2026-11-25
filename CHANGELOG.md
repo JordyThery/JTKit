@@ -28,9 +28,12 @@ API client. Code written for 1.8 compiles unchanged.
   (`2026-11-23 10:59:11 PM +0000`, any space before AM or PM; 12 AM is midnight). 24-hour texts read as before.
 - `DemoSoftwareUpdate`: the Mac Blueprint’s time of day is 22:59 (`macDeploymentTime`), and the Studio Macs group has
   16 Macs.
+- `DemoSoftwareUpdateServer`: the first read of each demo scope group in a launch also lists a pilot device
+  (`formerDevices`: Pilot Mac 01 in Studio Macs, Pilot iPad 01 in Field iPads); later reads don’t.
 
 ### What an app needs to do
-- Nothing to compile. An app that counts the demo Macs sees 16 Studio Macs instead of 11.
+- Nothing to compile. An app that counts the demo Macs sees 16 Studio Macs instead of 11, and 17 on the first read of
+  Studio Macs in a launch (with Pilot Mac 01); Field iPads has Pilot iPad 01 on its first read too.
 
 ## 1.8.1 (2026-11-17)
 A patch release: no crash in Release builds made with Swift 6.4 when several reads run at once. Code written for 1.8

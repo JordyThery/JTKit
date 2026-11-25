@@ -471,10 +471,11 @@ public nonisolated final class DemoSoftwareUpdateServer: DemoServer, @unchecked 
     }
 
     /// The pilot devices (`formerDevices`) of a family that are in the
-    /// Blueprint’s scope group: only until its members are read a second
-    /// time, so the first refresh of each Blueprint in a launch has them and
-    /// a later one finds they have left the scope. `membership`: this is
-    /// that read (its first page), which counts.
+    /// Blueprint’s scope group: only until that group’s members are read a
+    /// second time, so the first refresh of each Blueprint in a launch has
+    /// them and a later one finds they have left the scope. The reads are
+    /// counted per scope group (Field iPads, Studio Macs: one per family).
+    /// `membership`: this is that read (its first page), which counts.
     private func pilots(_ family: DemoSoftwareUpdate.Family, membership: Bool = false) -> [DemoSoftwareUpdate.Device] {
         let reads = lock.withLock {
             let reads = membershipReads[family, default: 0]
