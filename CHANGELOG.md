@@ -1,6 +1,6 @@
 # Changelog
 
-## 1.9.1 (unreleased)
+## 1.9.1 (2026-11-25)
 A patch release: Inspect can read through two clients, as the reader does. Code written for 1.9 compiles unchanged and
 behaves the same.
 
