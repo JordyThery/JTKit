@@ -373,7 +373,9 @@ public actor HTTPClient {
     ///     Graph: 4); the others wait in order. A request keeps its turn while
     ///     it waits to be retried. Nil: no limit.
     ///   - rateLimit: at most so many requests in a rolling window (Apple
-    ///     Business and Apple School Manager). Nil: no limit.
+    ///     Business and Apple School Manager; the Platform API’s 100 a
+    ///     second). Nil: no limit. With a window of a second or less, waits
+    ///     under a second aren’t logged.
     ///   - sleep, random, now: injectable for tests.
     public init(
         baseURL: URL,
@@ -617,8 +619,15 @@ public actor HTTPClient {
         return (urlRequest, token)
     }
 
+    /// For a limit whose window is a second or less (requests a second),
+    /// waits shorter than this aren’t written to the activity log or shown
+    /// in the recorder’s `waits`: they only wait. A longer window logs every wait.
+    static let shortestLoggedRateWait: TimeInterval = 1
+
     /// Waits until another request fits in the rate limit’s window. The
     /// slot is taken before anything is sent, so simultaneous requests queue.
+    /// Every wait is written to the log and shown in `RequestWaits`, except
+    /// one under a second for a limit with a window of a second or less.
     private func reserveSlot(for request: HTTPRequest) async throws {
         guard let rateLimit else { return }
         while true {
@@ -629,6 +638,16 @@ public actor HTTPClient {
                 return
             }
             let delay = max(rateLimit.window - current.timeIntervalSince(oldest), 0) + 0.1
+            // a limit per second waits fractions of a second all the time: a wait under a second
+            // isn't worth a line in the log or the status. A longer window (Apple's per minute) logs every wait
+            if rateLimit.window <= 1 && delay < Self.shortestLoggedRateWait {
+                do {
+                    try await sleep(.milliseconds(Int((delay * 1000).rounded(.up))))
+                } catch {
+                    throw CancellationError()
+                }
+                continue
+            }
             await recorder.note(request.method, request.path,
                                 note: "\(rateLimit.explanation): waiting \(Int(delay.rounded(.up))) s.",
                                 category: "Retry", isWarning: true)

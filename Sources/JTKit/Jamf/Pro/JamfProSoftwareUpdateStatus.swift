@@ -52,7 +52,8 @@ extension JamfPro {
             public var osVersion: String?
             public var buildVersion: String?
             /// The deadline as the device wrote it: in its local time without a
-            /// zone, or as a moment with an offset (`2026-11-09 22:59:12 +0000`).
+            /// zone, or as a moment with an offset (`2026-11-09 22:59:12 +0000`),
+            /// with a 24-hour or a 12-hour clock (`targetDate`, `targetLocal` read both).
             public var targetLocalDateTime: String?
             /// When the pending version item last changed: the Jamf Pro
             /// server’s local time, without a zone.
@@ -74,11 +75,26 @@ extension JamfPro {
             /// nil without one.
             public var targetOffset: Int? { Self.offsetDate(targetLocalDateTime)?.offset }
 
-            /// `2026-11-09 22:59:12 +0000`, `2026-11-09T22:59:12+01:00` or `…Z`.
+            /// The deadline as a local date-time without an offset, written
+            /// `2026-11-16T23:59:00`: as the device wrote it (`2026-11-16
+            /// 23:59:00` too), or from a 12-hour clock (`2026-11-16 11:59:00
+            /// PM`). Nil when the text carries an offset (then `targetDate`
+            /// has it) or isn’t a date-time.
+            public var targetLocal: String? {
+                if let twelve = Self.twelveHour(targetLocalDateTime), twelve.offset == nil { return twelve.local }
+                guard let local = targetLocalDateTime?.replacingOccurrences(of: " ", with: "T"),
+                      local.range(of: "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}$", options: .regularExpression) != nil
+                else { return nil }
+                return local
+            }
+
+            /// `2026-11-09 22:59:12 +0000`, `2026-11-09T22:59:12+01:00` or `…Z`;
+            /// also with a 12-hour clock (`2026-11-23 10:59:11 PM +0000`, seen on
+            /// a Mac with a narrow no-break space before PM).
             static func offsetDate(_ text: String?) -> (date: Date, offset: Int)? {
                 guard let text = text?.trimmingCharacters(in: .whitespaces),
                       let match = text.firstMatch(of: /^(\d{4}-\d{2}-\d{2})[T ](\d{2}:\d{2}(?::\d{2})?)(?:\.\d+)?\s*(Z|[+-]\d{2}:?\d{2})$/)
-                else { return nil }
+                else { return twelveHourDate(text) }
                 let zone = String(match.output.3)
                 var offset = 0
                 if zone != "Z" {
@@ -92,6 +108,38 @@ extension JamfPro {
                 formatter.timeZone = TimeZone(secondsFromGMT: offset)
                 formatter.dateFormat = "yyyy-MM-dd'T'HH:mm:ss"
                 return formatter.date(from: "\(match.output.1)T\(clock)").map { ($0, offset) }
+            }
+
+            /// A 12-hour date-time with an offset, as a moment; nil without an offset.
+            static func twelveHourDate(_ text: String?) -> (date: Date, offset: Int)? {
+                guard let twelve = twelveHour(text), let offset = twelve.offset else { return nil }
+                let formatter = DateFormatter()
+                formatter.locale = Locale(identifier: "en_US_POSIX")
+                formatter.timeZone = TimeZone(secondsFromGMT: offset)
+                formatter.dateFormat = "yyyy-MM-dd'T'HH:mm:ss"
+                return formatter.date(from: twelve.local).map { ($0, offset) }
+            }
+
+            /// A date-time written with a 12-hour clock and AM or PM, with or
+            /// without an offset: as a 24-hour local date-time
+            /// (`2026-11-23T22:59:11`) and the offset in seconds. Any space
+            /// before AM or PM counts, also a (narrow) no-break space; 12 AM
+            /// is midnight, 12 PM noon. Nil for anything else.
+            static func twelveHour(_ text: String?) -> (local: String, offset: Int?)? {
+                guard let text else { return nil }
+                let spaced = String(text.unicodeScalars.map { CharacterSet.whitespaces.contains($0) ? " " : Character($0) })
+                    .trimmingCharacters(in: .whitespaces)
+                guard let match = spaced.firstMatch(of: /^(\d{4}-\d{2}-\d{2})[T ](\d{1,2}):(\d{2})(?::(\d{2}))? *([AaPp])[Mm] *(Z|[+-]\d{2}:?\d{2})?$/),
+                      let hour = Int(match.output.2), (1...12).contains(hour) else { return nil }
+                let pm = match.output.5.lowercased() == "p"
+                let clock = hour % 12 + (pm ? 12 : 0)
+                let local = String(format: "%@T%02d:%@:%@", String(match.output.1), clock, String(match.output.3),
+                                   match.output.4.map(String.init) ?? "00")
+                guard let zone = match.output.6.map(String.init) else { return (local, nil) }
+                if zone == "Z" { return (local, 0) }
+                let digits = zone.dropFirst().filter(\.isNumber)
+                guard digits.count == 4, let hours = Int(digits.prefix(2)), let minutes = Int(digits.suffix(2)) else { return nil }
+                return (local, (hours * 3_600 + minutes * 60) * (zone.hasPrefix("-") ? -1 : 1))
             }
         }
 
