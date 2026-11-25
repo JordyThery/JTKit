@@ -70,8 +70,12 @@ extension SoftwareUpdateRules {
         /// (`demoReportedDeadlines`).
         public var seedsDemoDeadlines = false
         public var staleDays = 30
-        /// Reads started at the same time.
+        /// Status reports read at the same time.
         public var parallel = 4
+        /// Page reads of the Blueprint’s declaration reports in flight at a
+        /// time, shared by every declaration: after a declaration’s first page
+        /// its other pages are read at once, within this budget.
+        public var pageReads = 16
 
         /// One client for everything: the Platform API, also as the gateway to Jamf Pro.
         public init(client: JamfPlatform.Client, catalog: AppleReleases.Catalog?, serverTimeZone: TimeZone) {
@@ -145,7 +149,9 @@ extension SoftwareUpdateRules {
             // the scope, read on every refresh
             progress(RefreshProgress(step: "Reading the Blueprint’s scope"))
             let platformGroups = try await platform.platformGroups()
-            let groups = try await jamfPro.jamfProGroups()
+            // only the group lists the scope needs: an iPhone-only Blueprint lists no computer groups
+            let kinds = Self.groupKinds(platformGroupIDs: blueprint.scopeDeviceGroups, platformGroups: platformGroups)
+            let groups = kinds.isEmpty ? [] : try await jamfPro.jamfProGroups(kinds)
             let keys = Self.scope(platformGroupIDs: blueprint.scopeDeviceGroups, platformGroups: platformGroups)
             let scope = keys.compactMap { key in groups.first { $0.id == key } }
                 .sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
@@ -168,15 +174,17 @@ extension SoftwareUpdateRules {
             var inputs = try await statuses(members) { done, total in
                 progress(RefreshProgress(step: "Reading status reports", done: done, total: total, unit: "devices"))
             }
-            // the Blueprint's update declarations, as the devices list them: each read once, for every device
-            let identifiers = BlueprintHealth.identifiers(blueprintID: blueprintID, statuses: inputs.map(\.status), blocks: blocks)
-            let declarations = try await declarationReports(identifiers, inputs: &inputs, progress: progress)
+            // the Blueprint's update declarations, as the devices list them: the pairs some device holds active
+            // read in full, the others once each, for their name
+            let reads = BlueprintHealth.reads(blueprintID: blueprintID, statuses: inputs.map(\.status), blocks: blocks)
+            let declarations = try await declarationReports(reads, inputs: &inputs, progress: progress)
             var deviceIDs: [String: String] = [:]
             for input in inputs {
                 if let platformID = input.platformDeviceID?.lowercased() { deviceIDs[platformID] = Self.key(input.member) }
             }
             let tied = BlueprintHealth.byDevice(declarations.reports, deviceIDs: deviceIDs)
-            let current = BlueprintHealth.catalogue(declarations.reports, blocks: blocks, blueprintName: blueprint.overview.name)
+            let current = BlueprintHealth.catalogue(declarations.reports + declarations.samples, blocks: blocks,
+                                                    blueprintName: blueprint.overview.name)
             let (known, remember) = deadlineBasis(inputs, blocks: blocks, blueprint: blueprint, updateStarted: updateStarted, now: now)
             var devices = inputs.map { input in
                 let osName = Classifier.osName(isComputer: input.member.kind == .computer,
@@ -192,7 +200,7 @@ extension SoftwareUpdateRules {
                 let built = BlueprintHealth.make(byDevice: tied.reports, devices: devices, current: current,
                                                  blueprintName: blueprint.overview.name, blueprintID: blueprintID,
                                                  unmatchedDevices: tied.unmatched,
-                                                 devicesWithoutPlatformID: identifiers.isEmpty ? 0 : inputs.filter { $0.platformDeviceID == nil }.count)
+                                                 devicesWithoutPlatformID: reads.isEmpty ? 0 : inputs.filter { $0.platformDeviceID == nil }.count)
                 // the cause where nothing else explains it: the list says it
                 for index in devices.indices {
                     devices[index].declarationsChecked = true
@@ -222,15 +230,46 @@ extension SoftwareUpdateRules {
                            reportedDeadlines: remember, problems: problems)
         }
 
-        /// Each of the Blueprint’s update declarations the devices list, read
-        /// once (its devices’ reports), a few at a time, and the Platform device
-        /// list, read once, to tie each report to a device by serial number. A
-        /// refusal or a failed read stops the reading and is returned as the
-        /// problem (never as “serial not found”); a declaration nothing reported
-        /// gives none. A stop is thrown, so a stopped refresh is never saved.
+        /// What the health step read of the Blueprint’s declarations.
+        public struct DeclarationReadings: Sendable {
+            /// Every report of the declarations read in full (`BlueprintHealth.Reads.full`).
+            public var reports: [JamfPlatform.DeclarationReport] = []
+            /// One report per sampled pair (`Reads.sampled`), the newest: for the
+            /// catalogue (its name and predicate), never tied to a device.
+            public var samples: [JamfPlatform.DeclarationReport] = []
+            /// Why the reading stopped, if it did.
+            public var problem: String?
+
+            public init(reports: [JamfPlatform.DeclarationReport] = [], samples: [JamfPlatform.DeclarationReport] = [], problem: String? = nil) {
+                self.reports = reports
+                self.samples = samples
+                self.problem = problem
+            }
+        }
+
+        /// Each of the given update declarations read in full (its devices’
+        /// reports, every page), and the Platform device list, read once, to tie
+        /// each report to a device by serial number. As `declarationReports(_:inputs:progress:)`
+        /// with `BlueprintHealth.Reads`, sampling nothing.
         public func declarationReports(_ identifiers: [String], inputs: inout [DeviceInput],
                                 progress: @Sendable (RefreshProgress) -> Void = { _ in }) async throws -> (reports: [JamfPlatform.DeclarationReport], problem: String?) {
-            guard !identifiers.isEmpty else { return ([], nil) }
+            let read = try await declarationReports(BlueprintHealth.Reads(full: identifiers), inputs: &inputs, progress: progress)
+            return (read.reports, read.problem)
+        }
+
+        /// The Blueprint’s update declarations as `BlueprintHealth.reads` lists
+        /// them: the pairs some device holds active in full (their devices’
+        /// reports; after a declaration’s first page the pages its count
+        /// announces are read at once, every page read within `pageReads`),
+        /// the other pairs once each (their newest report, for the catalogue); and the
+        /// Platform device list, read once, to tie each report to a device by
+        /// serial number. A refusal or a failed read stops the reading and is
+        /// returned as the problem (never as “serial not found”); a declaration
+        /// nothing reported gives none. A stop is thrown, so a stopped refresh
+        /// is never saved.
+        public func declarationReports(_ reads: BlueprintHealth.Reads, inputs: inout [DeviceInput],
+                                progress: @Sendable (RefreshProgress) -> Void = { _ in }) async throws -> DeclarationReadings {
+            guard !reads.isEmpty else { return DeclarationReadings() }
             progress(RefreshProgress(step: "Reading the device list"))
             let platformDevices: [JamfPlatform.Device]
             do {
@@ -238,8 +277,8 @@ extension SoftwareUpdateRules {
             } catch is CancellationError {
                 throw CancellationError()
             } catch {
-                return ([], "The Platform device list couldn’t be read, so the Blueprint’s declaration reports can’t be tied to devices: "
-                            + error.localizedDescription)
+                return DeclarationReadings(problem: "The Platform device list couldn’t be read, so the Blueprint’s declaration reports can’t be tied to devices: "
+                                           + error.localizedDescription)
             }
             var bySerial: [String: String] = [:]
             for device in platformDevices {
@@ -248,32 +287,100 @@ extension SoftwareUpdateRules {
             for index in inputs.indices {
                 inputs[index].platformDeviceID = inputs[index].member.serialNumber.flatMap { bySerial[$0.uppercased()] }
             }
+            let budget = ReadBudget(pageReads)
+            let full = reads.full
+            let sampled = reads.sampled
             do {
-                var reports: [JamfPlatform.DeclarationReport] = []
-                try await withThrowingTaskGroup(of: [JamfPlatform.DeclarationReport].self) { group in
-                    var next = 0
-                    func start() {
-                        guard next < identifiers.count else { return }
-                        let identifier = identifiers[next]
-                        next += 1
-                        group.addTask { try await platform.declarationReports(declarationIdentifier: identifier) ?? [] }
+                // in the order of the identifiers, whichever finishes first
+                var found = [[JamfPlatform.DeclarationReport]](repeating: [], count: full.count + sampled.count)
+                try await withThrowingTaskGroup(of: (Int, [JamfPlatform.DeclarationReport]).self) { group in
+                    for (index, identifier) in full.enumerated() {
+                        group.addTask { (index, try await self.declaration(identifier, budget: budget)) }
                     }
-                    for _ in 0..<max(1, parallel) { start() }
+                    for (offset, identifier) in sampled.enumerated() {
+                        group.addTask { (full.count + offset, try await self.sample(identifier, budget: budget)) }
+                    }
                     var read = 0
-                    progress(RefreshProgress(step: "Reading Blueprint health", done: 0, total: identifiers.count, unit: "declarations"))
-                    while let found = try await group.next() {
-                        reports += found
+                    progress(RefreshProgress(step: "Reading Blueprint health", done: 0, total: reads.count, unit: "declarations"))
+                    while let (index, reports) = try await group.next() {
+                        found[index] = reports
                         read += 1
-                        progress(RefreshProgress(step: "Reading Blueprint health", done: read, total: identifiers.count, unit: "declarations"))
-                        start()
+                        progress(RefreshProgress(step: "Reading Blueprint health", done: read, total: reads.count, unit: "declarations"))
                     }
                 }
-                return (reports, nil)
+                return DeclarationReadings(reports: found.prefix(full.count).flatMap { $0 },
+                                           samples: found.dropFirst(full.count).flatMap { $0 })
             } catch is CancellationError {
                 throw CancellationError()
             } catch {
-                return ([], "The Blueprint’s declaration reports couldn’t be read: \(error.localizedDescription)")
+                return DeclarationReadings(problem: "The Blueprint’s declaration reports couldn’t be read: \(error.localizedDescription)")
             }
+        }
+
+        /// Every report of one declaration: its first page, then the pages its
+        /// count announces at once (each within the budget), then one page
+        /// after another should more have come meanwhile, or when the answer
+        /// carries no count. None when nothing reported it (404).
+        func declaration(_ identifier: String, budget: ReadBudget) async throws -> [JamfPlatform.DeclarationReport] {
+            let pageSize = 100
+            let maxPages = 1_000
+            func page(_ number: Int) async throws -> JamfPlatform.Page<JamfPlatform.DeclarationReport>? {
+                try await budget.run {
+                    try await self.platform.declarationReportPage(declarationIdentifier: identifier, page: number, pageSize: pageSize)
+                }
+            }
+            // task-group children call this: one return (swiftlang/swift#93208)
+            var reports: [JamfPlatform.DeclarationReport] = []
+            if let first = try await page(0) {
+                reports = first.results
+                var received = first.results.count + first.unreadableCount
+                var last = first
+                var next = 1
+                if JamfPlatform.hasMore(after: first, received: received, pageSize: pageSize), let total = first.totalCount {
+                    let announced = min((total + pageSize - 1) / pageSize, maxPages)
+                    if announced > 1 {
+                        let rest = try await withThrowingTaskGroup(of: (Int, JamfPlatform.Page<JamfPlatform.DeclarationReport>?).self,
+                                                                   returning: [(Int, JamfPlatform.Page<JamfPlatform.DeclarationReport>?)].self) { group in
+                            for number in 1..<announced {
+                                group.addTask { (number, try await page(number)) }
+                            }
+                            var pages: [(Int, JamfPlatform.Page<JamfPlatform.DeclarationReport>?)] = []
+                            for try await result in group { pages.append(result) }
+                            return pages.sorted { $0.0 < $1.0 }
+                        }
+                        for (_, found) in rest {
+                            guard let found else { break }
+                            reports += found.results
+                            received += found.results.count + found.unreadableCount
+                            last = found
+                        }
+                        next = announced
+                    }
+                }
+                while JamfPlatform.hasMore(after: last, received: received, pageSize: pageSize) {
+                    guard next < maxPages else {
+                        throw JamfPlatform.APIError(.pageLimitReached(path: "ddm/report/v1/declarations/\(identifier)/devices", pages: maxPages))
+                    }
+                    guard let found = try await page(next) else { break }
+                    reports += found.results
+                    received += found.results.count + found.unreadableCount
+                    last = found
+                    next += 1
+                }
+            }
+            return reports
+        }
+
+        /// One report of a pair no device in scope holds active: the newest
+        /// inactive one, which carries the predicate Jamf last gave the pair
+        /// (an active report carries none), as the catalogue would pick it
+        /// from every report. None when nothing reported it.
+        func sample(_ identifier: String, budget: ReadBudget) async throws -> [JamfPlatform.DeclarationReport] {
+            let page = try await budget.run {
+                try await self.platform.declarationReportPage(declarationIdentifier: identifier, page: 0, pageSize: 1,
+                                                              filter: "active==false", sort: "dateUpdated,desc")
+            }
+            return page?.results ?? []
         }
 
         /// What the Blueprint’s computed deadlines count from: the first public
@@ -496,6 +603,19 @@ extension SoftwareUpdateRules {
                 }
             }
             return rules.isEmpty ? "No software update" : Array(NSOrderedSet(array: rules)).compactMap { $0 as? String }.joined(separator: "; ")
+        }
+
+        /// The kinds of Jamf Pro groups the Blueprint’s scope holds, mobile
+        /// device groups first: the reader lists only these (an iPhone-only
+        /// Blueprint lists no computer groups). Empty when no scope group is a
+        /// Jamf Pro group.
+        public static func groupKinds(platformGroupIDs: [String], platformGroups: [JamfPlatform.PlatformGroup]) -> [MDMCommand.DeviceKind] {
+            let wanted = Set(platformGroupIDs.map { $0.lowercased() })
+            let types = Set(platformGroups.filter { wanted.contains($0.id.lowercased()) }.map(\.deviceType))
+            var kinds: [MDMCommand.DeviceKind] = []
+            if types.contains(.mobile) { kinds.append(.mobileDevice) }
+            if types.contains(.computer) { kinds.append(.computer) }
+            return kinds
         }
 
         /// The Blueprint’s scope as Jamf Pro groups (by kind and number), from
