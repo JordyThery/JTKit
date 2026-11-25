@@ -214,6 +214,9 @@ struct DemoSoftwareUpdateTests {
         let (_, client, _) = try demo()
         let groups = try await client.jamfProGroups()
         #expect(groups.map(\.name) == ["Field iPads", "Spare iPads", "Studio Macs", "Loaner Macs"])
+        let first = try await client.members(of: groups[0])
+        // the first read in a launch has the pilot iPad too (1.9.0); a second one only the Field iPads
+        #expect(Set(first.map(\.serialNumber)) == Set((DemoSoftwareUpdate.iPads + DemoSoftwareUpdate.formerDevices.filter { $0.family == .iPad }).map(\.serial)))
         let iPads = try await client.members(of: groups[0])
         #expect(iPads.count == DemoSoftwareUpdate.iPads.count)
         #expect(Set(iPads.map(\.serialNumber)) == Set(DemoSoftwareUpdate.iPads.map(\.serial)))
@@ -239,7 +242,8 @@ struct DemoSoftwareUpdateTests {
         let groups = try await client.computerGroups()
         let studio = try await client.members(of: try #require(groups.first { $0.isSmart }))
         let loaners = try await client.members(of: try #require(groups.first { !$0.isSmart }))
-        #expect(studio.count == 16 && loaners.count == 2)
+        // the first read in a launch has the pilot Mac too
+        #expect(studio.count == 17 && loaners.count == 2)
         let old = try #require(studio.first { $0.modelIdentifier == "MacBookPro15,2" })
         let status = try await client.softwareUpdateStatus(managementID: old.managementID ?? "", kind: .computer)
         #expect(status?.deviceID == "J132AP")
@@ -372,8 +376,9 @@ struct DemoSoftwareUpdateDetailsTests {
 
         let first = try #require(DemoSoftwareUpdate.macPairs.first)
         let reports = try #require(try await client.declarationReports(declarationIdentifier: first.configuration))
-        // every Mac the Blueprint reaches (not the Loaner Macs), each once
-        #expect(reports.count == DemoSoftwareUpdate.macs.count - 2)
+        // every Mac the Blueprint reaches (not the Loaner Macs), each once, and the pilot Mac
+        // (in scope until the Studio Macs' members are read a second time)
+        #expect(reports.count == DemoSoftwareUpdate.macs.count - 2 + 1)
         let syncing = try device(205).platformID, uncovered = try device(209).platformID
         #expect(reports.first { $0.deviceID == mac.platformID }?.status == .successful)
         #expect(reports.first { $0.deviceID == syncing }?.status == .awaitingSync)
@@ -389,8 +394,10 @@ struct DemoSoftwareUpdateDetailsTests {
     func deviceList() async throws {
         let (_, client, _) = try demo()
         let devices = try await client.devices(pageSize: 5)
-        #expect(devices.count == DemoSoftwareUpdate.devices.count)
-        #expect(Set(devices.compactMap(\.serialNumber)) == Set(DemoSoftwareUpdate.devices.map(\.serial)))
+        // every device Jamf knows, the pilot devices that left the scope too
+        let known = DemoSoftwareUpdate.devices + DemoSoftwareUpdate.formerDevices
+        #expect(devices.count == known.count)
+        #expect(Set(devices.compactMap(\.serialNumber)) == Set(known.map(\.serial)))
         #expect(devices.first { $0.serialNumber == DemoSoftwareUpdate.devices[0].serial }?.id == DemoSoftwareUpdate.devices[0].platformID)
     }
 

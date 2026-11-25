@@ -42,7 +42,8 @@ struct SoftwareUpdateReaderTests {
         let reader = SoftwareUpdateRules.Reader(client: try demo.client(), catalog: try await demo.catalog(), serverTimeZone: .gmt)
         let iPads = try await reader.read(blueprintID: DemoSoftwareUpdate.iPadBlueprintID)
         #expect(iPads.scope.map(\.name) == ["Field iPads"])
-        #expect(Set(iPads.devices.map(\.name)) == Set(DemoSoftwareUpdate.iPads.map(\.name)))
+        // the first refresh in a launch: the pilot iPad is in scope too
+        #expect(Set(iPads.devices.map(\.name)) == Set(DemoSoftwareUpdate.iPads.map(\.name) + ["Pilot iPad 01"]))
         #expect(iPads.devices.count == iPads.members.count && iPads.inputs.count == iPads.members.count)
         #expect(try device(iPads, "Field iPad 01").category == .onTarget)
         #expect(try device(iPads, "Field iPad 03").category == .inProgress)

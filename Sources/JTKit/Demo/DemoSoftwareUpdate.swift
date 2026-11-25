@@ -196,8 +196,11 @@ public enum DemoSoftwareUpdate {
     ]
 
     /// Devices that were in the pilot groups of `pastRefreshes` two and
-    /// three days back and are in no group today: they have left the
-    /// Blueprints’ scope. Jamf doesn’t answer for them.
+    /// three days back: in the Blueprints’ scope groups for the first
+    /// refresh of each Blueprint in a launch only (`DemoSoftwareUpdateServer`
+    /// stops listing them once a group’s members are read again), so a later
+    /// refresh finds they have left the scope. Jamf keeps answering for them
+    /// (inventory, status, the device list), as for any device it manages.
     public static let formerDevices: [Device] = [
         ipad(199, "Pilot iPad 01", "iPad Air 11-inch (M2)", "iPad14,8", "27.0.1", "Europe/Brussels", .idle),
         mac(299, "Pilot Mac 01", "MacBook Air (13-inch, M3, 2024)", "Mac15,12", "J613AP", "27.0.1", .idle),
@@ -451,7 +454,7 @@ public enum DemoSoftwareUpdate {
 
 /// Answers the demo Platform API’s group, inventory, DDM status and
 /// declaration report paths for `DemoSoftwareUpdate`’s devices (read only).
-public nonisolated final class DemoSoftwareUpdateServer: DemoServer {
+public nonisolated final class DemoSoftwareUpdateServer: DemoServer, @unchecked Sendable {
     static let paths = [
         "pro/v2/mobile-device-groups", "pro/v1/computer-groups", "pro/v3/computer-groups",
         "proclassic/computergroups", "pro/v4/computers-inventory", "pro/v1/ddm", "pro/v2/groups",
@@ -459,10 +462,31 @@ public nonisolated final class DemoSoftwareUpdateServer: DemoServer {
     ]
 
     private let now: Date
+    private let lock = NSLock()
+    /// How often each scope group’s members were read (their first page).
+    private var membershipReads: [DemoSoftwareUpdate.Family: Int] = [:]
 
     public init(now: Date = Date()) {
         self.now = now
     }
+
+    /// The pilot devices (`formerDevices`) of a family that are in the
+    /// Blueprint’s scope group: only until its members are read a second
+    /// time, so the first refresh of each Blueprint in a launch has them and
+    /// a later one finds they have left the scope. `membership`: this is
+    /// that read (its first page), which counts.
+    private func pilots(_ family: DemoSoftwareUpdate.Family, membership: Bool = false) -> [DemoSoftwareUpdate.Device] {
+        let reads = lock.withLock {
+            let reads = membershipReads[family, default: 0]
+            if membership { membershipReads[family] = reads + 1 }
+            return reads
+        }
+        let inScope = membership ? reads == 0 : reads <= 1
+        return inScope ? DemoSoftwareUpdate.formerDevices.filter { $0.family == family } : []
+    }
+
+    /// Every device Jamf knows, in a scope or not: the pilot devices too.
+    private var known: [DemoSoftwareUpdate.Device] { DemoSoftwareUpdate.devices + DemoSoftwareUpdate.formerDevices }
 
     public func respond(to request: DemoRequest) -> DemoResponse {
         guard request.method == "GET" else { return DemoJSON.response(405, ["httpStatus": 405, "errors": []]) }
@@ -479,7 +503,8 @@ public nonisolated final class DemoSoftwareUpdateServer: DemoServer {
                 return page([], request)
             }
             guard p[4] == DemoSoftwareUpdate.iPadGroupID, p[3] == "smart-group-membership" else { return notFound() }
-            return page(DemoSoftwareUpdate.iPads.map(mobileRecord), request)
+            let firstPage = (Int(request.query["page"] ?? "0") ?? 0) == 0
+            return page((DemoSoftwareUpdate.iPads + pilots(.iPad, membership: firstPage)).map(mobileRecord), request)
         case 3 where p == ["pro", "v2", "groups"]:
             // the Platform API's IDs of the groups the Blueprints are scoped to,
             // in the shape of Jamf's reference (groupType MOBILE or COMPUTER, smart)
@@ -496,7 +521,7 @@ public nonisolated final class DemoSoftwareUpdateServer: DemoServer {
             ])
         case 5 where Array(p[0...3]) == ["pro", "v3", "computer-groups", "smart-group-membership"]:
             guard p[4] == DemoSoftwareUpdate.macGroupID else { return notFound() }
-            return DemoJSON.response(200, ["members": studioMacs.map(\.number)])
+            return DemoJSON.response(200, ["members": (studioMacs + pilots(.mac, membership: true)).map(\.number)])
         case 4 where Array(p[0...2]) == ["proclassic", "computergroups", "id"]:
             guard p[3] == DemoSoftwareUpdate.loanerMacGroupID else { return notFound() }
             return DemoJSON.response(200, ["computer_group": [
@@ -505,13 +530,13 @@ public nonisolated final class DemoSoftwareUpdateServer: DemoServer {
             ]])
         case 3 where p == ["pro", "v4", "computers-inventory"]:
             let ids = Self.ids(in: request.query["filter"] ?? "")
-            return page(DemoSoftwareUpdate.macs.filter { ids.contains(String($0.number)) }.map(computerRecord), request)
+            return page(known.filter { $0.family == .mac && ids.contains(String($0.number)) }.map(computerRecord), request)
         case 5 where Array(p[0...2]) == ["pro", "v1", "ddm"] && p[4] == "status-items":
-            guard let device = DemoSoftwareUpdate.devices.first(where: { $0.managementID == p[3] }),
+            guard let device = known.first(where: { $0.managementID == p[3] }),
                   device.state != .noReport else { return notFound() }
             return DemoJSON.response(200, ["statusItems": statusItems(device)])
         case 6 where Array(p[0...3]) == ["ddm", "report", "v1", "devices"] && p[5] == "declarations":
-            guard let device = DemoSoftwareUpdate.devices.first(where: { $0.platformID == p[4] }) else { return notFound() }
+            guard let device = known.first(where: { $0.platformID == p[4] }) else { return notFound() }
             return reportPage(device, request)
         case 6 where Array(p[0...3]) == ["ddm", "report", "v1", "declarations"] && p[5] == "devices":
             return declarationDevices(p[4], request)
@@ -524,14 +549,14 @@ public nonisolated final class DemoSoftwareUpdateServer: DemoServer {
                 // the whole list, a page at a time (page, page-size), as Jamf's answers it
                 let page = Int(request.query["page"] ?? "0") ?? 0
                 let size = max(1, Int(request.query["page-size"] ?? "100") ?? 100)
-                let all = DemoSoftwareUpdate.devices
+                let all = known
                 let slice = Array(all.dropFirst(page * size).prefix(size))
                 return DemoJSON.response(200, ["page": page, "pageSize": size, "totalCount": all.count,
                                                "hasNext": (page + 1) * size < all.count, "results": slice.map(record)])
             }
             let serial = filter.replacingOccurrences(of: "serialNumber==", with: "")
                 .trimmingCharacters(in: CharacterSet(charactersIn: "\""))
-            let matches = DemoSoftwareUpdate.devices.filter { $0.serial.caseInsensitiveCompare(serial) == .orderedSame }
+            let matches = known.filter { $0.serial.caseInsensitiveCompare(serial) == .orderedSame }
             return DemoJSON.response(200, ["page": 0, "pageSize": 100, "totalCount": matches.count, "hasNext": false,
                                            "results": matches.map(record)])
         default:
@@ -737,7 +762,8 @@ public nonisolated final class DemoSoftwareUpdateServer: DemoServer {
             return DemoJSON.response(400, ["httpStatus": 400, "errors": [["code": "INVALID_FIELD", "field": "filter",
                                                                           "description": "filter is required"]]])
         }
-        let results = DemoSoftwareUpdate.devices.flatMap(reports)
+        // the pilot devices report the Blueprints' declarations while they are in scope
+        let results = (DemoSoftwareUpdate.devices + pilots(.iPad) + pilots(.mac)).flatMap(reports)
             .filter { $0["declarationIdentifier"] as? String == identifier && Self.passes($0, filter: filter) }
         guard !results.isEmpty else { return notFound() }
         let page = Int(request.query["page"] ?? "0") ?? 0

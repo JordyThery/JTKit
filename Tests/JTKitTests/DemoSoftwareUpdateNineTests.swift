@@ -8,10 +8,8 @@ import JTKitTestSupport
 @Suite("1.9.0: demo samples for the newer states")
 @MainActor
 struct DemoSoftwareUpdateNineTests {
-    private func read(_ blueprintID: String, seeds: Bool = true) async throws -> SoftwareUpdateRules.Reader.Reading {
-        let defaults = UserDefaults(suiteName: "jtkit-demo-nine-\(UUID().uuidString)")!
-        let mode = DemoMode(key: "demoMode", defaults: defaults, arguments: ["app"])
-        DemoSoftwareUpdate.install(on: mode.jamfPlatformServer)
+    private func read(_ blueprintID: String, seeds: Bool = true, in launch: DemoMode? = nil) async throws -> SoftwareUpdateRules.Reader.Reading {
+        let mode = launch ?? newLaunch()
         let source = try #require(mode.source(for: .demoJamfPlatform))
         let client = try JamfPlatform.Client(connection: source.connection, secret: source.secret,
                                              recorder: RequestRecorder(session: source.session, log: nil), sleep: { _ in })
@@ -20,6 +18,14 @@ struct DemoSoftwareUpdateNineTests {
         var reader = SoftwareUpdateRules.Reader(client: client, catalog: catalog, serverTimeZone: .gmt)
         reader.seedsDemoDeadlines = seeds
         return try await reader.read(blueprintID: blueprintID)
+    }
+
+    /// Demo Mode as a new launch sets it up.
+    private func newLaunch() -> DemoMode {
+        let defaults = UserDefaults(suiteName: "jtkit-demo-nine-\(UUID().uuidString)")!
+        let mode = DemoMode(key: "demoMode", defaults: defaults, arguments: ["app"])
+        DemoSoftwareUpdate.install(on: mode.jamfPlatformServer)
+        return mode
     }
 
     private func device(_ reading: SoftwareUpdateRules.Reader.Reading, _ name: String) throws -> SoftwareUpdateRules.DeviceStatus {
@@ -91,11 +97,16 @@ struct DemoSoftwareUpdateNineTests {
             #expect(refresh.formerMembers.isEmpty == !expected)
             #expect(refresh.formerMembers.allSatisfy { refresh.extraScopeGroup != nil && DemoSoftwareUpdate.formerDevices.contains($0) })
         }
-        let today = try await read(DemoSoftwareUpdate.iPadBlueprintID).members.map(\.serialNumber)
-            + read(DemoSoftwareUpdate.macBlueprintID).members.map(\.serialNumber)
-        for former in DemoSoftwareUpdate.formerDevices {
-            #expect(!today.contains(former.serial))
-            #expect(!DemoSoftwareUpdate.devices.contains(former))
+        // the first refresh of each Blueprint in a launch has its pilot device; the next one doesn't
+        let launch = newLaunch()
+        for (blueprint, name) in [(DemoSoftwareUpdate.iPadBlueprintID, "Pilot iPad 01"), (DemoSoftwareUpdate.macBlueprintID, "Pilot Mac 01")] {
+            let first = try await read(blueprint, in: launch)
+            #expect(first.devices.contains { $0.name == name }, "\(name) in the first refresh")
+            #expect(first.health?.unmatchedDevices == 0, "its declaration reports are tied to it")
+            let second = try await read(blueprint, in: launch)
+            #expect(!second.devices.contains { $0.name == name }, "\(name) left the scope by the second")
+            #expect(second.health?.unmatchedDevices == 0, "and no report of it is left over")
         }
+        for former in DemoSoftwareUpdate.formerDevices { #expect(!DemoSoftwareUpdate.devices.contains(former)) }
     }
 }
