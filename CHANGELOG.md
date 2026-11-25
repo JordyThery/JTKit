@@ -1,6 +1,6 @@
 # Changelog
 
-## 1.9.0 (unreleased)
+## 1.9.0 (2026-11-25)
 A minor release: the software update rules of Software Update Dashboard, shared, and request limits on the Platform
 API client. Code written for 1.8 compiles unchanged.
 
