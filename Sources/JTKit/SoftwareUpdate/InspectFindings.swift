@@ -214,7 +214,7 @@ extension SoftwareUpdateRules {
             var findings: [Finding] = []
             func add(_ cause: String, _ detail: String) { findings.append(Finding(cause: cause, detail: detail)) }
 
-            if let problem = input.problem { add("Could not be inspected", problem) }
+            if let problem = input.problem { add("Couldn’t be inspected", problem) }
             if member.managed == false { add("Not managed", "Jamf Pro lists the device as unmanaged") }
             // Apple's enforced update: supervised or device enrollments on iOS and iPadOS, supervised Macs only
             if isMobile && member.isUserEnrollment == true {

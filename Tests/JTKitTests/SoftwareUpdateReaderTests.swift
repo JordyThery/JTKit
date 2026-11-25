@@ -132,6 +132,19 @@ struct SoftwareUpdateReaderTests {
     }
 }
 
+@Suite("1.9.0: Inspect’s wording")
+struct SoftwareUpdateInspectWordingTests {
+    @Test("A device whose reads failed: “Couldn’t be inspected”, with the reason, as the likely cause")
+    func notInspected() {
+        let member = JamfPro.GroupMember(id: "7", kind: .computer, name: "Mac 7", serialNumber: "ZZTEST7")
+        let result = SoftwareUpdateRules.InspectFindings.evaluate(
+            SoftwareUpdateRules.InspectInput(member: member, problem: "Stopped"),
+            context: SoftwareUpdateRules.InspectContext(blueprintID: "b", now: Date(), serverTimeZone: .gmt))
+        #expect(result.findings.first == SoftwareUpdateRules.Finding(cause: "Couldn’t be inspected", detail: "Stopped"))
+        #expect(result.cause == "Couldn’t be inspected")
+    }
+}
+
 extension SoftwareUpdateRules.Reader.Reading {
     /// The Blueprint’s rule as the app words it.
     func ruleText(blocks: [JamfPlatform.SoftwareUpdateBlock]) -> String { SoftwareUpdateRules.Reader.rule(blocks) }

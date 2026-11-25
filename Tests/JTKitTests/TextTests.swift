@@ -161,9 +161,7 @@ struct TextTests {
         for file in files {
             let text = try String(contentsOf: file, encoding: .utf8)
             for literal in Self.stringLiterals(in: text)
-            where literal.contains(/(?i)\b(cannot|can not|does not|do not|is not|are not|will not|could not|did not|was not)\b/)
-                // moved from Software Update Dashboard with its wording, which the app shows and exports as it is
-                && !(file.lastPathComponent == "InspectFindings.swift" && literal == "Could not be inspected") {
+            where literal.contains(/(?i)\b(cannot|can not|does not|do not|is not|are not|will not|could not|did not|was not)\b/) {
                 found.append("\(file.lastPathComponent): \(literal)")
             }
         }
