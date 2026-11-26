@@ -150,25 +150,18 @@ extension SoftwareUpdateRules {
             progress(RefreshProgress(step: "Reading the Blueprint’s scope"))
             let platformGroups = try await platform.platformGroups()
             // only the group lists the scope needs: an iPhone-only Blueprint lists no computer groups
-            let kinds = Self.groupKinds(platformGroupIDs: blueprint.scopeDeviceGroups, platformGroups: platformGroups)
-            let groups = kinds.isEmpty ? [] : try await jamfPro.jamfProGroups(kinds)
-            let keys = Self.scope(platformGroupIDs: blueprint.scopeDeviceGroups, platformGroups: platformGroups)
-            let scope = keys.compactMap { key in groups.first { $0.id == key } }
-                .sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
-            let unmatched = blueprint.scopeDeviceGroups.count - scope.count
+            let scopeReader = ScopeReader(jamfPro: jamfPro)
+            let groups = try await scopeReader.groups(platformGroupIDs: blueprint.scopeDeviceGroups, platformGroups: platformGroups)
+            let scope = groups.groups
+            let unmatched = groups.unmatched
             if unmatched > 0 {
                 problems.append("\(unmatched) of the Blueprint’s scope groups \(unmatched == 1 ? "isn’t" : "aren’t") a Jamf Pro mobile device or computer group.")
             }
 
             // each device once, also when it is in several scope groups
-            var members: [JamfPro.GroupMember] = []
-            var seen = Set<String>()
-            for (number, group) in scope.enumerated() {
-                progress(RefreshProgress(step: "Reading group members", done: number, total: scope.count, unit: "groups"))
-                for member in try await jamfPro.members(of: group) where seen.insert(Self.key(member)).inserted {
-                    members.append(member)
-                }
-            }
+            let members = try await scopeReader.members(of: groups) { done, total in
+                progress(RefreshProgress(step: "Reading group members", done: done, total: total, unit: "groups"))
+            }.members
 
             progress(RefreshProgress(step: "Reading status reports", done: 0, total: members.count, unit: "devices"))
             var inputs = try await statuses(members) { done, total in
@@ -563,7 +556,7 @@ extension SoftwareUpdateRules {
         }
 
         /// A device by kind and Jamf Pro number: a Mac and an iPad can share a number.
-        public static func key(_ member: JamfPro.GroupMember) -> String { "\(member.kind.rawValue)/\(member.id)" }
+        public static func key(_ member: JamfPro.GroupMember) -> String { ScopeReader.key(member) }
 
         /// The block for a device: the one whose activation predicate asks for
         /// its OS (`== 'iPadOS'`; never `!= 'iPadOS'`), else one without a
@@ -610,20 +603,14 @@ extension SoftwareUpdateRules {
         /// Blueprint lists no computer groups). Empty when no scope group is a
         /// Jamf Pro group.
         public static func groupKinds(platformGroupIDs: [String], platformGroups: [JamfPlatform.PlatformGroup]) -> [MDMCommand.DeviceKind] {
-            let wanted = Set(platformGroupIDs.map { $0.lowercased() })
-            let types = Set(platformGroups.filter { wanted.contains($0.id.lowercased()) }.map(\.deviceType))
-            var kinds: [MDMCommand.DeviceKind] = []
-            if types.contains(.mobile) { kinds.append(.mobileDevice) }
-            if types.contains(.computer) { kinds.append(.computer) }
-            return kinds
+            ScopeReader.groupKinds(platformGroupIDs: platformGroupIDs, platformGroups: platformGroups)
         }
 
         /// The Blueprint’s scope as Jamf Pro groups (by kind and number), from
         /// its Platform API group IDs, through the Platform API’s list of
         /// groups (`pro/v2/groups`).
         public static func scope(platformGroupIDs: [String], platformGroups: [JamfPlatform.PlatformGroup]) -> Set<JamfPro.DeviceGroup.ID> {
-            let wanted = Set(platformGroupIDs.map { $0.lowercased() })
-            return Set(platformGroups.filter { wanted.contains($0.id.lowercased()) }.compactMap(JamfPro.DeviceGroup.ID.init))
+            ScopeReader.scope(platformGroupIDs: platformGroupIDs, platformGroups: platformGroups)
         }
     }
 }

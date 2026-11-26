@@ -102,6 +102,8 @@ extension JamfPro {
         /// The enrollment type Apple reports for a mobile device
         /// (`appleEnrollmentType`): `supervised`, `device`, `user`, `none`, `unknown`.
         public var appleEnrollmentType: String?
+        /// The Jamf Pro site the device is in; nil for none (1.11.0).
+        public var siteName: String?
 
         /// Enrolled with User Enrollment (profile-based or account-driven),
         /// by Apple’s enrollment type, else Jamf Pro’s ownership type; nil
@@ -178,6 +180,7 @@ extension JamfPro {
                       department: text("department"))
             deviceOwnershipType = text("deviceOwnershipType")
             appleEnrollmentType = text("appleEnrollmentType")
+            siteName = Self.site(text("siteName") ?? json["site"]?["name"]?.text, id: text("siteId") ?? json["site"]?["id"]?.text)
         }
 
         /// A member from a mobile device’s inventory record
@@ -205,6 +208,13 @@ extension JamfPro {
                       department: location?["departmentName"]?.text ?? location?["department"]?.text)
             deviceOwnershipType = general?["deviceOwnershipType"]?.text
             appleEnrollmentType = general?["appleEnrollmentType"]?.text
+            siteName = Self.site(general?["siteName"]?.text ?? general?["site"]?["name"]?.text,
+                                 id: general?["siteId"]?.text ?? general?["site"]?["id"]?.text)
+        }
+
+        /// A site name, nil for Jamf Pro’s “no site” (ID -1, or `None`).
+        static func site(_ name: String?, id: String?) -> String? {
+            JamfPro.Site(id: id, name: name).assignedName
         }
 
         /// This member with what it lacks taken from `other` (the same device).
@@ -227,6 +237,7 @@ extension JamfPro {
                 building: building ?? other.building, department: department ?? other.department)
             member.deviceOwnershipType = deviceOwnershipType ?? other.deviceOwnershipType
             member.appleEnrollmentType = appleEnrollmentType ?? other.appleEnrollmentType
+            member.siteName = siteName ?? other.siteName
             return member
         }
 
@@ -243,6 +254,7 @@ extension JamfPro {
                       bootstrapTokenEscrowedStatus: computer.security?.bootstrapTokenEscrowedStatus,
                       bootstrapTokenAllowed: computer.security?.bootstrapTokenAllowed)
             diskEncryption = computer.diskEncryption
+            siteName = computer.general?.site?.assignedName
         }
     }
 }

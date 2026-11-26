@@ -1,5 +1,56 @@
 # Changelog
 
+## 1.11.0 (unreleased)
+A minor release: content caching rules, read only. Code written for 1.10 compiles unchanged and behaves the same.
+
+### Added
+- `ContentCacheRules` (new area `ContentCaching/`), with the permissions the software update reader already needs
+  (`devices:read`, `blueprints:read`, `device-groups:read`, `declarations:read`) and GET only. Saves nothing.
+  - `Sweep(client:)` / `Sweep(jamfPro:platform:)` and `read(skipping:now:progress:)`: every Mac in
+    `v4/computers-inventory` with the `GENERAL` and `CONTENT_CACHING` sections, sorted by ID (the list can’t be
+    filtered on the cache: every Mac is read), keeping those whose cache is activated; after the first page the pages
+    its `totalCount` announces are read at once, `pageReads` (16) at a time. Then each cache’s status report
+    (`parallel`, 4), the Blueprints with a content caching declaration (a Blueprint in `skipping` with the same
+    `updated` time is known to have none and isn’t read again), their computer groups and members, and the
+    declaration’s reports. A failed inventory page or a refusal stops the sweep; anything else is a `problem` and the
+    rest stands. `Result`: `caches` (`CacheRecord`), `cachingBlueprints` (`CachingBlueprint` with `configured`
+    Macs, activated or not, and how the declaration stands on each), `unplanned`, `notCaching` (to pass to the next
+    sweep), `snapshots`, `healthBySite`, `problems`. Inventory pages are recorded in the activity log only when they fail.
+  - `CacheHealth.evaluate(_:status:reportDate:declarationApplied:serverTimeZone:thresholds:now:)`: OK, Warning or
+    Fault with the reasons. Fault: activated but not running, a cache or startup status other than OK, registration
+    with Apple failed, every parent unhealthy, no inventory report for 7 days. Warning: registration pending, cache
+    pressure of 50 % or more, a parent unhealthy, an alert in the last 24 hours, data moving to another volume or a
+    failed move, no inventory report for 48 hours, the caching declaration not applied. How full a cache is is never a
+    rule. `Thresholds` holds the numbers; macOS 27 status items newer than the inventory report decide first.
+  - `Savings.compute(_:)`: bytes returned to clients, peers and children minus bytes stored from Apple, never below
+    zero; personal (iCloud) bytes are shown beside it and never counted.
+  - `CacheSnapshot` (Codable, what an app keeps per cache per sweep), `Series.deltas(_:)`, `isReset(from:to:)` and
+    `total(_:since:cacheID:)`: a reset when the counters’ start moves, the cache’s GUID changes or a counter goes down.
+  - `DeclarationState.state(configuration:activation:)`: applied, pending, awaiting sync, failed, invalid, not
+    received, or not for this device when the activation reports `Info.Predicate`.
+- `JamfPro.ContentCaching`: the inventory’s `CONTENT_CACHING` section (usage, limits, pressure, categories,
+  counters since `totalBytesAreSince`, parents, alerts, registration, data migration); `JamfPro.Computer.contentCaching`
+  and `JamfPro.InventorySection.contentCaching`.
+- `JamfPro.ContentCacheStatus(items:)`: macOS 27’s `content-cache.info`, `.status`, `.parents` and `.peers` status items,
+  flattened, as nested JSON or as `{key=value}` text. Within one item, keys more than a minute older than its newest
+  key are ignored (`droppedKeys`); removed parents and peers are left out.
+- `JamfPlatform.ContentCacheSettings` and `BlueprintDetail.contentCacheSettings`: Apple’s
+  `com.apple.configuration.content-cache.settings` in any component that lists declarations (`com.jamf.ddm-strict`,
+  `com.jamf.ddm.custom-declarations`), with the identifier Jamf gives it (`…_declaration_custom_<n>`).
+  `Blueprints.cachingBlueprints(skipping:)`.
+- `JamfPlatform.DeclarationReport.payloadType`; `JamfPro.GroupMember.siteName`; `JamfPro.Site.assignedName` (nil for
+  Jamf Pro’s “no site”).
+- Demo Mode: `DemoContentCaching`, installed with `DemoSoftwareUpdate.install(on:)`: four caches (OK, Warning, Fault,
+  unplanned), a Mac the caching Blueprint configures that isn’t a cache, the Blueprint “Contoso – Content Caches” and
+  its group, a site on every demo device, and `pastSweeps(now:)` with one counter reset.
+
+### Changed
+- The demo Platform API lists a fifth group (Content Cache Macs) and the caching Blueprint next to the two update Blueprints; the demo computer
+  inventory answers without a filter (every Mac).
+
+### What an app needs to do
+- Nothing.
+
 ## 1.10.0 (2026-11-25)
 A minor release: a faster Blueprint health step in the software update reader, with the same results. Code written
 for 1.9 compiles unchanged.

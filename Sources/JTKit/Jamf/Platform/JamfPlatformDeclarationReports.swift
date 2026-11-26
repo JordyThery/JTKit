@@ -69,10 +69,13 @@ extension JamfPlatform {
         public var reasons: [Reason]
         public var dateUpdated: Date?
         public var lastReportTime: Date?
+        /// Apple’s declaration type, e.g. `com.apple.configuration.content-cache.settings`
+        /// (`payloadType`; 1.11.0). Nil when the answer doesn’t say.
+        public var payloadType: String?
 
         public init(declarationIdentifier: String, deviceID: String? = nil, channel: String? = nil, type: String? = nil,
                     status: Status = .unknown, active: Bool? = nil, validity: Validity = .unknown, reasons: [Reason] = [],
-                    dateUpdated: Date? = nil, lastReportTime: Date? = nil) {
+                    dateUpdated: Date? = nil, lastReportTime: Date? = nil, payloadType: String? = nil) {
             self.declarationIdentifier = declarationIdentifier
             self.deviceID = deviceID
             self.channel = channel
@@ -83,6 +86,7 @@ extension JamfPlatform {
             self.reasons = reasons
             self.dateUpdated = dateUpdated
             self.lastReportTime = lastReportTime
+            self.payloadType = payloadType
         }
 
         /// The Blueprint it came from, when Jamf built the identifier from
@@ -112,7 +116,8 @@ extension JamfPlatform {
                       type: json["type"]?.text, status: Status(json["status"]?.text), active: json["active"]?.bool,
                       validity: Validity(json["validityState"]?.text), reasons: reasons,
                       dateUpdated: json["dateUpdated"]?.text.flatMap(JamfPlatform.date(from:)),
-                      lastReportTime: json["lastReportTime"]?.text.flatMap(JamfPlatform.date(from:)))
+                      lastReportTime: json["lastReportTime"]?.text.flatMap(JamfPlatform.date(from:)),
+                      payloadType: json["payloadType"]?.text)
         }
     }
 }

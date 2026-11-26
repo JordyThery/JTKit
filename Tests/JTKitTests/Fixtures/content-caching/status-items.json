@@ -1,0 +1,134 @@
+{
+  "statusItems": [
+    {
+      "key": "content-cache.info.cache-details",
+      "value": "iCloud : 30435304,Other : 1426903",
+      "lastUpdateTime": "2026-11-25T09:13:50.904"
+    },
+    {
+      "key": "content-cache.info.cache-free",
+      "value": "194989865984",
+      "lastUpdateTime": "2026-11-25T09:13:50.907"
+    },
+    {
+      "key": "content-cache.info.cache-limit",
+      "value": "0",
+      "lastUpdateTime": "2026-11-25T09:13:50.906"
+    },
+    {
+      "key": "content-cache.info.cache-status",
+      "value": "OK",
+      "lastUpdateTime": "2026-11-25T09:13:50.905"
+    },
+    {
+      "key": "content-cache.info.cache-used",
+      "value": "31862207",
+      "lastUpdateTime": "2026-11-25T09:13:50.909"
+    },
+    {
+      "key": "content-cache.info.max-cache-pressure-last-hour",
+      "value": "0",
+      "lastUpdateTime": "2026-11-25T09:13:50.91"
+    },
+    {
+      "key": "content-cache.info.personal-cache-free",
+      "value": "194989865984",
+      "lastUpdateTime": "2026-11-25T09:13:50.911"
+    },
+    {
+      "key": "content-cache.info.personal-cache-limit",
+      "value": "0",
+      "lastUpdateTime": "2026-11-25T09:13:50.903"
+    },
+    {
+      "key": "content-cache.info.personal-cache-used",
+      "value": "30435304",
+      "lastUpdateTime": "2026-11-25T09:13:50.902"
+    },
+    {
+      "key": "content-cache.parents",
+      "value": "",
+      "lastUpdateTime": "2026-11-25T05:45:44.648"
+    },
+    {
+      "key": "content-cache.peers",
+      "value": "",
+      "lastUpdateTime": "2026-11-25T05:45:44.63"
+    },
+    {
+      "key": "content-cache.status.activated",
+      "value": "true",
+      "lastUpdateTime": "2026-11-25T09:13:50.894"
+    },
+    {
+      "key": "content-cache.status.active",
+      "value": "true",
+      "lastUpdateTime": "2026-11-25T09:13:50.891"
+    },
+    {
+      "key": "content-cache.status.cache-status",
+      "value": "OK",
+      "lastUpdateTime": "2026-11-25T09:13:50.897"
+    },
+    {
+      "key": "content-cache.status.port",
+      "value": "50519",
+      "lastUpdateTime": "2026-11-25T09:13:50.89"
+    },
+    {
+      "key": "content-cache.status.private-addresses",
+      "value": "192.0.2.10",
+      "lastUpdateTime": "2026-11-25T09:13:50.892"
+    },
+    {
+      "key": "content-cache.status.public-address",
+      "value": "203.0.113.10",
+      "lastUpdateTime": "2026-11-25T09:13:50.895"
+    },
+    {
+      "key": "content-cache.status.registration-error",
+      "value": "NOT_ACTIVATED",
+      "lastUpdateTime": "2026-11-25T05:45:44.636"
+    },
+    {
+      "key": "content-cache.status.registration-response-code",
+      "value": "403",
+      "lastUpdateTime": "2026-11-25T05:45:44.64"
+    },
+    {
+      "key": "content-cache.status.registration-status",
+      "value": "1",
+      "lastUpdateTime": "2026-11-25T09:13:50.896"
+    },
+    {
+      "key": "content-cache.status.server-guid",
+      "value": "00000000-0000-4000-8000-0000000000CA",
+      "lastUpdateTime": "2026-11-25T09:13:50.898"
+    },
+    {
+      "key": "content-cache.status.startup-status",
+      "value": "OK",
+      "lastUpdateTime": "2026-11-25T09:13:50.899"
+    },
+    {
+      "key": "content-cache.status.tetherator-status",
+      "value": "0",
+      "lastUpdateTime": "2026-11-25T09:13:50.901"
+    },
+    {
+      "key": "content-cache.status.version",
+      "value": "265.40.2",
+      "lastUpdateTime": "2026-11-25T09:13:50.9"
+    },
+    {
+      "key": "management.declarations.activations",
+      "value": "{active=true, identifier=Blueprint_00000000-0000-4000-8000-0000000000b1_s1_c1_sys_act1, valid=valid, server-token=0000},{active=true, identifier=Blueprint_00000000-0000-4000-8000-00000000b102_s1_c1_sys_act1, valid=valid, server-token=0000},{active=true, identifier=Blueprint_00000000-0000-4000-8000-00000000b103_s1_c1_sys_act1, valid=valid, server-token=0000}",
+      "lastUpdateTime": "2026-11-25T09:06:26.279"
+    },
+    {
+      "key": "management.declarations.configurations",
+      "value": "{active=true, identifier=Blueprint_00000000-0000-4000-8000-0000000000b1_s1_c1_declaration_custom_0, valid=valid, server-token=0000},{active=true, identifier=00000000-0000-4000-8000-00000000b104, valid=valid, server-token=0000},{active=true, identifier=Blueprint_00000000-0000-4000-8000-00000000b102_s1_c1_sys_cfg2, valid=valid, server-token=0000}",
+      "lastUpdateTime": "2026-11-25T09:06:26.281"
+    }
+  ]
+}

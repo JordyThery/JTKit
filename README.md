@@ -44,6 +44,10 @@ Sign-in with an API client or a username and password, with tokens renewed as ne
 
 What a Blueprint’s software update means for each iPhone, iPad and Mac it reaches, and why a device isn’t on target: its target and deadline from the Blueprint’s rule and Apple’s release data, what Jamf actually sent it, a category with a plain diagnosis, readiness, Blueprint health and Inspect’s list of reasons. A reader does a refresh’s requests, read only. The app keeps what earlier refreshes remembered; the package saves nothing.
 
+### Content caching rules
+
+The Macs whose content cache is activated, from Jamf Pro’s computer inventory, with what each cache holds, served and saved, its parents and alerts, and on macOS 27 its live status from the Mac’s DDM status report. The Blueprints that send Apple’s content caching declaration, the Macs they configure and whether each applied it, and the caches no Blueprint plans. A health of OK, Warning or Fault with the reasons, and counter resets across a series of sweeps. Read only, with the permissions the software update rules already need; the app keeps its sweeps, the package saves nothing.
+
 ### Apple release data
 
 Apple’s OS releases from SOFA (Mac Admins Open Source) and Apple’s own software lookup service (GDMF), read with GET only and no credentials: the latest release per major, the build of a version, which models (or a Mac’s board ID) can run a major, the last version a model can run, and `OSVersion` to compare versions.
@@ -58,7 +62,7 @@ One client for both: devices, MDM servers, assignments, AppleCare coverage, Acti
 
 ### Demo Mode
 
-Fake Jamf Pro, Jamf Platform API, Jamf School, Intune and Apple servers inside the app, with sample data, so an app can be tried without a tenant. An app can add sample iPads and Macs in the middle of a software update, with Apple’s release data, to the demo Platform API, including Macs that missed the deadline, installs that hang and devices that left a Blueprint’s scope.
+Fake Jamf Pro, Jamf Platform API, Jamf School, Intune and Apple servers inside the app, with sample data, so an app can be tried without a tenant. An app can add sample iPads and Macs in the middle of a software update, with Apple’s release data, to the demo Platform API, including Macs that missed the deadline, installs that hang and devices that left a Blueprint’s scope, and content caches in every state with ten days of history.
 
 ### Activity log and redaction
 
