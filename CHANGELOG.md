@@ -1,6 +1,6 @@
 # Changelog
 
-## 1.11.0 (unreleased)
+## 1.11.0 (2026-11-26)
 A minor release: content caching rules, read only. Code written for 1.10 compiles unchanged and behaves the same.
 
 ### Added
