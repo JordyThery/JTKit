@@ -46,7 +46,7 @@ What a Blueprint’s software update means for each iPhone, iPad and Mac it reac
 
 ### Content caching rules
 
-The Macs whose content cache is activated, from Jamf Pro’s computer inventory, with what each cache holds, served and saved, its parents and alerts, and on macOS 27 its live status from the Mac’s DDM status report. The Blueprints that send Apple’s content caching declaration, the Macs they configure and whether each applied it, and the caches no Blueprint plans. A health of OK, Warning or Fault with the reasons, and counter resets across a series of sweeps. Read only, with the permissions the software update rules already need; the app keeps its sweeps, the package saves nothing.
+The Macs whose content cache is activated, from Jamf Pro’s computer inventory, with what each cache holds, served and saved, its parents and alerts, and on macOS 27 its live status from the Mac’s DDM status report. The Blueprints that send Apple’s content caching declaration, the Macs they configure and whether each applied it, and the caches no caching Blueprint reaches, such as those set up with a configuration profile or by hand. A health of OK, Warning or Fault with the reasons, and counter resets across a series of sweeps. Read only, with the permissions the software update rules already need; the app keeps its sweeps, the package saves nothing.
 
 ### Apple release data
 

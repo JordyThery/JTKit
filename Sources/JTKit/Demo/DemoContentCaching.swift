@@ -12,7 +12,7 @@ import Foundation
 ///   (and 94 of its 100 GB in use, which is information only).
 /// - **Loaner Mac 01**: Fault: activated but not running, registration
 ///   with Apple failed, its declaration failed.
-/// - **Studio Mac 07**: unplanned: activated, OK, no caching Blueprint.
+/// - **Studio Mac 07**: no caching Blueprint: activated and OK, set up some other way.
 ///
 /// The caching Blueprint “Contoso – Content Caches” is scoped to the
 /// smart group Content Cache Macs (01, 03, 05 and Loaner Mac 01). Every
@@ -146,7 +146,7 @@ public enum DemoContentCaching {
                 "cacheDetails": [category("Mac Software", 4 * g, 7)],
             ]) { $1 }
         default:
-            // Studio Mac 07, unplanned: no limit, some personal content
+            // Studio Mac 07, no caching Blueprint: no limit, some personal content
             section.merge([
                 "cacheBytesUsed": 22 * g, "actualCacheBytesUsed": 22 * g, "personalCacheBytesUsed": 3 * g,
                 "cacheDetails": [category("Mac Software", 19 * g, 8), category("iCloud", 3 * g, 9)],

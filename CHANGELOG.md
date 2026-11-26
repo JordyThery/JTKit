@@ -14,7 +14,8 @@ A minor release: content caching rules, read only. Code written for 1.10 compile
     `updated` time is known to have none and isn’t read again), their computer groups and members, and the
     declaration’s reports. A failed inventory page or a refusal stops the sweep; anything else is a `problem` and the
     rest stands. `Result`: `caches` (`CacheRecord`), `cachingBlueprints` (`CachingBlueprint` with `configured`
-    Macs, activated or not, and how the declaration stands on each), `unplanned`, `notCaching` (to pass to the next
+    Macs, activated or not, and how the declaration stands on each), `unplanned` (the caches no caching Blueprint
+    reaches, also those set up with a configuration profile or by hand), `notCaching` (to pass to the next
     sweep), `snapshots`, `healthBySite`, `problems`. Inventory pages are recorded in the activity log only when they fail.
   - `CacheHealth.evaluate(_:status:reportDate:declarationApplied:serverTimeZone:thresholds:now:)`: OK, Warning or
     Fault with the reasons. Fault: activated but not running, a cache or startup status other than OK, registration
@@ -44,7 +45,7 @@ A minor release: content caching rules, read only. Code written for 1.10 compile
   (`siteName`); a device saved before 1.11.0 reads without one. `DeviceStatus.init` takes it as a last parameter with a
   default.
 - Demo Mode: `DemoContentCaching`, installed with `DemoSoftwareUpdate.install(on:)`: four caches (OK, Warning, Fault,
-  unplanned), a Mac the caching Blueprint configures that isn’t a cache, the Blueprint “Contoso – Content Caches” and
+  and one no caching Blueprint reaches), a Mac the caching Blueprint configures that isn’t a cache, the Blueprint “Contoso – Content Caches” and
   its group, a site on every demo device, and `pastSweeps(now:)` with one counter reset.
 
 ### Changed

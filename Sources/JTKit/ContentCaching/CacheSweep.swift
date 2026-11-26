@@ -80,7 +80,11 @@ extension ContentCacheRules {
         public var declarationIdentifiers: [String]
         /// The caching Blueprints’ declarations on this Mac.
         public var declarations: [DeclarationState]
-        /// Activated, and no caching Blueprint sends it a content caching declaration.
+        /// Activated, and no caching Blueprint reaches it: none has it in
+        /// scope and it holds none of their declarations. A cache set up with
+        /// a Jamf Pro configuration profile or by hand is one too: the
+        /// inventory doesn’t say which payloads a Mac’s profiles hold. (Apps
+        /// show it as “No caching Blueprint”.)
         public var isUnplanned: Bool
         public var health: CacheHealth
         public var savings: Savings
@@ -239,6 +243,7 @@ extension ContentCacheRules {
                 self.problems = problems
             }
 
+            /// The caches no caching Blueprint reaches (`CacheRecord.isUnplanned`).
             public var unplanned: [CacheRecord] { caches.filter(\.isUnplanned) }
 
             /// What to keep of every cache for the trend.
