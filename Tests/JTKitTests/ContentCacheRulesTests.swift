@@ -1,6 +1,7 @@
 import Foundation
 import Testing
 @testable import JTKit
+@testable import JTKitContentCaching
 
 typealias CacheTestHealth = ContentCacheRules.CacheHealth
 
