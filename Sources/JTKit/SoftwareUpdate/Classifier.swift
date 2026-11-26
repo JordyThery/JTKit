@@ -177,6 +177,8 @@ extension SoftwareUpdateRules {
         public var neverReported: Bool?
         /// An iPhone or iPad enrolled with User Enrollment (Jamf Pro’s inventory).
         public var userEnrollment: Bool?
+        /// The Jamf Pro site the device is in; nil for none, or in a history saved before 1.11.0.
+        public var siteName: String?
 
         /// The device by kind and number: a Mac and an iPad can share a number.
         public var id: String { "\(isComputer ? "computer" : "mobileDevice")/\(jamfID)" }
@@ -248,6 +250,7 @@ extension SoftwareUpdateRules {
             case ddmEnabled
             case neverReported
             case userEnrollment
+            case siteName
         }
 
         /// The newer of the version the device reports and the one in its
@@ -345,7 +348,8 @@ extension SoftwareUpdateRules {
             supervised: Bool? = nil,
             ddmEnabled: Bool? = nil,
             neverReported: Bool? = nil,
-            userEnrollment: Bool? = nil
+            userEnrollment: Bool? = nil,
+            siteName: String? = nil
         ) {
             self.jamfID = jamfID
             self.isComputer = isComputer
@@ -413,6 +417,7 @@ extension SoftwareUpdateRules {
             self.ddmEnabled = ddmEnabled
             self.neverReported = neverReported
             self.userEnrollment = userEnrollment
+            self.siteName = siteName
         }
     }
 
@@ -549,7 +554,7 @@ extension SoftwareUpdateRules {
                 supervised: member.supervised, ddmEnabled: member.ddmEnabled,
                 // no report at all (none, or one without a single item); a report that couldn't be read isn't that
                 neverReported: input.statusProblem == nil && (status.map { $0.itemCount == 0 && $0.osVersion == nil } ?? true),
-                userEnrollment: member.kind == .mobileDevice ? member.isUserEnrollment : nil)
+                userEnrollment: member.kind == .mobileDevice ? member.isUserEnrollment : nil, siteName: member.siteName)
         }
 
         /// One device measured against its own target (`TargetRules`): its

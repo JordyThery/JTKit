@@ -40,6 +40,9 @@ A minor release: content caching rules, read only. Code written for 1.10 compile
   `Blueprints.cachingBlueprints(skipping:)`.
 - `JamfPlatform.DeclarationReport.payloadType`; `JamfPro.GroupMember.siteName`; `JamfPro.Site.assignedName` (nil for
   Jamf Pro’s “no site”).
+- `SoftwareUpdateRules.DeviceStatus.siteName`: the device’s Jamf Pro site, from its group member, saved with the device
+  (`siteName`); a device saved before 1.11.0 reads without one. `DeviceStatus.init` takes it as a last parameter with a
+  default.
 - Demo Mode: `DemoContentCaching`, installed with `DemoSoftwareUpdate.install(on:)`: four caches (OK, Warning, Fault,
   unplanned), a Mac the caching Blueprint configures that isn’t a cache, the Blueprint “Contoso – Content Caches” and
   its group, a site on every demo device, and `pastSweeps(now:)` with one counter reset.

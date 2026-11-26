@@ -83,6 +83,22 @@ struct ContentCachingInventoryTests {
         #expect(JamfPro.Site(id: "1", name: "Field").assignedName == "Field")
     }
 
+    @Test("A device’s site comes through classification and is saved; a device saved before 1.11.0 reads without one")
+    func deviceSite() throws {
+        var member = JamfPro.GroupMember(id: "7", kind: .computer, name: "Mac 7", serialNumber: "ZZTEST7")
+        member.siteName = "Studio"
+        let device = SoftwareUpdateRules.Classifier.classify(
+            SoftwareUpdateRules.DeviceInput(member: member, status: nil),
+            context: SoftwareUpdateRules.ClassificationContext(target: nil, serverTimeZone: .gmt, now: Date()))
+        #expect(device.siteName == "Studio")
+        let saved = try JSONEncoder().encode(device)
+        #expect(try JSONDecoder().decode(SoftwareUpdateRules.DeviceStatus.self, from: saved).siteName == "Studio")
+        var old = try #require(try JSONSerialization.jsonObject(with: saved) as? [String: Any])
+        old["siteName"] = nil
+        let older = try JSONDecoder().decode(SoftwareUpdateRules.DeviceStatus.self, from: try JSONSerialization.data(withJSONObject: old))
+        #expect(older.siteName == nil && older.name == "Mac 7")
+    }
+
     @Test("The device’s declaration report carries Apple’s declaration type")
     func payloadType() throws {
         let json = try LosslessJSON(data: try CacheFixture.data("declarations.json"))
