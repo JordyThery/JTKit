@@ -213,7 +213,8 @@ struct DemoSoftwareUpdateTests {
     func iPads() async throws {
         let (_, client, _) = try demo()
         let groups = try await client.jamfProGroups()
-        #expect(groups.map(\.name) == ["Field iPads", "Spare iPads", "Studio Macs", "Loaner Macs"])
+        // 1.11.0: the content caching Blueprint's group too
+        #expect(groups.map(\.name) == ["Field iPads", "Spare iPads", "Studio Macs", "Loaner Macs", "Content Cache Macs"])
         let first = try await client.members(of: groups[0])
         // the first read in a launch has the pilot iPad too (1.9.0); a second one only the Field iPads
         #expect(Set(first.map(\.serialNumber)) == Set((DemoSoftwareUpdate.iPads + DemoSoftwareUpdate.formerDevices.filter { $0.family == .iPad }).map(\.serial)))

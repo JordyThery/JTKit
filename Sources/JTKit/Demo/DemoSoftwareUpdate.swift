@@ -212,7 +212,7 @@ public enum DemoSoftwareUpdate {
     public static func install(on platform: DemoJamfPlatformServer, now: Date = Date()) {
         let server = DemoSoftwareUpdateServer(now: now)
         for path in DemoSoftwareUpdateServer.paths { platform.route(path, to: server) }
-        platform.add(blueprints(now: now))
+        platform.add(blueprints(now: now) + [DemoContentCaching.blueprint(now: now)])
     }
 
     /// The deadline as Blueprints write it: the device’s local time.
@@ -514,13 +514,18 @@ public nonisolated final class DemoSoftwareUpdateServer: DemoServer, @unchecked 
                  "groupName": "Field iPads", "groupType": "MOBILE", "smart": true],
                 ["groupPlatformId": DemoSoftwareUpdate.macPlatformGroupID, "groupJamfProId": DemoSoftwareUpdate.macGroupID,
                  "groupName": "Studio Macs", "groupType": "COMPUTER", "smart": true],
+                ["groupPlatformId": DemoContentCaching.platformGroupID, "groupJamfProId": DemoContentCaching.groupID,
+                 "groupName": DemoContentCaching.groupName, "groupType": "COMPUTER", "smart": true],
             ], request)
         case 3 where p == ["pro", "v1", "computer-groups"]:
             return DemoJSON.response(200, [
                 ["id": "601", "name": "Studio Macs", "description": "Macs of the design studio", "smartGroup": true],
                 ["id": "602", "name": "Loaner Macs", "description": "", "smartGroup": false],
+                ["id": DemoContentCaching.groupID, "name": DemoContentCaching.groupName, "description": "Macs that cache content",
+                 "smartGroup": true],
             ])
         case 5 where Array(p[0...3]) == ["pro", "v3", "computer-groups", "smart-group-membership"]:
+            if p[4] == DemoContentCaching.groupID { return DemoJSON.response(200, ["members": DemoContentCaching.configured]) }
             guard p[4] == DemoSoftwareUpdate.macGroupID else { return notFound() }
             return DemoJSON.response(200, ["members": (studioMacs + pilots(.mac, membership: true)).map(\.number)])
         case 4 where Array(p[0...2]) == ["proclassic", "computergroups", "id"]:
@@ -530,12 +535,22 @@ public nonisolated final class DemoSoftwareUpdateServer: DemoServer, @unchecked 
                 "computers": loanerMacs.map { ["id": $0.number, "name": $0.name, "serial_number": $0.serial] },
             ]])
         case 3 where p == ["pro", "v4", "computers-inventory"]:
-            let ids = Self.ids(in: request.query["filter"] ?? "")
-            return page(known.filter { $0.family == .mac && ids.contains(String($0.number)) }.map(computerRecord), request)
+            let filter = request.query["filter"] ?? ""
+            let caching = (URLComponents(url: request.url, resolvingAgainstBaseURL: false)?.queryItems ?? [])
+                .contains { $0.name == "section" && $0.value == JamfPro.InventorySection.contentCaching.rawValue }
+            let ids = Self.ids(in: filter)
+            // without a filter every Mac, by ID (the content cache sweep)
+            let macs = known.filter { $0.family == .mac && (filter.isEmpty || ids.contains(String($0.number))) }
+                .sorted { $0.number < $1.number }
+            return page(macs.map { device in
+                var record = computerRecord(device)
+                if caching { record["contentCaching"] = DemoContentCaching.section(device.number, iso: iso) }
+                return record
+            }, request)
         case 5 where Array(p[0...2]) == ["pro", "v1", "ddm"] && p[4] == "status-items":
             guard let device = known.first(where: { $0.managementID == p[3] }),
                   device.state != .noReport else { return notFound() }
-            return DemoJSON.response(200, ["statusItems": statusItems(device)])
+            return DemoJSON.response(200, ["statusItems": statusItems(device) + DemoContentCaching.statusItems(device.number, time: serverTime)])
         case 6 where Array(p[0...3]) == ["ddm", "report", "v1", "devices"] && p[5] == "declarations":
             guard let device = known.first(where: { $0.platformID == p[4] }) else { return notFound() }
             return reportPage(device, request)
@@ -595,6 +610,7 @@ public nonisolated final class DemoSoftwareUpdateServer: DemoServer, @unchecked 
             "passcodePresent": device.passcodePresent, "batteryLevel": device.number == 106 ? 18 : 64 + device.number % 30,
             "batteryHealth": "NORMAL", "availableSpaceMb": device.number == 103 ? 1_900 : 41_000, "capacityMb": 128_000,
             "roaming": false, "dataRoamingEnabled": false, "building": "Contoso HQ", "department": "Field Team",
+            "site": ["id": DemoContentCaching.site(of: device.number).id, "name": DemoContentCaching.site(of: device.number).name],
         ]
         if let zone = device.timeZone { record["timeZone"] = zone }
         return record
@@ -604,6 +620,7 @@ public nonisolated final class DemoSoftwareUpdateServer: DemoServer, @unchecked 
         [
             "id": String(device.number), "udid": device.udid,
             "general": ["name": device.name, "managementId": device.managementID,
+                        "site": ["id": DemoContentCaching.site(of: device.number).id, "name": DemoContentCaching.site(of: device.number).name],
                         "lastContactTime": iso(device.contactDaysAgo),
                         "reportDate": iso(device.contactDaysAgo + 0.1), "supervised": device.supervised,
                         "remoteManagement": ["managed": true]],
@@ -718,6 +735,10 @@ public nonisolated final class DemoSoftwareUpdateServer: DemoServer, @unchecked 
             }
         }
         results.append(report("com.contoso.wifi", "CONFIGURATION", status: "SUCCESSFUL", active: true))
+        if device.family == .mac {
+            results += DemoContentCaching.reports(device.number, deviceID: device.platformID, reported: reported,
+                                                 changed: iso(20))
+        }
         return results
     }
 

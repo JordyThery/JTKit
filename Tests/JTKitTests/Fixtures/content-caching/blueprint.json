@@ -1,0 +1,45 @@
+{
+  "id": "00000000-0000-4000-8000-0000000000b1",
+  "name": "Test Content Cache Blueprint",
+  "description": null,
+  "scope": {
+    "deviceGroups": [
+      "00000000-0000-4000-8000-0000000000d1"
+    ]
+  },
+  "created": "2026-11-25T09:03:59.417554Z",
+  "updated": "2026-11-25T09:06:06.197111Z",
+  "deploymentState": {
+    "state": "DEPLOYED",
+    "lastDeployment": {
+      "started": "2026-11-25T09:06:06.195206Z",
+      "state": "SUCCEEDED"
+    }
+  },
+  "steps": [
+    {
+      "name": "Components in this blueprint",
+      "components": [
+        {
+          "identifier": "com.jamf.ddm-strict",
+          "configuration": {
+            "declarations": [
+              {
+                "kind": "CONFIGURATION",
+                "type": "com.apple.configuration.content-cache.settings",
+                "payload": {
+                  "KeepAwake": true,
+                  "AutoActivation": true,
+                  "AllowSharedCaching": true,
+                  "DeclarativeStatusInterval": 300
+                },
+                "channelType": "SYSTEM"
+              }
+            ]
+          }
+        }
+      ],
+      "activationPredicate": null
+    }
+  ]
+}

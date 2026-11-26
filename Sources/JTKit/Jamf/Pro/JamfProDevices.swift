@@ -27,6 +27,8 @@ extension JamfPro {
         case diskEncryption = "DISK_ENCRYPTION"
         /// Mobile devices only.
         case security = "SECURITY"
+        /// A Mac’s content cache (`JamfPro.ContentCaching`).
+        case contentCaching = "CONTENT_CACHING"
 
         /// The key the answer uses: `USER_AND_LOCATION` → `userAndLocation`.
         public var key: String {
@@ -50,6 +52,12 @@ extension JamfPro {
             let c = try decoder.container(keyedBy: AnyKey.self)
             id = c.text("id")
             name = c.text("name")
+        }
+
+        /// The site’s name; nil for Jamf Pro’s “no site” (ID -1, or the name `None`).
+        public var assignedName: String? {
+            guard id != "-1", let name, !name.isEmpty, name != "None" else { return nil }
+            return name
         }
     }
 
@@ -145,6 +153,8 @@ extension JamfPro {
         public var diskEncryption: DiskEncryption?
         public var userAndLocation: UserAndLocation?
         public var security: Security?
+        /// The `CONTENT_CACHING` section, when it was asked for.
+        public var contentCaching: ContentCaching?
 
         public var serialNumber: String? { hardware?.serialNumber }
 
@@ -184,6 +194,7 @@ extension JamfPro {
                 security = Security(bootstrapTokenEscrowedStatus: s.text("bootstrapTokenEscrowedStatus"),
                                     bootstrapTokenAllowed: s.flag("bootstrapTokenAllowed"))
             }
+            contentCaching = c.object(ContentCaching.self, "contentCaching")
             if let u = try? c.nestedContainer(keyedBy: AnyKey.self, forKey: "userAndLocation") {
                 userAndLocation = UserAndLocation(
                     username: u.text("username"), realName: u.text("realname") ?? u.text("realName"),

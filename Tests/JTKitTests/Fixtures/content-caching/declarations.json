@@ -1,0 +1,48 @@
+{
+  "deviceId": "00000000-0000-4000-8000-0000000000a1",
+  "totalCount": 2,
+  "results": [
+    {
+      "declarationIdentifier": "Blueprint_00000000-0000-4000-8000-0000000000b1_s1_c1_declaration_custom_0",
+      "deviceId": "00000000-0000-4000-8000-0000000000a1",
+      "channel": "SYSTEM",
+      "type": "CONFIGURATION",
+      "payloadType": "com.apple.configuration.content-cache.settings",
+      "status": "SUCCESSFUL",
+      "active": true,
+      "validityState": "VALID",
+      "serverToken": "0000",
+      "dateUpdated": "2026-11-25T09:06:26.326817Z",
+      "lastReportTime": "2026-11-25T09:06:26.263Z"
+    },
+    {
+      "declarationIdentifier": "Blueprint_00000000-0000-4000-8000-00000000b106_s1_c2_sys_cfg1",
+      "deviceId": "00000000-0000-4000-8000-0000000000a1",
+      "channel": "SYSTEM",
+      "type": "CONFIGURATION",
+      "payloadType": "com.apple.configuration.softwareupdate.enforcement.specific",
+      "status": "UNSUCCESSFUL",
+      "active": false,
+      "validityState": "UNKNOWN",
+      "serverToken": "0000",
+      "dateUpdated": "2026-11-23T06:03:02.552988Z",
+      "lastReportTime": "2026-11-25T09:06:26.263Z",
+      "reasons": [
+        {
+          "code": "Error.ActivationFailed",
+          "description": "Activation “Blueprint_00000000-0000-4000-8000-00000000b106_s1_c2_sys_act1:0000” has errors.",
+          "details": [
+            {
+              "key": "Identifier",
+              "description": "Blueprint_00000000-0000-4000-8000-00000000b106_s1_c2_sys_act1"
+            },
+            {
+              "key": "ServerToken",
+              "description": "0000"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

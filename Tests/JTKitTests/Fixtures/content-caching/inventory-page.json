@@ -1,0 +1,110 @@
+{
+  "totalCount": 1,
+  "results": [
+    {
+      "id": "101",
+      "udid": "00000000-0000-4000-8000-00000000FA11",
+      "general": {
+        "name": "Test Mac 1",
+        "lastIpAddress": "198.51.100.20",
+        "lastReportedIpV4": "192.0.2.10",
+        "lastReportedIpV6": "2001:db8::10",
+        "jamfBinaryVersion": "11.33.0-t0000000000000",
+        "platform": "Mac",
+        "barcode1": null,
+        "barcode2": null,
+        "assetTag": null,
+        "remoteManagement": {
+          "managed": true,
+          "managementUsername": null
+        },
+        "supervised": true,
+        "mdmCapable": {
+          "capable": true,
+          "capableUsers": [],
+          "userManagementInfo": []
+        },
+        "reportDate": "2026-11-25T09:08:04.386Z",
+        "lastCheckIn": "2026-11-25T09:07:38.408Z",
+        "lastContact": "2026-11-25T09:13:50.835Z",
+        "lastCloudBackupDate": null,
+        "lastEnrolledDate": "2026-08-13T07:58:10.152Z",
+        "mdmProfileExpiration": "2028-08-13T07:57:33Z",
+        "initialEntryDate": "2026-08-13",
+        "distributionPoint": null,
+        "site": {
+          "id": "-1",
+          "name": "None"
+        },
+        "itunesStoreAccountActive": false,
+        "enrolledViaAutomatedDeviceEnrollment": true,
+        "userApprovedMdm": true,
+        "enrollmentMethod": {
+          "id": "1",
+          "objectName": "Test PreStage",
+          "objectType": "PreStage enrollment"
+        },
+        "declarativeDeviceManagementEnabled": true,
+        "appleEnrollmentType": "supervised",
+        "awaitingConfiguration": false,
+        "managementId": "00000000-0000-4000-8000-0000000000a1",
+        "lastLoggedInUsernameSelfService": null,
+        "lastLoggedInUsernameSelfServiceTimestamp": null,
+        "lastLoggedInUsernameBinary": "testuser",
+        "lastLoggedInUsernameBinaryTimestamp": "2026-11-25T05:41:47.319Z",
+        "lastLoggedInUsernameMdm": null,
+        "lastLoggedInUsernameMdmTimestamp": null,
+        "extensionAttributes": []
+      },
+      "contentCaching": {
+        "computerContentCachingInformationId": "1",
+        "parents": [],
+        "alerts": [],
+        "activated": true,
+        "active": true,
+        "actualCacheBytesUsed": 162133,
+        "cacheDetails": [
+          {
+            "computerContentCachingCacheDetailsId": "10",
+            "categoryName": "iCloud",
+            "diskSpaceBytesUsed": 162133
+          }
+        ],
+        "cacheBytesFree": 195032792064,
+        "cacheBytesLimit": 0,
+        "cacheStatus": "OK",
+        "cacheBytesUsed": 162133,
+        "dataMigrationCompleted": false,
+        "dataMigrationProgressPercentage": 0,
+        "dataMigrationError": {
+          "code": 0,
+          "domain": null,
+          "userInfo": []
+        },
+        "maxCachePressureLast1HourPercentage": 0,
+        "personalCacheBytesFree": 195032792064,
+        "personalCacheBytesLimit": 0,
+        "personalCacheBytesUsed": 162133,
+        "port": 50519,
+        "publicAddress": "203.0.113.10",
+        "registrationError": null,
+        "registrationResponseCode": 0,
+        "registrationStarted": null,
+        "registrationStatus": "CONTENT_CACHING_SUCCEEDED",
+        "restrictedMedia": false,
+        "serverGuid": "00000000-0000-4000-8000-0000000000CA",
+        "startupStatus": "OK",
+        "tetheratorStatus": "CONTENT_CACHING_DISABLED",
+        "totalBytesAreSince": "2026-11-25T09:06:16Z",
+        "totalBytesDropped": 0,
+        "totalBytesImported": 0,
+        "totalBytesReturnedToChildren": 0,
+        "totalBytesReturnedToClients": 162133,
+        "totalBytesReturnedToPeers": 0,
+        "totalBytesStoredFromOrigin": 162133,
+        "totalBytesStoredFromParents": 0,
+        "totalBytesStoredFromPeers": 0
+      }
+    }
+  ]
+}
