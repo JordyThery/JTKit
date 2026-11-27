@@ -123,7 +123,9 @@ public nonisolated final class LiveCheckPolicy: @unchecked Sendable {
     private var storageUploads: [String: (role: String, target: String, appID: String)] = [:]
     /// Devices claimed by commands decided but maybe not yet recorded (`decideCommand`).
     private let commandLock = NSLock()
-    private var reservedDevices: [String: Set<String>] = [:]
+    /// Devices of commands decided but not yet sent (or skipped), per
+    /// target: how many such commands name each serial.
+    private var reservedDevices: [String: [String: Int]] = [:]
 
     /// - Parameters:
     ///   - allowList: the loaded allow-list.
@@ -378,9 +380,9 @@ public nonisolated final class LiveCheckPolicy: @unchecked Sendable {
         // take the last device
         let withinLimit = commandLock.withLock {
             let earlier = Set(sentDeviceCommands().filter { $0.target == target.lowercased() }.map(\.serial))
-                .union(reservedDevices[target.lowercased()] ?? [])
+                .union((reservedDevices[target.lowercased()] ?? [:]).keys)
             guard earlier.union(serials).count <= DeviceCommands.maxDevicesPerRun else { return false }
-            reservedDevices[target.lowercased(), default: []].formUnion(serials)
+            for serial in serials { reservedDevices[target.lowercased(), default: [:]][serial, default: 0] += 1 }
             return true
         }
         guard withinLimit else {
@@ -428,9 +430,27 @@ public nonisolated final class LiveCheckPolicy: @unchecked Sendable {
         let sent = serials.map { SentDeviceCommand(role: allowed.role, target: allowed.target.lowercased(), serial: $0,
                                                    command: name, level: level) }
         lock.withLock { sentCommands += sent }
-        guard let commandsFile else { return }
-        for command in sent {
-            if let line = try? JSONEncoder().encode(command) { LiveCheckNetwork.appendLine(line, to: commandsFile) }
+        if let commandsFile {
+            for command in sent {
+                if let line = try? JSONEncoder().encode(command) { LiveCheckNetwork.appendLine(line, to: commandsFile) }
+            }
+        }
+        // counted as sent now, no longer as reserved
+        releaseReservation(allowed)
+    }
+
+    /// Gives back the devices a decided command reserved, when it isn’t sent
+    /// (skipped or answered wrongly at the serial prompt, or the run stopped)
+    /// or once it is recorded as sent. A command that reached the server
+    /// stays counted, whatever its answer.
+    func releaseReservation(_ allowed: LiveDecision.Allowed) {
+        guard case .command(_, _, let serials) = allowed.kind else { return }
+        let target = allowed.target.lowercased()
+        commandLock.withLock {
+            for serial in serials {
+                guard let count = reservedDevices[target]?[serial] else { continue }
+                reservedDevices[target]?[serial] = count > 1 ? count - 1 : nil
+            }
         }
     }
 

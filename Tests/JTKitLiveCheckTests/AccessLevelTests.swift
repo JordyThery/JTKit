@@ -178,6 +178,38 @@ struct DeviceCommandLevelTests {
         #expect(!other.decide(request("POST", "\(gateway)/device-actions/v1/devices/\(deviceID(4))/check-in", headers: labHeaders)).isAllowed)
     }
 
+    @Test("1.13.1: a command that isn’t sent gives its device back; one that is sent keeps it counted")
+    func aSkippedCommandDoesntCount() {
+        let policy = levelPolicy()
+        for (index, serial) in ([listedSerial] + otherSerials).enumerated() { learn(policy, serial: serial, id: deviceID(index + 1)) }
+        // three decided and then skipped (as at the serial prompt)
+        for index in 1...3 {
+            guard case .allow(let allowed) = policy.decide(
+                request("POST", "\(gateway)/device-actions/v1/devices/\(deviceID(index))/check-in", headers: labHeaders)) else {
+                Issue.record("device \(index) was refused")
+                return
+            }
+            policy.releaseReservation(allowed)
+        }
+        // a fourth device is still allowed: nothing was sent to the first three
+        guard case .allow(let fourth) = policy.decide(
+            request("POST", "\(gateway)/device-actions/v1/devices/\(deviceID(4))/check-in", headers: labHeaders)) else {
+            Issue.record("the fourth device was refused although nothing was sent")
+            return
+        }
+        policy.recordSent(fourth)
+        // sent ones stay counted: three more devices make four, the last is refused
+        for index in 1...2 {
+            guard case .allow(let allowed) = policy.decide(
+                request("POST", "\(gateway)/device-actions/v1/devices/\(deviceID(index))/check-in", headers: labHeaders)) else {
+                Issue.record("device \(index) was refused")
+                return
+            }
+            policy.recordSent(allowed)
+        }
+        #expect(!policy.decide(request("POST", "\(gateway)/device-actions/v1/devices/\(deviceID(3))/check-in", headers: labHeaders)).isAllowed)
+    }
+
     @Test func withoutListedDevicesNoCommandIsSent() {
         let policy = levelPolicy(levelList(devices: []))
         #expect(policy.decide(request("POST", "\(gateway)/device-actions/v1/devices/\(deviceID(1))/check-in", headers: labHeaders))

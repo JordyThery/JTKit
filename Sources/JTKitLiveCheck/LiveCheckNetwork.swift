@@ -712,8 +712,13 @@ nonisolated final class LiveCheckURLProtocol: URLProtocol, @unchecked Sendable {
         case .allow(let allowed) where allowed.isInterruptive:
             // the serial prompt first, off the loading thread
             Self.confirmQueue.async { [self] in
-                if stateLock.withLock({ stopped }) { return }
+                if stateLock.withLock({ stopped }) {
+                    network.policy.releaseReservation(allowed)
+                    return
+                }
                 if let reason = network.confirmInterruptive(allowed, request: seen) {
+                    // nothing sent: the device no longer counts toward the limit
+                    network.policy.releaseReservation(allowed)
                     client?.urlProtocol(self, didFailWithError: network.refuse(seen, reason: reason))
                 } else {
                     network.policy.recordSent(allowed)
