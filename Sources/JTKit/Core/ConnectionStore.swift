@@ -10,7 +10,7 @@ public nonisolated struct SecretLocation: Sendable {
     /// - Parameters:
     ///   - store: e.g. `KeychainSecretStore(service: "JamfMigrator-tenant")`.
     ///   - account: the account name for a connection; by default its id,
-    ///     e.g. `"E4908A92-FC22-43B0-90CD-646796719708"`.
+    ///     e.g. `"EEEEEEEE-0000-4000-8000-00000000B001"`.
     public init(store: any SecretStore,
                 account: @escaping @Sendable (Connection) -> String = { $0.id.uuidString }) {
         self.store = store
@@ -211,13 +211,14 @@ public final class ConnectionStore<Record: ConnectionRecord> {
     /// at it: a secret that isn’t there counts as deleted. When the Keychain
     /// refuses one (locked, access refused), the record stays and
     /// `ConnectionStoreError.keychainRefused` says which secret, and which
-    /// were already deleted (they stay deleted). A demo connection’s secrets
-    /// are never in the Keychain.
+    /// were already deleted (they stay deleted). When the list can’t be
+    /// saved afterwards, `couldNotSave` says which secrets are already gone.
+    /// A demo connection’s secrets are never in the Keychain.
     public func delete(id: UUID) throws {
         guard let record = record(id: id) else { return }
         if let problem { throw problem }
+        var deleted = [String]()
         if !record.connection.isDemo {
-            var deleted = [String]()
             for kind in ConnectionSecretKind.allCases where secretLocations[kind] != nil {
                 do {
                     try writeSecret(nil, kind, for: record.connection)
@@ -231,7 +232,18 @@ public final class ConnectionStore<Record: ConnectionRecord> {
                 deleted.append(Self.secretName(kind, of: record.connection))
             }
         }
-        try write(records.filter { $0.id != id })
+        do {
+            try write(records.filter { $0.id != id })
+        } catch ConnectionStoreError.couldNotSave(let detail) where !deleted.isEmpty {
+            // the connection stays in the list, without its secrets: say so,
+            // so the user deletes it again or enters the secret again
+            let secrets = deleted.formatted(.list(type: .and))
+            let sentence = detail.hasSuffix(".") ? detail : detail + "."
+            throw ConnectionStoreError.couldNotSave(
+                "\(sentence) “\(ConnectionMenuText.name(of: record.connection))” is still in the list, but its \(secrets) "
+                    + (deleted.count == 1 ? "was" : "were")
+                    + " already deleted from the Keychain. Delete the connection again, or enter the secret again to keep using it.")
+        }
     }
 
     /// e.g. "client secret", "Jamf Protect client secret".
