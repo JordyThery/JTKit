@@ -1,19 +1,19 @@
 # Changelog
 
-## 1.12.0 (unreleased)
+## 1.12.0 (2026-11-27)
 A minor release: the content caching model, savings and health as their own product. Code written for 1.11
 compiles unchanged and behaves the same.
 
 ### Added
-- `JTKitContentCaching`, a library product with Foundation only, so an iOS app can use it without the rest of JTKit
-  (the package now also names iOS 17 as a platform, for this product alone). It holds `ContentCaching` (the
-  `CONTENT_CACHING` section), `ContentCacheStatus` (the macOS 27 status items, older keys ignored), `DDMStatusItem`,
-  and `ContentCacheRules` with `Savings` and `CacheHealth`.
+- `JTKitContentCaching`, a library product that needs only Foundation, so an iOS app can use it without the rest of
+  JTKit. It supports macOS 14 and iOS 17 or later (iOS for this product alone). It holds `ContentCaching` (the
+  `CONTENT_CACHING` inventory section), `ContentCacheStatus` (the macOS 27 status items), `DDMStatusItem`, and
+  `ContentCacheRules` with `Savings` and `CacheHealth`.
 
 ### Changed
-- `JTKit` depends on `JTKitContentCaching` and re-exports it. `JamfPro.ContentCaching`, `JamfPro.ContentCacheStatus`
-  and `JamfPro.StatusItem` are now type aliases of those types; `ContentCacheRules`’ snapshots, series and sweep stay
-  in `JTKit`. The content caching target keeps its own internal copies of the field readers and date parsing it needs.
+- `JTKit` includes and re-exports `JTKitContentCaching`. `JamfPro.ContentCaching`, `JamfPro.ContentCacheStatus` and
+  `JamfPro.StatusItem` remain available as type aliases of the new types. `ContentCacheRules`’ snapshots, series and
+  sweep stay in `JTKit`.
 
 ## 1.11.0 (2026-11-26)
 A minor release: content caching rules, read only. Code written for 1.10 compiles unchanged and behaves the same.
