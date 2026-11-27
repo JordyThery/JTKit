@@ -31,7 +31,10 @@ extension JamfPro {
         case contentCaching = "CONTENT_CACHING"
 
         /// The key the answer uses: `USER_AND_LOCATION` → `userAndLocation`.
-        public var key: String {
+        public var key: String { Self.key(of: rawValue) }
+
+        /// The key of any section Jamf names, also one without a case here (`NETWORK` → `network`).
+        static func key(of rawValue: String) -> String {
             let words = rawValue.lowercased().split(separator: "_")
             guard let first = words.first else { return "" }
             return String(first) + words.dropFirst().map { $0.prefix(1).uppercased() + $0.dropFirst() }.joined()
@@ -370,10 +373,13 @@ extension JamfPro {
         case results
     }
 
+    /// What says which record an inventory record is, outside its sections.
+    static let inventoryIdentityKeys = ["id", "udid", "mobileDeviceId", "deviceType"]
+
     /// Keeps a page’s `totalCount` and, per record, only what says which
     /// record it is and the sections asked for.
     static func recordedInventory(sections: [InventorySection]) -> RecordedJSONFilter {
-        let allowed = Set(["id", "udid", "mobileDeviceId", "deviceType"]).union(sections.map(\.key))
+        let allowed = Set(inventoryIdentityKeys).union(sections.map(\.key))
         return { object in
             guard let page = object as? [String: Any] else { return object }
             var kept: [String: Any] = [:]
@@ -391,6 +397,13 @@ extension JamfPro {
     /// The sections every lookup asks for unless told otherwise.
     public static let computerSections: [InventorySection] = [.general, .hardware, .operatingSystem, .userAndLocation]
     public static let mobileDeviceSections: [InventorySection] = [.general, .hardware, .userAndLocation]
+
+    /// The sections a lookup by serial number asks for: also `HARDWARE`,
+    /// which holds the serial number the answer is matched on. Jamf answers
+    /// only the sections asked for.
+    static func matchingSerials(_ sections: [InventorySection]) -> [InventorySection] {
+        sections.contains(.hardware) ? sections : sections + [.hardware]
+    }
 
     /// Lookups ask for at most this many serials per request.
     static let batchSize = 50
@@ -432,7 +445,7 @@ extension JamfPlatform.Client {
                          recording: JamfPro.Recording = .errorsOnly) async throws -> DeviceMatch<JamfPro.Computer> {
         guard let safe = try? JamfPro.validatedIdentifier(serial) else { return .none }
         let records: [JamfPro.Computer] = try await inventory(.computers, filter: "\(InventoryList.computers.serialField)==\"\(safe)\"",
-                                                              sections: sections, recording: recording)
+                                                              sections: JamfPro.matchingSerials(sections), recording: recording)
         return Self.match(records, safe) { $0.serialNumber }
     }
 
@@ -451,7 +464,7 @@ extension JamfPlatform.Client {
                              recording: JamfPro.Recording = .errorsOnly) async throws -> DeviceMatch<JamfPro.MobileDevice> {
         guard let safe = try? JamfPro.validatedIdentifier(serial) else { return .none }
         let records: [JamfPro.MobileDevice] = try await inventory(.mobileDevices, filter: "serialNumber==\"\(safe)\"",
-                                                                  sections: sections, recording: recording)
+                                                                  sections: JamfPro.matchingSerials(sections), recording: recording)
         return try await completingGeneral(Self.match(records, safe) { $0.serialNumber }, sections: sections)
     }
 
@@ -536,7 +549,7 @@ extension JamfPlatform.Client {
     ///   saved); every Jamf error is a failure of the serials concerned.
     public func computers(serials: [String], sections: [JamfPro.InventorySection] = JamfPro.computerSections,
                           recording: JamfPro.Recording = .errorsOnly) async throws -> JamfPro.Batch<JamfPro.Computer> {
-        try await batch(.computers, serials: serials, sections: sections, recording: recording) { $0.serialNumber }
+        try await batch(.computers, serials: serials, sections: JamfPro.matchingSerials(sections), recording: recording) { $0.serialNumber }
     }
 
     /// Mobile devices by serial number, many at once, as `computers(serials:)`.
@@ -544,7 +557,8 @@ extension JamfPlatform.Client {
     /// section (and its asset tag), as in `mobileDevice(serial:)`.
     public func mobileDevices(serials: [String], sections: [JamfPro.InventorySection] = JamfPro.mobileDeviceSections,
                               recording: JamfPro.Recording = .errorsOnly) async throws -> JamfPro.Batch<JamfPro.MobileDevice> {
-        var batch: JamfPro.Batch<JamfPro.MobileDevice> = try await self.batch(.mobileDevices, serials: serials, sections: sections,
+        var batch: JamfPro.Batch<JamfPro.MobileDevice> = try await self.batch(.mobileDevices, serials: serials,
+                                                                                sections: JamfPro.matchingSerials(sections),
                                                                                 recording: recording) { $0.serialNumber }
         guard sections.contains(.general) else { return batch }
         let incomplete = batch.records.filter { $0.value.general == nil && $0.value.id != nil }

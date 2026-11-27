@@ -38,13 +38,24 @@ private struct SweepServer {
                 let page = Int(request.queryValue("page") ?? "0") ?? 0
                 if page == inventoryFailsOnPage { return .json(400, #"{"httpStatus":400,"errors":[]}"#) }
                 let size = Int(request.queryValue("page-size") ?? "100") ?? 100
+                // only the sections asked for, as Jamf answers
+                let asked = Set((URLComponents(url: request.url, resolvingAgainstBaseURL: false)?.queryItems ?? [])
+                    .filter { $0.name == "section" }.compactMap(\.value))
                 let results = (page * size..<min(count, (page + 1) * size)).map { number -> [String: Any] in
                     var off = caching
                     off["activated"] = false
                     off["active"] = false
-                    return ["id": String(number + 1), "general": ["name": "Mac \(number + 1)", "managementId": "M-\(number + 1)",
-                                                                  "reportDate": "2026-11-25T09:08:04.386Z"],
-                            "contentCaching": caches.contains(number + 1) ? caching : off]
+                    let sections: [String: [String: Any]] = [
+                        "GENERAL": ["name": "Mac \(number + 1)", "managementId": "M-\(number + 1)", "reportDate": "2026-11-25T09:08:04.386Z"],
+                        "HARDWARE": ["serialNumber": "C02SWEEP\(number + 1)", "model": "Mac mini (2024)"],
+                        "OPERATING_SYSTEM": ["name": "macOS", "version": "27.0"],
+                        "CONTENT_CACHING": caches.contains(number + 1) ? caching : off,
+                    ]
+                    var record: [String: Any] = ["id": String(number + 1)]
+                    for (name, section) in sections where asked.contains(name) {
+                        record[JamfPro.InventorySection(rawValue: name)?.key ?? name] = section
+                    }
+                    return record
                 }
                 let body = try JSONSerialization.data(withJSONObject: ["totalCount": count, "results": results])
                 return MockResponse(status: 200, body: body)
@@ -74,7 +85,7 @@ struct CacheSweepTests {
 
     static let now = CacheFixture.date("2026-11-25T10:00:00Z")
 
-    @Test("Every Mac, by ID, with GENERAL and CONTENT_CACHING; only the activated caches are kept; GET only")
+    @Test("Every Mac, by ID, with GENERAL, HARDWARE, OPERATING_SYSTEM and CONTENT_CACHING; only the activated caches are kept; GET only")
     func inventory() async throws {
         let server = try SweepServer(count: 250, caches: [5, 150], reports: [5: 200]).make()
         let result = try await sweep(server).read(now: Self.now)
@@ -84,7 +95,7 @@ struct CacheSweepTests {
         #expect(pages.count == 3)
         for page in pages {
             let items = URLComponents(url: page.url, resolvingAgainstBaseURL: false)?.queryItems ?? []
-            #expect(items.filter { $0.name == "section" }.map(\.value) == ["GENERAL", "CONTENT_CACHING"])
+            #expect(items.filter { $0.name == "section" }.map(\.value) == ["GENERAL", "HARDWARE", "OPERATING_SYSTEM", "CONTENT_CACHING"])
             #expect(page.queryValue("sort") == "id:asc" && page.queryValue("page-size") == "100")
         }
         #expect(server.requests.allSatisfy { $0.method == "GET" })
@@ -93,6 +104,7 @@ struct CacheSweepTests {
         #expect(five.status?.info?.cacheUsed == 31_862_207 && five.statusProblem == nil)
         #expect(five.health == ContentCacheRules.CacheHealth() && five.isUnplanned && five.declarations.isEmpty)
         #expect(five.savings.served == 162_133 && five.managementID == "M-5" && five.name == "Mac 5")
+        #expect(five.serialNumber == "C02SWEEP5" && five.model == "Mac mini (2024)" && five.osVersion == "27.0")
         let other = try #require(result.caches.first { $0.id == "150" })
         #expect(other.status == nil && other.statusProblem == nil)
         #expect(result.problems.isEmpty && result.cachingBlueprints.isEmpty && result.unplanned.count == 2)

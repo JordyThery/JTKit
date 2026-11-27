@@ -1,5 +1,19 @@
 # Changelog
 
+## 1.12.1 (unreleased)
+A patch release. Code written for 1.12 compiles unchanged.
+
+### Fixed
+- `ContentCacheRules.Sweep` also asks the computer inventory for the `HARDWARE` and `OPERATING_SYSTEM` sections, in
+  the same pages (no extra requests; a page of 100 Macs is about 40 % larger). A `CacheRecord` now has its
+  `serialNumber`, `model` and `osVersion`, and a cache a caching Blueprint reaches is matched to its declaration
+  reports by serial number again: its declaration reads as applied when it is, instead of not received with a
+  Warning.
+- `computer(serial:)`, `computers(serials:)`, `mobileDevice(serial:)` and `mobileDevices(serials:)` always ask for
+  the `HARDWARE` section, which holds the serial number they match on, also when the `sections` passed leave it out.
+- The demo servers answer an inventory list (`v4/computers-inventory`, `v2/mobile-devices/detail`) with only the
+  sections asked for, and `GENERAL` when none is, as Jamf Pro does.
+
 ## 1.12.0 (2026-11-27)
 A minor release: the content caching model, savings and health as their own product. Code written for 1.11
 compiles unchanged and behaves the same.

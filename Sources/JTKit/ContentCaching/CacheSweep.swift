@@ -188,9 +188,9 @@ extension ContentCacheRules {
     }
 
     /// Reads every content cache of a tenant: the computer inventory with
-    /// its `GENERAL` and `CONTENT_CACHING` sections (every Mac; Jamf’s list
-    /// can’t be filtered on the cache), keeping the Macs whose cache is
-    /// activated; each cache’s status report; the Blueprints that send a
+    /// its `GENERAL`, `HARDWARE`, `OPERATING_SYSTEM` and `CONTENT_CACHING`
+    /// sections (every Mac; Jamf’s list can’t be filtered on the cache),
+    /// keeping the Macs whose cache is activated; each cache’s status report; the Blueprints that send a
     /// content caching declaration, their scope and how the declaration
     /// stands. GET only, with the permissions the software update reader
     /// already needs (`devices:read`, `blueprints:read`,
@@ -262,7 +262,7 @@ extension ContentCacheRules {
                          progress: @Sendable (Progress) -> Void = { _ in }) async throws -> Result {
             var result = Result(date: now)
 
-            // 1. every Mac, with the two sections; a failure here stops the sweep
+            // 1. every Mac, with its sections; a failure here stops the sweep
             let inventory = try await computers { done, total in
                 progress(Progress(step: "Reading the computer inventory", done: done, total: total, unit: "pages"))
             }
@@ -372,7 +372,7 @@ extension ContentCacheRules {
 
         // MARK: Steps
 
-        /// Every computer with `GENERAL` and `CONTENT_CACHING`, by ID: page 0,
+        /// Every computer with `inventorySections`, by ID: page 0,
         /// then the pages its `totalCount` announces at once within
         /// `pageReads`, then one after another should more have come.
         func computers(progress: @Sendable (_ done: Int, _ total: Int) -> Void) async throws
@@ -435,6 +435,13 @@ extension ContentCacheRules {
             return (records, pages, problems)
         }
 
+        /// The inventory sections a sweep reads: the name, management ID, site
+        /// and report date (`GENERAL`), the serial number, which matches a
+        /// cache to its declaration reports, and the model (`HARDWARE`), the
+        /// macOS version (`OPERATING_SYSTEM`) and the cache itself. Jamf
+        /// answers only the sections asked for.
+        static let inventorySections: [JamfPro.InventorySection] = [.general, .hardware, .operatingSystem, .contentCaching]
+
         /// One page of the computer inventory, sorted by ID so pages don’t
         /// shift. Its answer isn’t recorded (every Mac’s general section);
         /// an error is.
@@ -443,10 +450,9 @@ extension ContentCacheRules {
                 let totalCount: Int?
                 let results: [Tolerant<JamfPro.Computer>]
             }
-            let query = [URLQueryItem(name: "page", value: String(number)), URLQueryItem(name: "page-size", value: String(size)),
-                         URLQueryItem(name: "section", value: JamfPro.InventorySection.general.rawValue),
-                         URLQueryItem(name: "section", value: JamfPro.InventorySection.contentCaching.rawValue),
-                         URLQueryItem(name: "sort", value: "id:asc")]
+            let query = [URLQueryItem(name: "page", value: String(number)), URLQueryItem(name: "page-size", value: String(size))]
+                + Self.inventorySections.map { URLQueryItem(name: "section", value: $0.rawValue) }
+                + [URLQueryItem(name: "sort", value: "id:asc")]
             let response = try await jamfPro.send(HTTPRequest(path: "pro/v4/computers-inventory", query: query),
                                                   privileges: [.readComputers], permissions: [JamfPlatform.Permission.devicesRead])
             // task-group children call this: one return (swiftlang/swift#93208)

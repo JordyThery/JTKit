@@ -36,4 +36,16 @@ nonisolated enum DemoJSON {
     static func header(_ name: String, in request: DemoRequest) -> String? {
         request.headers.first { $0.key.lowercased() == name.lowercased() }?.value
     }
+
+    /// An inventory record (`v4/computers-inventory`, `v2/mobile-devices/detail`)
+    /// as Jamf answers it: what says which record it is, and only the
+    /// sections the request asks for (`section=…`; `GENERAL` when it asks
+    /// for none).
+    static func sections(of record: [String: Any], for request: DemoRequest) -> [String: Any] {
+        let asked = (URLComponents(url: request.url, resolvingAgainstBaseURL: false)?.queryItems ?? [])
+            .filter { $0.name == "section" }.compactMap(\.value)
+        let keys = (asked.isEmpty ? [JamfPro.InventorySection.general.rawValue] : asked).map(JamfPro.InventorySection.key(of:))
+        let kept = Set(JamfPro.inventoryIdentityKeys).union(keys)
+        return record.filter { kept.contains($0.key) }
+    }
 }

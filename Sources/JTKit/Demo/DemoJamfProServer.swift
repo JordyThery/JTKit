@@ -297,7 +297,7 @@ public nonisolated final class DemoJamfProServer: DemoServer, @unchecked Sendabl
             .filter { $0.device.isComputer == computers }
             .filter { wanted.isEmpty || wanted.contains(byUDID ? $0.device.udid.uppercased() : $0.device.serial) }
             .sorted { $0.device.number < $1.device.number }
-            .map { computers ? computerJSON($0) : mobileJSON($0) }
+            .map { DemoJSON.sections(of: computers ? computerJSON($0) : mobileJSON($0), for: request) }
         return page(matches, request)
     }
 
