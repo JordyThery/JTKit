@@ -244,7 +244,21 @@ public nonisolated struct KeychainSecretStore: SecretStore {
             }
             throw SecretStoreError(status: status == errSecSuccess ? errSecDecode : status)
         }
-        return String(data: data, encoding: .utf8)
+        do {
+            return try Self.text(of: data)
+        } catch {
+            if logsMisses {
+                log?("[Keychain] the item for \(account) isn’t text")
+            }
+            throw error
+        }
+    }
+
+    /// A stored item’s text. An item that isn’t UTF-8 (damaged, or written
+    /// by another tool) can’t be read; it never counts as “none stored”.
+    static func text(of data: Data) throws -> String {
+        guard let text = String(data: data, encoding: .utf8) else { throw SecretStoreError(status: errSecDecode) }
+        return text
     }
 
     private func exists(_ base: [String: Any], account: String) throws -> Bool {
