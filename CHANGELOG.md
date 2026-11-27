@@ -1,6 +1,6 @@
 # Changelog
 
-## 1.12.1 (unreleased)
+## 1.12.1 (2026-11-27)
 A patch release. Code written for 1.12 compiles unchanged.
 
 ### Fixed
