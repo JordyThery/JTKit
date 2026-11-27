@@ -171,7 +171,7 @@ extension SoftwareUpdateRules {
         /// identifiers are pairs no device in scope holds active; every device
         /// reports those as “not for this device”, and they decide nothing per
         /// device. Each is read once instead: its newest report, which carries
-        /// the predicate Jamf last gave it, enough for the catalogue (its name,
+        /// the predicate Jamf last gave it, enough for the catalog (its name,
         /// its range, whether it covers a device’s version). The pairs some
         /// device in scope holds active are read in full.
         public struct Reads: Sendable, Hashable {
@@ -240,7 +240,8 @@ extension SoftwareUpdateRules {
         /// each pair with the predicate of its newest report (when a device
         /// reported one; by the declaration’s `dateUpdated`), its
         /// family from that predicate or its step’s activation predicate, and
-        /// its name. In step order, then by number.
+        /// its name. In step order, then by number. (The name keeps its
+        /// British spelling until a major version: renaming it would break apps.)
         public static func catalogue(_ reports: [JamfPlatform.DeclarationReport], blocks: [JamfPlatform.SoftwareUpdateBlock],
                               blueprintName: String) -> [Current] {
             let pairs = DeclarationPair.pairs(reports)

@@ -228,7 +228,7 @@ extension SoftwareUpdateRules {
             /// Every report of the declarations read in full (`BlueprintHealth.Reads.full`).
             public var reports: [JamfPlatform.DeclarationReport] = []
             /// One report per sampled pair (`Reads.sampled`), the newest: for the
-            /// catalogue (its name and predicate), never tied to a device.
+            /// catalog (its name and predicate), never tied to a device.
             public var samples: [JamfPlatform.DeclarationReport] = []
             /// Why the reading stopped, if it did.
             public var problem: String?
@@ -254,7 +254,7 @@ extension SoftwareUpdateRules {
         /// them: the pairs some device holds active in full (their devices’
         /// reports; after a declaration’s first page the pages its count
         /// announces are read at once, every page read within `pageReads`),
-        /// the other pairs once each (their newest report, for the catalogue); and the
+        /// the other pairs once each (their newest report, for the catalog); and the
         /// Platform device list, read once, to tie each report to a device by
         /// serial number. A refusal or a failed read stops the reading and is
         /// returned as the problem (never as “serial not found”); a declaration
@@ -366,7 +366,7 @@ extension SoftwareUpdateRules {
 
         /// One report of a pair no device in scope holds active: the newest
         /// inactive one, which carries the predicate Jamf last gave the pair
-        /// (an active report carries none), as the catalogue would pick it
+        /// (an active report carries none), as the catalog would pick it
         /// from every report. None when nothing reported it.
         func sample(_ identifier: String, budget: ReadBudget) async throws -> [JamfPlatform.DeclarationReport] {
             let page = try await budget.run {
