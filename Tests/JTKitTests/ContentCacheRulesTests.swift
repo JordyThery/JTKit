@@ -235,3 +235,52 @@ struct CacheDeclarationCheckTests {
         #expect(!blueprint.isHeld(in: [Self.activation, "Blueprint_b1_s1_c2_sys_cfg1", "Blueprint_b2_s1_c1_declaration_custom_0"]))
     }
 }
+
+@Suite("1.13.0: why an inventory report is old")
+struct CacheHealthLastContactTests {
+    static let now = CacheHealthTests.now
+    static func ago(days: Double) -> Date { now.addingTimeInterval(-days * 86_400) }
+
+    static func evaluate(report: Date?, contact: Date?) -> CacheTestHealth {
+        CacheTestHealth.evaluate(CacheHealthTests.healthy(), reportDate: report, lastContact: contact, now: now)
+    }
+
+    @Test("In contact within 48 hours: the reason says so, in plain words")
+    func inContact() {
+        #expect(Self.evaluate(report: Self.ago(days: 11), contact: Self.ago(days: 0.1)).reasons
+                == ["In contact today, but no inventory report for 11 days"])
+        #expect(Self.evaluate(report: Self.ago(days: 3), contact: Self.ago(days: 1.5)).reasons
+                == ["In contact yesterday, but no inventory report for 3 days"])
+        #expect(Self.evaluate(report: Self.ago(days: 11), contact: Self.now.addingTimeInterval(60)).reasons
+                == ["In contact today, but no inventory report for 11 days"], "a contact a little ahead of the clock")
+        var wide = CacheTestHealth.Thresholds()
+        wide.warningReportAge = 4 * 86_400
+        #expect(CacheTestHealth.evaluate(CacheHealthTests.healthy(), reportDate: Self.ago(days: 5), lastContact: Self.ago(days: 3),
+                                         thresholds: wide, now: Self.now).reasons
+                == ["In contact 3 days ago, but no inventory report for 5 days"])
+    }
+
+    @Test("No contact for longer than 48 hours: the reason is the contact, not the report")
+    func noContact() {
+        #expect(Self.evaluate(report: Self.ago(days: 62), contact: Self.ago(days: 60)).reasons == ["No contact for 60 days"])
+        #expect(Self.evaluate(report: Self.ago(days: 3), contact: Self.ago(days: 2.5)).reasons == ["No contact for 2 days"])
+    }
+
+    @Test("Without a last contact, the reason is the report’s age, as before")
+    func noLastContact() {
+        #expect(Self.evaluate(report: Self.ago(days: 11), contact: nil).reasons == ["No inventory report for 11 days"])
+        #expect(Self.evaluate(report: nil, contact: Self.ago(days: 0.1)).reasons == ["No inventory report date"])
+        #expect(Self.evaluate(report: Self.ago(days: 0.5), contact: Self.ago(days: 30)) == CacheTestHealth(),
+                "a recent report is OK, whatever the last contact")
+    }
+
+    @Test("The levels are the report’s age alone, the same as without a last contact",
+          arguments: [0.5, 1.9, 2.1, 6.9, 7.1, 11, 60])
+    func sameLevels(reportDays: Double) {
+        let before = Self.evaluate(report: Self.ago(days: reportDays), contact: nil).level
+        for contactDays in [0, 1, 1.9, 2.1, 30, 90] {
+            #expect(Self.evaluate(report: Self.ago(days: reportDays), contact: Self.ago(days: contactDays)).level == before)
+        }
+        #expect(before == (reportDays > 7 ? .fault : reportDays > 2 ? .warning : .ok))
+    }
+}
