@@ -1,6 +1,6 @@
 # Changelog
 
-## 1.13.0 (unreleased)
+## 1.13.0 (2026-11-27)
 A minor release. Code written for 1.12 compiles unchanged; only the wording of one health reason changes.
 
 ### Added
