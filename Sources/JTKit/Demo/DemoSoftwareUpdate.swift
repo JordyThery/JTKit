@@ -536,16 +536,15 @@ public nonisolated final class DemoSoftwareUpdateServer: DemoServer, @unchecked 
             ]])
         case 3 where p == ["pro", "v4", "computers-inventory"]:
             let filter = request.query["filter"] ?? ""
-            let caching = (URLComponents(url: request.url, resolvingAgainstBaseURL: false)?.queryItems ?? [])
-                .contains { $0.name == "section" && $0.value == JamfPro.InventorySection.contentCaching.rawValue }
             let ids = Self.ids(in: filter)
             // without a filter every Mac, by ID (the content cache sweep)
             let macs = known.filter { $0.family == .mac && (filter.isEmpty || ids.contains(String($0.number))) }
                 .sorted { $0.number < $1.number }
             return page(macs.map { device in
                 var record = computerRecord(device)
-                if caching { record["contentCaching"] = DemoContentCaching.section(device.number, iso: iso) }
-                return record
+                record["contentCaching"] = DemoContentCaching.section(device.number, iso: iso)
+                // only the sections asked for, as Jamf answers
+                return DemoJSON.sections(of: record, for: request)
             }, request)
         case 5 where Array(p[0...2]) == ["pro", "v1", "ddm"] && p[4] == "status-items":
             guard let device = known.first(where: { $0.managementID == p[3] }),
