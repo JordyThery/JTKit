@@ -36,7 +36,9 @@ extension JamfPlatform {
         public private(set) var signInCount = 0
 
         /// - Parameters:
-        ///   - tokenURL: the full address of the token endpoint.
+        ///   - tokenURL: the full address of the token endpoint. Only an
+        ///     `https://` address is used: with any other, signing in throws
+        ///     `HTTPError.invalidURL` and nothing is sent.
         ///   - secret: the client secret or password; its errors are passed on
         ///     unchanged (e.g. the app’s "no secret saved" error).
         ///   - recorder: sends and records the sign-in.
@@ -115,6 +117,14 @@ extension JamfPlatform {
 
         private func signIn() async throws -> (String, Date, TimeInterval) {
             signInCount += 1
+            // the secret or the password never goes out in clear: an address
+            // that isn’t https:// is refused before the secret is even read
+            guard tokenURL.scheme?.lowercased() == "https" else {
+                await recorder.note("POST", tokenURL.path(),
+                                    note: "Refused before sending: \(tokenURL.absoluteString) isn’t an https:// address.",
+                                    category: "Blocked", isWarning: true)
+                throw HTTPError.invalidURL("\(tokenURL.absoluteString) isn’t an https:// address, so nothing was sent.")
+            }
             let secret = try secret()
 
             var request = URLRequest(url: tokenURL)

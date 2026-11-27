@@ -344,9 +344,9 @@ public actor HTTPClient {
     private let redirects: RedirectRule
     private let writeSpacing: Duration
     private let maxConcurrent: Int?
-    /// Made with the public init: only an `https://` base address is used,
-    /// so a token never goes out in clear.
-    private nonisolated(unsafe) var requiresHTTPS = false
+    /// Made with the public init or for a Jamf Platform client: only an
+    /// `https://` base address is used, so a token never goes out in clear.
+    private nonisolated let requiresHTTPS: Bool
     private let rateLimit: RateLimit?
     /// When the requests in the current window started, oldest first.
     private var recentRequests: [Date] = []
@@ -394,11 +394,14 @@ public actor HTTPClient {
     ) {
         self.init(baseURL: baseURL, tokens: tokens, recorder: recorder, headers: headers, permits: permits,
                   pathMapping: .none, redirects: redirects, writeSpacing: writeSpacing, maxConcurrent: maxConcurrent,
-                  rateLimit: rateLimit, rules: rules, sleep: sleep, random: random, now: now)
-        requiresHTTPS = true
+                  rateLimit: rateLimit, rules: rules, requiresHTTPS: true, sleep: sleep, random: random, now: now)
     }
 
     /// As the public init, with a path mapping (`.jamfProDirect`).
+    ///
+    /// - Parameter requiresHTTPS: refuse to send when the base address
+    ///   isn’t `https://`; false only for JTKit’s own clients that check
+    ///   their address themselves.
     init(
         baseURL: URL,
         tokens: (any BearerTokenSource)?,
@@ -411,10 +414,12 @@ public actor HTTPClient {
         maxConcurrent: Int? = nil,
         rateLimit: RateLimit? = nil,
         rules: RetryRules = .standard,
+        requiresHTTPS: Bool = false,
         sleep: @escaping @Sendable (Duration) async throws -> Void = { try await Task.sleep(for: $0) },
         random: @escaping @Sendable () -> Double = { Double.random(in: 0...1) },
         now: @escaping @Sendable () -> Date = { Date() }
     ) {
+        self.requiresHTTPS = requiresHTTPS
         self.baseURL = baseURL
         self.tokens = tokens
         self.recorder = recorder

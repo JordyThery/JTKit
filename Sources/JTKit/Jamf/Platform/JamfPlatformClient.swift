@@ -99,6 +99,10 @@ extension JamfPlatform {
         /// A client with its own token source, e.g. for tests or credentials
         /// that aren’t saved as a connection.
         ///
+        /// Only an `https://` base address is used: with any other, every
+        /// request is refused before it’s sent (`HTTPError.invalidURL`), so
+        /// the token never goes out in clear.
+        ///
         /// - Parameters:
         ///   - server: `.jamfPro` for a Jamf Pro server reached directly;
         ///     give it `.organization` scope.
@@ -143,7 +147,7 @@ extension JamfPlatform {
                               permits: permits, pathMapping: server == .jamfPro ? .jamfProDirect : .none,
                               redirects: .sameHostHTTPSOnly, writeSpacing: writeSpacing,
                               maxConcurrent: maxConcurrent, rateLimit: rateLimit,
-                              sleep: sleep, random: random, now: now)
+                              requiresHTTPS: true, sleep: sleep, random: random, now: now)
         }
 
         /// Sends a request. Returns a 2xx answer (or what `HTTPClient`
