@@ -1,5 +1,20 @@
 # Changelog
 
+## 1.13.0 (unreleased)
+A minor release. Code written for 1.12 compiles unchanged; only the wording of one health reason changes.
+
+### Added
+- `ContentCacheRules.CacheHealth.evaluate` takes `lastContact: Date? = nil`, the Mac’s last contact with Jamf Pro.
+  When the inventory report is older than `warningReportAge`, the reason says why: a Mac in contact within
+  `warningReportAge` reads “In contact today, but no inventory report for 11 days” (today, yesterday or N days ago);
+  one out of contact for longer reads “No contact for 60 days”. Without a last contact the reason stays “No inventory
+  report for N days”. The levels don’t change: the report’s age still decides Warning and Fault, with the same
+  thresholds.
+
+### Changed
+- `ContentCacheRules.Sweep` passes each cache’s `lastContact` to `CacheHealth.evaluate`, so a sweep’s caches get the
+  new reasons.
+
 ## 1.12.1 (2026-11-27)
 A patch release. Code written for 1.12 compiles unchanged.
 

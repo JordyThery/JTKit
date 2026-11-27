@@ -118,13 +118,20 @@ extension ContentCacheRules {
         /// The macOS 27 status items, when newer than the inventory report,
         /// decide active, the statuses, pressure and the parents’ health.
         ///
+        /// When the inventory report is older than `warningReportAge`, a last
+        /// contact says why: within `warningReportAge` of `now` the reason is
+        /// “In contact today, but no inventory report for N days”; longer ago,
+        /// “No contact for N days”. The levels come from the report’s age only.
+        ///
         /// - Parameters:
         ///   - reportDate: the Mac’s last inventory report (`general.reportDate`).
+        ///   - lastContact: the Mac’s last contact with Jamf Pro
+        ///     (`general.lastContact`); nil leaves the reason as the report’s age.
         ///   - serverTimeZone: the zone Jamf Pro writes status item times in.
         ///   - declarationApplied: whether the caching Blueprint’s declaration
         ///     is applied on this Mac; nil when no caching Blueprint sends it one.
         public static func evaluate(_ caching: ContentCaching, status: ContentCacheStatus? = nil,
-                                    reportDate: Date?, declarationApplied: Bool? = nil,
+                                    reportDate: Date?, lastContact: Date? = nil, declarationApplied: Bool? = nil,
                                     serverTimeZone: TimeZone = TimeZone(identifier: "UTC") ?? .gmt,
                                     thresholds: Thresholds = Thresholds(), now: Date = Date()) -> CacheHealth {
             var faults: [String] = []
@@ -185,9 +192,9 @@ extension ContentCacheRules {
             if let reportDate {
                 let age = now.timeIntervalSince(reportDate)
                 if age > thresholds.faultReportAge {
-                    faults.append("No inventory report for \(days(age)) days")
+                    faults.append(oldReportReason(age: age, lastContact: lastContact, thresholds: thresholds, now: now))
                 } else if age > thresholds.warningReportAge {
-                    warnings.append("No inventory report for \(days(age)) days")
+                    warnings.append(oldReportReason(age: age, lastContact: lastContact, thresholds: thresholds, now: now))
                 }
             } else {
                 warnings.append("No inventory report date")
@@ -201,6 +208,25 @@ extension ContentCacheRules {
         private static func isOK(_ text: String) -> Bool { text.uppercased() == "OK" }
 
         private static func days(_ seconds: TimeInterval) -> Int { max(Int(seconds / 86_400), 1) }
+
+        /// The reason for an inventory report `age` old, by the last contact:
+        /// still in contact, out of contact, or unknown.
+        private static func oldReportReason(age: TimeInterval, lastContact: Date?, thresholds: Thresholds,
+                                            now: Date) -> String {
+            guard let lastContact else { return "No inventory report for \(days(age)) days" }
+            let silence = now.timeIntervalSince(lastContact)
+            guard silence <= thresholds.warningReportAge else { return "No contact for \(days(silence)) days" }
+            return "In contact \(relativeDay(silence)), but no inventory report for \(days(age)) days"
+        }
+
+        /// Whole days ago in plain words: today, yesterday, N days ago.
+        private static func relativeDay(_ seconds: TimeInterval) -> String {
+            switch max(Int(seconds / 86_400), 0) {
+            case 0: "today"
+            case 1: "yesterday"
+            case let count: "\(count) days ago"
+            }
+        }
 
         /// `com.apple.AssetCache.LowSpaceAlert` → “Low Space”.
         static func alertName(_ className: String) -> String {

@@ -359,6 +359,7 @@ extension ContentCacheRules {
                     status: read?.items.flatMap(JamfPro.ContentCacheStatus.init(items:)), statusProblem: read?.problem,
                     declarationIdentifiers: identifiers, declarations: declarations, isUnplanned: !planned)
                 record.health = CacheHealth.evaluate(caching, status: record.status, reportDate: record.reportDate,
+                                                     lastContact: record.lastContact,
                                                      declarationApplied: record.declarationApplied,
                                                      serverTimeZone: serverTimeZone, thresholds: thresholds, now: now)
                 return record
