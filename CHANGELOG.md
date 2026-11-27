@@ -1,5 +1,48 @@
 # Changelog
 
+## 1.13.1 (2026-11-27)
+A patch release. Code written for 1.13 compiles unchanged; one behavior is stricter (see Changed).
+
+### Changed
+- `JamfPlatform.Client.init(baseURL:…)` and `JamfPlatform.TokenProvider.init(tokenURL:…)` use `https://` only, as
+  `HTTPClient`’s public init already did. With an `http://` (or any other non-HTTPS) address, every request is
+  refused before it is sent and logged as Blocked (`HTTPError.invalidURL`, wrapped in `JamfPlatform.APIError` by the
+  client), and the token provider throws `HTTPError.invalidURL` without reading the secret. The `init(connection:…)`
+  forms are unchanged: `Connection.jamfBaseURL` never gives an `http://` address.
+
+### Fixed
+- `Connection.jamfBaseURL` drops a trailing `/api` from a Jamf Pro server address (as `JamfWebLink` and Jamf School
+  already did), so `https://myorg.jamfcloud.com/api` no longer signs in at `/api/api/oauth/token`.
+- `ABM.TokenProvider.token(beforeSigningIn:)`: requests that arrive while the first one waits for its rate-limit
+  slot share that sign-in without taking a slot of their own, so a burst of requests with no token no longer fills
+  Apple’s window with sign-in slots.
+- `Redaction.text` keeps the words of a sentence such as “Basic authentication is disabled for this API” or “Invalid
+  bearer token”. After `Authorization:` anything is still hidden; elsewhere `Bearer` and `Basic` (as written) hide
+  what follows when it looks like a credential.
+- `ConnectionStore.delete(id:)`: when the list can’t be saved after the secrets were deleted, the
+  `ConnectionStoreError.couldNotSave` message says the connection is still listed and which secrets are already gone.
+- `IdentifierMasker.identifiers(inPath:)` (the bug-report export) also collects a UUID after a device path segment
+  (`devices`, `mobile-devices`, `computers-inventory`, `managedDevices`, …; Jamf School’s UDIDs), a serial of 10–12
+  capital letters after such a segment, and the account name of a LAPS read (`…/account/{name}/…`).
+- `Graph.TokenProvider` passes the client secret to the recorder as a known secret and removes it from the error it
+  throws, as the Jamf and Apple providers do.
+- A mobile device group’s `members(of:)` throws `pageLimitReached` after 1,000 pages instead of returning a list
+  cut short.
+- `KeychainSecretStore`: an item that isn’t UTF-8 text throws `SecretStoreError(status: errSecDecode)` instead of
+  reading as “none stored”.
+- `SoftwareUpdateRules.InspectWorkflow` returns each device’s reads from one place (swiftlang/swift#93208 shape).
+- `TestRun.refusingSession`’s route is let go with its session. `OSVersion` builds its pattern once.
+
+### Live checks (`JTKitLiveCheck`)
+- A write to a group or PreStage that names members (`members`, `assignments`, `serialNumbers`, `computers`,
+  `criteria`, Classic `<computers><computer>`, `<computer_additions>`, Graph `members@odata.bind`,
+  `groups/{id}/members/$ref`, …) is refused, and so is a smart or dynamic group (`groupType` SMART, `is_smart`,
+  a `smart-groups` path, Graph `DynamicMembership` or `membershipRule`). Empty member lists stay allowed.
+- A mobile device’s own detail (`…/mobile-devices/{id}/detail`, which holds its unlock token) counts as a device
+  secret and is never read; the detail list (`…/mobile-devices/detail`) stays readable.
+- A device command that is decided but not sent (skipped or answered wrongly at the serial prompt, or the run
+  stopped) no longer counts toward the three-device limit.
+
 ## 1.13.0 (2026-11-27)
 A minor release. Code written for 1.12 compiles unchanged; only the wording of one health reason changes.
 
