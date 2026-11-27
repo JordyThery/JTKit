@@ -79,7 +79,9 @@ extension ABM {
 
         /// As `token()`; `beforeSigningIn` runs before a sign-in this call
         /// starts (the client’s rate limit: Apple counts the sign-in too), not
-        /// when it shares one already under way.
+        /// when it shares one already under way. The sign-in counts as under
+        /// way from the start of that wait, so requests arriving meanwhile
+        /// share it without taking a slot of their own.
         public func token(beforeSigningIn: @escaping @Sendable () async throws -> Void) async throws -> String {
             if let cached, cached.expiresAt.timeIntervalSince(now()) > cached.margin {
                 return cached.value
@@ -87,15 +89,10 @@ extension ABM {
             if let inFlight {
                 return try await inFlight.value.0
             }
-            try await beforeSigningIn()
-            // another request may have signed in while this one waited
-            if let cached, cached.expiresAt.timeIntervalSince(now()) > cached.margin {
-                return cached.value
+            let task = Task {
+                try await beforeSigningIn()
+                return try await self.signIn()
             }
-            if let inFlight {
-                return try await inFlight.value.0
-            }
-            let task = Task { try await self.signIn() }
             inFlight = task
             defer { inFlight = nil }
             do {
