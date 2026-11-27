@@ -8,6 +8,7 @@
 
 [![Latest version](https://img.shields.io/github/v/tag/JordyThery/JTKit?label=version)](https://github.com/JordyThery/JTKit/tags)
 ![macOS 14+](https://img.shields.io/badge/macOS-14%2B-blue)
+![iOS 17+ (JTKitContentCaching)](https://img.shields.io/badge/iOS-17%2B%20(JTKitContentCaching)-blue)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 
 ## What it does
@@ -16,7 +17,7 @@ JTKit is a Swift package with the code that my Mac admin apps share: checking fo
 
 | Product | What it is | Used by |
 | --- | --- | --- |
-| `JTKit` | The package itself: everything described below | Every app |
+| `JTKit` | The package itself: everything described below | Every Mac app |
 | `JTKitContentCaching` | A Mac’s content cache from Jamf: the inventory section, the macOS 27 status items, savings and health. Foundation only, so it also builds for iOS; `JTKit` includes it | Muster (iOS), through `JTKit` the Mac apps |
 | `JTKitMSAL` | Microsoft’s sign-in window for Intune, the only product that depends on MSAL | Apps that sign in to Intune interactively |
 | `JTKitTestSupport` | Test helpers: a mock server, an in-memory secret store, JTKit’s own live checks | Apps’ unit test targets |
@@ -86,6 +87,7 @@ Every request to Jamf, Microsoft Graph and Apple is recorded in an activity log 
 - [Jamf Migrator](https://github.com/JordyThery/JamfMigrator)
 - [Serial Number Reader](https://github.com/JordyThery/Serial-Number-Reader)
 - [Software Update Dashboard](https://github.com/JordyThery/Software-Update-Dashboard)
+- [Muster](https://jordythery.be/muster.html) (iOS, on the App Store; `JTKitContentCaching` only)
 
 All of them are listed at [jordythery.be/apps.html](https://jordythery.be/apps.html).
 
@@ -106,11 +108,15 @@ In a `Package.swift`:
 
 ```swift
 dependencies: [
-    .package(url: "https://github.com/JordyThery/JTKit", from: "1.0.0"),
+    .package(url: "https://github.com/JordyThery/JTKit", from: "1.13.1"),
 ],
 targets: [
     .target(name: "MyApp", dependencies: [
         .product(name: "JTKit", package: "JTKit"),
+    ]),
+    // an iOS app: the content cache rules only
+    .target(name: "MyiOSApp", dependencies: [
+        .product(name: "JTKitContentCaching", package: "JTKit"),
     ]),
 ]
 ```
@@ -125,7 +131,7 @@ JTKit follows [semantic versioning](https://semver.org) since 1.0: patch version
 
 ## Development
 
-Open `Package.swift` in Xcode and press ⌘U to run the tests; they make no network calls. `swift test` also runs the live-check rules’ own tests. The live checks run only when the release check switches them on, and never without the local allow-list. [ROADMAP.md](ROADMAP.md) is the development plan.
+Open `Package.swift` in Xcode and press ⌘U to run the tests; they make no network calls. `swift test` (with Xcode as the developer directory, e.g. `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer swift test`) also runs the live-check rules’ own tests. The live checks run only when the release check switches them on, and never without the local allow-list. [ROADMAP.md](ROADMAP.md) is the development plan.
 
 ## Support
 
@@ -137,4 +143,4 @@ This package is provided as-is, without warranty of any kind. Use it at your own
 
 ## License
 
-MIT
+[MIT](LICENSE)
