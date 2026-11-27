@@ -313,6 +313,9 @@ public nonisolated final class LiveCheckPolicy: @unchecked Sendable {
                 return .allow(.init(kind: .delete, role: role, target: target, resource: "deleteditems", id: deleted))
             }
         }
+        if let refusal = membershipRefusal(request, target: target, path: lowered) {
+            return .refuse(refusal)
+        }
         if !target.hasPrefix("intune:"), let refusal = jamfScopeRefusal(request, target: target) {
             return .refuse(refusal)
         }
@@ -528,6 +531,83 @@ public nonisolated final class LiveCheckPolicy: @unchecked Sendable {
             }
         }
         return refusal
+    }
+
+    // MARK: Group and PreStage members
+
+    /// A write to a group or PreStage never names members, and a group is
+    /// never smart or dynamic: a test object scoped to a run’s group then
+    /// still reaches no device. An empty member list is fine (a static
+    /// group is created with one).
+    private func membershipRefusal(_ request: LiveRequest, target: String, path: String) -> String? {
+        guard request.method != "DELETE" else { return nil }
+        let segments = path.split(separator: "/").map(String.init)
+        let isGroupOrPreStage = segments.contains { $0.contains("group") || $0.contains("prestage") }
+        guard isGroupOrPreStage else { return nil }
+        if target.hasPrefix("intune:") {
+            // POST groups/{id}/members/$ref, and any other change of members or owners
+            if let index = segments.firstIndex(of: "groups"), segments.dropFirst(index + 1).contains(where: { $0 == "members" || $0 == "owners" }) {
+                return "Adding members to a group is refused in a live check"
+            }
+        } else if segments.contains(where: { $0.contains("smart") }) {
+            return "A smart group is refused in a live check: it can include real devices"
+        }
+        guard !request.body.isEmpty else { return nil }
+        if let body = try? JSONSerialization.jsonObject(with: request.body) {
+            var refusal: String?
+            Self.visitObjects(in: body) { object in
+                for (key, value) in object where refusal == nil {
+                    let key = Ledger.normalized(key)
+                    let memberKeys = target.hasPrefix("intune:") ? Self.graphMemberKeys : Self.jamfMemberKeys
+                    if memberKeys.contains(key), Self.isNonEmpty(value) {
+                        refusal = "A group or PreStage with members (“\(key)”) is refused in a live check"
+                    } else if key == "grouptype" || key == "grouptypes" {
+                        let types = (value as? [Any] ?? [value]).compactMap { ($0 as? String)?.lowercased() }
+                        if types.contains(where: { $0 == "smart" || $0 == "dynamicmembership" }) {
+                            refusal = "A smart or dynamic group is refused in a live check: it can include real devices"
+                        }
+                    } else if key == "issmart" || key == "smart" {
+                        if (value as? Bool) == true || (value as? String)?.lowercased() == "true" {
+                            refusal = "A smart group is refused in a live check: it can include real devices"
+                        }
+                    }
+                }
+            }
+            return refusal
+        }
+        guard let document = try? XMLDocument(data: request.body, options: []), let root = document.rootElement() else {
+            return "A group or PreStage body that can’t be read is refused"
+        }
+        // Classic groups: <is_smart>, and members or criteria in their lists
+        // (a `<size>` alone, as Jamf returns it, names no one)
+        if (root.elements(forName: "is_smart").first?.stringValue ?? "").trimmingCharacters(in: .whitespaces).lowercased() == "true" {
+            return "A smart group is refused in a live check: it can include real devices"
+        }
+        let members = "//computers/computer | //mobile_devices/mobile_device | //users/user | //criteria/criterion"
+            + " | //computer_additions/computer | //mobile_device_additions/mobile_device"
+        if let named = try? document.nodes(forXPath: members), !named.isEmpty {
+            return "A group with members or criteria is refused in a live check"
+        }
+        return nil
+    }
+
+    /// Jamf Pro, Platform and PreStage JSON keys that name members (normalized).
+    static let jamfMemberKeys: Set<String> = [
+        "members", "assignments", "serialnumbers", "computers", "mobiledevices", "computerids",
+        "mobiledeviceids", "deviceids", "criteria", "users",
+    ]
+    /// Graph keys that name a group’s members (normalized) or make it dynamic.
+    static let graphMemberKeys: Set<String> = ["membersodatabind", "ownersodatabind", "membershiprule"]
+
+    /// A value that names something: a non-empty list, object or text.
+    static func isNonEmpty(_ value: Any) -> Bool {
+        switch value {
+        case let array as [Any]: !array.isEmpty
+        case let object as [String: Any]: !object.isEmpty
+        case let text as String: !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        case is NSNull: false
+        default: true
+        }
     }
 
     // MARK: Jamf scopes
