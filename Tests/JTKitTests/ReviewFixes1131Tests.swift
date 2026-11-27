@@ -84,6 +84,55 @@ struct AppleSharedSignInTests {
     }
 }
 
+@Suite("1.13.2: stopping a request that waits for Apple’s sign-in")
+struct AppleSignInCancellationTests {
+    private func provider(_ server: MockServer) -> ABM.TokenProvider {
+        let pem = P256.Signing.PrivateKey().pemRepresentation
+        return ABM.TokenProvider(service: .business, clientID: "BUSINESSAPI.test", keyID: "key-1",
+                                 privateKey: { pem }, recorder: RequestRecorder(session: server.session, log: nil))
+    }
+
+    @Test("The only waiter stopped: it ends at once, the wait for a slot ends, and no sign-in is sent")
+    func onlyWaiter() async throws {
+        let server = MockServer { _ in .json(200, tokenJSON("apple-token")) }
+        let tokens = provider(server)
+        let waitEnded = Locked(false)
+        let started = ContinuousClock.now
+        let task = Task {
+            try await tokens.token(beforeSigningIn: {
+                do { try await Task.sleep(for: .seconds(60)) } catch { waitEnded.value = true; throw error }
+            })
+        }
+        try await Task.sleep(for: .milliseconds(100))
+        task.cancel()
+        await #expect(throws: CancellationError.self) { _ = try await task.value }
+        #expect(ContinuousClock.now - started < .seconds(5))
+        for _ in 0..<100 where !waitEnded.value { try await Task.sleep(for: .milliseconds(10)) }
+        #expect(waitEnded.value)
+        #expect(server.requests.isEmpty)
+        // a later request signs in afresh
+        #expect(try await tokens.token(beforeSigningIn: {}) == "apple-token")
+        #expect(server.requests.count == 1)
+    }
+
+    @Test("One of two waiters stopped: the other still gets the token from the one sign-in")
+    func otherWaiterKeepsWaiting() async throws {
+        let server = MockServer { _ in .json(200, tokenJSON("apple-token")) }
+        let tokens = provider(server)
+        let slots = Counter()
+        let slow: @Sendable () async throws -> Void = { _ = slots.next(); try await Task.sleep(for: .milliseconds(300)) }
+        let first = Task { try await tokens.token(beforeSigningIn: slow) }
+        try await Task.sleep(for: .milliseconds(50))
+        let second = Task { try await tokens.token(beforeSigningIn: slow) }
+        try await Task.sleep(for: .milliseconds(50))
+        first.cancel()
+        await #expect(throws: CancellationError.self) { _ = try await first.value }
+        #expect(try await second.value == "apple-token")
+        #expect(slots.value == 1)
+        #expect(server.requests.count == 1)
+    }
+}
+
 @Suite("1.13.1: Bearer and Basic in free text")
 struct BearerBasicRedactionTests {
     @Test("Sentences keep their words",
