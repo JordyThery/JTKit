@@ -213,7 +213,8 @@ extension JamfPlatform {
 extension Connection {
     /// Where Jamf requests go: the Platform API gateway of the region, or the
     /// host override (scheme and trailing slashes dropped), or the Jamf Pro
-    /// server (`https://` added when it has no scheme). Nil for other
+    /// server (`https://` added when it has no scheme, a trailing `/api`
+    /// dropped). Nil for other
     /// services and unusable addresses, `http://` ones included.
     public var jamfBaseURL: URL? {
         switch service {
@@ -230,9 +231,16 @@ extension Connection {
             components.host = host
             return components.url
         case .jamfPro:
-            // an address saved without a scheme gets https://; http:// is refused
+            // an address saved without a scheme gets https://; http:// is refused;
+            // a trailing /api (as some copy it from the API docs) is dropped, as
+            // JamfWebLink and Jamf School do, so requests don’t go to /api/api/
             var address = Self.normalizedServerAddress(serverURL).trimmingCharacters(in: .whitespacesAndNewlines)
             while address.hasSuffix("/") { address.removeLast() }
+            if var components = URLComponents(string: address), components.path.lowercased().hasSuffix("/api") {
+                components.path.removeLast(4)
+                while components.path.hasSuffix("/") { components.path.removeLast() }
+                address = components.string ?? address
+            }
             guard Self.isWebAddress(address) else { return nil }
             return URL(string: address)
         case .jamfSchool, .intune, .appleBusinessManager, .appleSchoolManager:
