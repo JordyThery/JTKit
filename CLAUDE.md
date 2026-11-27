@@ -14,13 +14,15 @@ Organize `Sources/JTKit/` in folders:
 - `Core/`: Keychain, JSONValue, log redaction, request and activity logs, HTTP basics
 - `Updates/`: GitHub-release update checker and update view
 - `AppShell/`: About window, acknowledgements, the Settings window and reusable Settings sections (updates; connections from step 4), shared design components
-- `Jamf/`: token providers (OAuth client credentials, basic auth), Jamf Pro API, Classic API, Platform API (Blueprints, device groups), Jamf School
+- `Jamf/`: token providers (OAuth client credentials, basic auth), Jamf Pro API, Classic API, Platform API (`Platform/`: Blueprints, device groups, devices, declaration reports, environments, software update and content cache reads, paging, polling, permissions), Jamf School
 - `Intune/`: Entra ID / Microsoft Graph auth and Intune device endpoints
 - `ABM/`: Apple Business or Apple School Manager API
 - `SoftwareUpdate/`: the software update rules (`SoftwareUpdateRules`, from Software Update Dashboard in 1.9.0): targets and deadlines per device, classification, readiness, Blueprint health, Inspect, and the reader of a refresh. Saves nothing: apps pass in what they remember
+- `AppleReleases/` (1.5.0): Apple’s release data from SOFA and GDMF, read only, and `OSVersion`
+- `ContentCaching/` (1.11.0): `ContentCacheRules` and `CacheSweep`, the content caches from Jamf Pro and the caching Blueprints (the model itself is in `JTKitContentCaching`)
 - `Demo/`: demo mode (switch, private network, fake servers, Contoso sample data)
 
-Test helpers (MockURLProtocol, fixtures) are in the separate library product `JTKitTestSupport`, never in `JTKit` itself. `JTKitMSAL` is Microsoft’s sign-in window (the only product that depends on MSAL). For the release checks: `JTKitUITestSupport` (UI test targets only, XCTest, doesn’t link JTKit; Swift 5 language mode), `JTKitLiveCheck` (apps’ unit test targets only, never shipped; the allow-list, rules, ledger and guarded network of the live checks) and `Scripts/release-check-lib.sh` with `release-check-setup.sh` (the release-check template each app’s `Scripts/release-check.sh` loads). `Scripts/check-versions.sh` is the start-of-conversation check each app’s CLAUDE.md runs: its JTKit version against the latest tag, and its commits since its latest release.
+Test helpers are in the separate library product `JTKitTestSupport`, never in `JTKit` itself: `MockServer` (with `MockURLProtocol`), an in-memory secret store and the Blueprint deploy live check (`LiveBlueprintDeployCheck`). JTKit’s own fixtures stay in `Tests/JTKitTests/Fixtures`, read by path. `JTKitMSAL` is Microsoft’s sign-in window (the only product that depends on MSAL). For the release checks: `JTKitUITestSupport` (UI test targets only, XCTest, doesn’t link JTKit; Swift 5 language mode), `JTKitLiveCheck` (apps’ unit test targets only, never shipped; the allow-list, rules, ledger and guarded network of the live checks) and `Scripts/release-check-lib.sh` with `release-check-setup.sh` (the release-check template each app’s `Scripts/release-check.sh` loads). `Scripts/check-versions.sh` is the start-of-conversation check each app’s CLAUDE.md runs: its JTKit version against the latest tag, and its commits since its latest release.
 
 ## Rules for shared code
 
@@ -28,7 +30,7 @@ Test helpers (MockURLProtocol, fixtures) are in the separate library product `JT
 2. Only what apps need is `public`; everything else stays internal.
 3. Swift 6 concurrency: model types are `Sendable`; UI state is `@MainActor`.
 4. macOS only, except `JTKitContentCaching`: it stays Foundation only (no AppKit, SwiftUI, Security or networking), so it keeps building for iOS. Nothing else in JTKit gets iOS code or `#if os(iOS)` branches, and IntuneOnboard and Device Assist (iOS) stay out of JTKit entirely.
-5. Every component gets Swift Testing tests in `Tests/JTKitTests`, with no real network calls.
+5. Every component gets Swift Testing tests in `Tests/JTKitTests` (the live-check rules: `Tests/JTKitLiveCheckTests`; MSAL: `Tests/JTKitMSALTests`), with no real network calls.
 6. No third-party dependencies without asking Jordy first.
 7. Views follow Apple’s HIG: run the apple-design skill review on any view added or changed here. Design-review fixes change only JTKit’s shared look, never a single app.
 8. The package has no resources: text is plain English Swift strings (American spelling, contractions with a curly apostrophe: doesn’t, can’t), and images are SF Symbols. Adding a resource means loading it with `Bundle.module`.
@@ -44,7 +46,7 @@ One component, one app at a time:
 4. **Preserve stored data.** Keep each app’s existing Keychain service and account names, UserDefaults keys, file locations and Codable field names by passing them in from the app. Changing them silently loses users’ saved connections and settings.
 5. Build the app and run its unit tests (see "Testing").
 
-Apps depend on JTKit through its GitHub URL (Up to Next Major Version). Never add a local-path reference to JTKit inside an app’s project. `~/Developer/Apps.xcworkspace` already makes every app build against the local JTKit during development.
+Apps depend on JTKit through its GitHub URL (Up to Next Major Version). Never add a local-path reference to JTKit inside an app’s project. **Exception: Muster** (iOS, `JTKitContentCaching` only) pins an exact version, because an App Store app gets only the version it was tested with. Raising it is a Muster change, made only when Jordy asks for Muster: set `exactVersion` for JTKit in Muster’s `project.yml`, run `xcodegen generate` there, resolve the packages and test Muster on that version; **Update to Latest Package Versions** doesn’t move an exact pin. `~/Developer/Apps.xcworkspace` already makes every app build against the local JTKit during development.
 
 Only change an app when Jordy asks for that app.
 
@@ -52,7 +54,7 @@ Only change an app when Jordy asks for that app.
 
 Never run the full UI test suites or the `run-*-ui-tests.sh` scripts of Jamf Deployer and AppSettings2Blueprint: they take too long and don’t test the right things (decided by Jordy on 2026-10-25). Run a single UI test only when Jordy asks for it by name. "Run its tests" in a prompt or in `ROADMAP.md` means the unit tests.
 
-From step 11 on, each app has a release check (`Scripts/release-check.sh`, see ROADMAP step 11), in five stages: build from its own project against the published JTKit and sign in to the app’s allow-listed tenants (`--tenants`: all of them), unit tests, short UI smoke tests in demo mode, **required live checks against sandbox tenants** (decided by Jordy on 2026-10-26: they replace most of his hand checks), and a report. While fixing one test, `release-check.sh --only <test>` (1.3.0) runs just that test on the last build of the same source; it’s a partial run, never a release check. Claude may run the release check and the apps’ smoke-test classes unattended (decided by Jordy on 2026-10-27; start it with `nohup` and poll); the rule above for the full UI suites still stands.
+From step 11 on, each app has a release check (`Scripts/release-check.sh`, see ROADMAP step 11), in five stages: build from its own project against the published JTKit and sign in to the app’s allow-listed tenants (`--tenants`: all of them), unit tests, short UI smoke tests in demo mode, **required live checks against sandbox tenants** (decided by Jordy on 2026-10-26: they replace most of his hand checks), and a report. While fixing one test, `release-check.sh --only <test>` (1.3.0) runs just that test on the last build of the same source; it’s a partial run, never a release check. Ask Jordy before starting a release check or any UI test; once he says go, it may run unattended (start with `nohup`, then poll). The rule above for the full UI suites still stands.
 
 Live checks (decided by Jordy on 2026-10-27):
 - Only tenants on the allow-list, `~/Library/Application Support/JTKit Release Check/allowlist.json`: outside every repo, never committed, hostnames, non-secret IDs and access levels only. Deny by default. Never add a customer tenant. Never name a real tenant in a repo; tests and scripts use role names.
@@ -84,7 +86,7 @@ Bump `JTKit.version`, add a CHANGELOG entry (it’s for developers using the pac
 
 The README is public and describes the package to other developers. When a change makes a statement in it untrue (products, areas, principles, requirements), update it in the same commit.
 
-**Before tagging any JTKit version, build every app that uses it** in `Apps.xcworkspace`, against the local JTKit: AppSettings2Blueprint, Checkpoint, Intune Deployer, Jamf Deployer, JamfMigrator, Serial Number Reader, Software Update Dashboard (Profile2Blueprint and Blueprint Managed Preferences Editor were archived on 2026-11-11 and are no longer built). Report any that fail and don’t tag until they all build. JTKit’s own tests can’t catch a change that breaks how an app calls it (0.4.2 broke Serial Number Reader’s Settings preview).
+**Before tagging any JTKit version, build every app that uses it** in `Apps.xcworkspace`, against the local JTKit: AppSettings2Blueprint, Checkpoint, Intune Deployer, Jamf Deployer, JamfMigrator, Serial Number Reader, Software Update Dashboard (Profile2Blueprint and Blueprint Managed Preferences Editor were archived on 2026-11-11 and are no longer built). A private app outside the workspace also depends on JTKit: build it against the local JTKit as well (its own CLAUDE.md says how; it is named only in the private notes). Report any that fail and don’t tag until they all build. JTKit’s own tests can’t catch a change that breaks how an app calls it (0.4.2 broke Serial Number Reader’s Settings preview).
 
 **A change to `JTKitContentCaching`** is also built for the iOS Simulator before tagging, not only for macOS (`xcodebuild -scheme JTKitContentCaching -destination 'generic/platform=iOS Simulator' build`), and then Muster is checked too: build it in `Apps.xcworkspace` against the local JTKit.
 
