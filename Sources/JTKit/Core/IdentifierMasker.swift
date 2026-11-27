@@ -211,8 +211,11 @@ public nonisolated struct IdentifierMasker: Sendable {
     }
 
     /// Identifiers in a request path and query: values that look like a
-    /// serial number, Apple’s UDID formats, and a UUID right after `udid`.
-    /// A plain UUID elsewhere is an object ID (a Blueprint, a group), not a device.
+    /// serial number, Apple’s UDID formats, a UUID right after `udid` or a
+    /// device path segment (Jamf School’s UDIDs are UUIDs), a serial of
+    /// letters only right after a device path segment, and the account name
+    /// after `account` (a LAPS read). A plain UUID elsewhere is an object ID
+    /// (a Blueprint, a group), not a device.
     public static func identifiers(inPath path: String) -> [FoundIdentifier] {
         let decoded = path.removingPercentEncoding ?? path
         let separators = CharacterSet(charactersIn: "/?&=\"',;:()[]{} ")
@@ -220,12 +223,27 @@ public nonisolated struct IdentifierMasker: Sendable {
         var found = [FoundIdentifier]()
         for (index, segment) in segments.enumerated() {
             let previous = index > 0 ? segments[index - 1].lowercased() : ""
+            let afterDevice = devicePathSegments.contains(previous)
             if looksLikeSerialNumber(segment) || looksLikeDeviceUDID(segment)
-                || (["udid", "udids"].contains(previous) && UUID(uuidString: segment) != nil) {
+                || ((["udid", "udids"].contains(previous) || afterDevice) && UUID(uuidString: segment) != nil)
+                || (afterDevice && looksLikeLetterSerial(segment)) {
                 found.append(FoundIdentifier(.device, segment))
+            } else if previous == "account" {
+                found.append(FoundIdentifier(.user, segment))
             }
         }
         return unique(found + identifiers(inText: decoded))
+    }
+
+    /// Path segments followed by a device’s own identifier (lowercased).
+    static let devicePathSegments: Set<String> = [
+        "devices", "mobile-devices", "mobiledevices", "computers-inventory", "computers-inventory-detail",
+        "manageddevices", "orgdevices", "serialnumber", "serial-number",
+    ]
+
+    /// 10 to 12 uppercase letters, as a randomized serial number can be.
+    static func looksLikeLetterSerial(_ text: String) -> Bool {
+        (10...12).contains(text.count) && text.allSatisfy { $0.isASCII && $0.isUppercase }
     }
 
     /// Email addresses anywhere in free text.
