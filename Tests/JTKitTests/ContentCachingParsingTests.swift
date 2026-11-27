@@ -1,6 +1,7 @@
 import Foundation
 import Testing
 @testable import JTKit
+@testable import JTKitContentCaching
 
 @Suite("1.11.0: the inventory’s content caching section")
 struct ContentCachingInventoryTests {

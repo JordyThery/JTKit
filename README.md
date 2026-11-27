@@ -17,6 +17,7 @@ JTKit is a Swift package with the code that my Mac admin apps share: checking fo
 | Product | What it is | Used by |
 | --- | --- | --- |
 | `JTKit` | The package itself: everything described below | Every app |
+| `JTKitContentCaching` | A Mac’s content cache from Jamf: the inventory section, the macOS 27 status items, savings and health. Foundation only, so it also builds for iOS; `JTKit` includes it | Muster (iOS), through `JTKit` the Mac apps |
 | `JTKitMSAL` | Microsoft’s sign-in window for Intune, the only product that depends on MSAL | Apps that sign in to Intune interactively |
 | `JTKitTestSupport` | Test helpers: a mock server, an in-memory secret store, JTKit’s own live checks | Apps’ unit test targets |
 | `JTKitUITestSupport` | A base class and smoke checks for UI tests in Demo Mode, and live UI tests | Apps’ UI test targets |
@@ -90,7 +91,7 @@ All of them are listed at [jordythery.be/apps.html](https://jordythery.be/apps.h
 
 ## Requirements
 
-- macOS 14 or later
+- macOS 14 or later (`JTKitContentCaching` alone: macOS 14 or iOS 17 or later)
 - Swift 6 tools
 - Xcode 16.3 or later; developed and tested with Xcode 27
 

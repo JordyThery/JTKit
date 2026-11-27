@@ -5,9 +5,15 @@ let package = Package(
     name: "JTKit",
     platforms: [
         .macOS(.v14),   // lowest target among the apps (Serial Number Reader); macOS only
+        // JTKitContentCaching only (Foundation alone), for Muster; no other product builds for iOS
+        .iOS(.v17),
     ],
     products: [
         .library(name: "JTKit", targets: ["JTKit"]),
+        // The content caching model, status items, savings and health
+        // (1.12.0): Foundation only, so Muster (iOS) can use them without
+        // the rest of JTKit. JTKit re-exports it.
+        .library(name: "JTKitContentCaching", targets: ["JTKitContentCaching"]),
         // Microsoft’s sign-in window for Intune. The only product that
         // depends on MSAL: apps without it ship nothing of MSAL.
         .library(name: "JTKitMSAL", targets: ["JTKitMSAL"]),
@@ -31,7 +37,8 @@ let package = Package(
         .package(url: "https://github.com/AzureAD/microsoft-authentication-library-for-objc", exact: "2.16.0"),
     ],
     targets: [
-        .target(name: "JTKit"),
+        .target(name: "JTKit", dependencies: ["JTKitContentCaching"]),
+        .target(name: "JTKitContentCaching"),
         .target(name: "JTKitMSAL", dependencies: [
             "JTKit",
             .product(name: "MSAL", package: "microsoft-authentication-library-for-objc"),
@@ -47,7 +54,7 @@ let package = Package(
         .target(name: "JTKitLiveCheck"),
         .executableTarget(name: "JTKitLiveGateway", dependencies: ["JTKitLiveCheck"]),
         // Fixtures are read from disk by path, not bundled
-        .testTarget(name: "JTKitTests", dependencies: ["JTKit", "JTKitTestSupport", "JTKitUITestSupport", "JTKitLiveCheck"],
+        .testTarget(name: "JTKitTests", dependencies: ["JTKit", "JTKitContentCaching", "JTKitTestSupport", "JTKitUITestSupport", "JTKitLiveCheck"],
                     exclude: ["Fixtures"]),
         .testTarget(name: "JTKitLiveCheckTests", dependencies: ["JTKitLiveCheck", "JTKitTestSupport"]),
         .testTarget(name: "JTKitMSALTests", dependencies: ["JTKitMSAL"]),

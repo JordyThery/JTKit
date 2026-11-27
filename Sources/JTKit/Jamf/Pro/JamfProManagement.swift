@@ -60,29 +60,7 @@ extension JamfPro {
         }
     }
 
-    /// One item of a device’s DDM status report, as Jamf Pro keeps it.
-    public struct StatusItem: Hashable, Sendable {
-        /// The JSON type a value came in.
-        public enum ValueKind: String, Hashable, Sendable {
-            case string, number, boolean, object, array, null
-        }
-
-        public var key: String
-        /// The value as text: a number as written, a boolean as `true` or
-        /// `false`, an object or a list as compact JSON.
-        public var value: String?
-        /// As Jamf Pro writes it: the server’s local time, without a zone.
-        public var lastUpdateTime: String?
-        /// The type the value came in (`statusItems(managementID:kind:)`);
-        /// nil for an item made another way.
-        public var valueKind: ValueKind?
-
-        public init(key: String, value: String? = nil, lastUpdateTime: String? = nil) {
-            self.key = key
-            self.value = value
-            self.lastUpdateTime = lastUpdateTime
-        }
-    }
+    // StatusItem: JTKitContentCaching’s DDMStatusItem (JamfProContentCaching.swift).
 
     /// A declaration as the server holds it (`dss-declarations`). Its payload
     /// can carry a password, so it is never recorded.
