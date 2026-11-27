@@ -91,4 +91,20 @@ struct SoftwareUpdateInspectWorkflowTests {
         let split = InspectWorkflow(jamfPro: try demo.client(), platform: try demo.client(), parallel: 2)
         #expect(try await split.run(members, rows: demo.reading.devices, context: demo.context) == results)
     }
+
+    @Test("1.13.1: one device’s reads: without a serial its status is still read; with one, its device and reports")
+    func oneDevicesReads() async throws {
+        let demo = try await demo()
+        let member = try #require(demo.members.first)
+        let workflow = InspectWorkflow(client: try demo.client())
+        let full = await workflow.inspectInput(member, row: nil)
+        #expect(full.status != nil && full.platformDeviceID != nil && full.reports != nil)
+        #expect(full.problem == nil && full.reportsProblem == nil)
+
+        var noSerial = member
+        noSerial.serialNumber = nil
+        let partial = await workflow.inspectInput(noSerial, row: nil)
+        #expect(partial.status != nil)
+        #expect(partial.platformDeviceID == nil && partial.reports == nil && partial.problem == nil)
+    }
 }

@@ -52,6 +52,9 @@ extension SoftwareUpdateRules {
         }
 
         /// One device’s reads; what can’t be read is written into the input.
+        /// A task-group child awaits this: `input` is returned from one place
+        /// only, as Swift 6.4’s optimizer can lose a value returned from inside
+        /// a do/catch (swiftlang/swift#93208).
         func inspectInput(_ member: JamfPro.GroupMember, row: DeviceStatus?, serverTimeZone: TimeZone = .gmt) async -> InspectInput {
             var input = InspectInput(member: member, device: row)
             do {
@@ -64,14 +67,15 @@ extension SoftwareUpdateRules {
                     input.osVersionChanged = items.last { $0.key == "device.operating-system.version" }?.lastUpdateTime
                         .flatMap { JamfPro.serverDate($0, timeZone: serverTimeZone) }
                 }
-                guard let serial = member.serialNumber, let device = try await platform.device(serial: serial) else { return input }
-                input.platformDeviceID = device.id
-                do {
-                    input.reports = try await platform.declarationReports(deviceID: device.id) ?? []
-                } catch is CancellationError {
-                    input.problem = "Stopped"
-                } catch {
-                    input.reportsProblem = error.localizedDescription
+                if let serial = member.serialNumber, let device = try await platform.device(serial: serial) {
+                    input.platformDeviceID = device.id
+                    do {
+                        input.reports = try await platform.declarationReports(deviceID: device.id) ?? []
+                    } catch is CancellationError {
+                        input.problem = "Stopped"
+                    } catch {
+                        input.reportsProblem = error.localizedDescription
+                    }
                 }
             } catch is CancellationError {
                 input.problem = "Stopped"
