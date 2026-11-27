@@ -145,13 +145,18 @@ extension Graph {
             let data: Data
             let response: HTTPURLResponse
             do {
-                (data, response) = try await recorder.send(request, category: "Sign-in", redirects: .sameHostHTTPSOnly)
+                // an answer that repeats the secret (an echoed form, a proxy’s
+                // error page) never shows it, as for Jamf and Apple
+                (data, response) = try await recorder.send(request, category: "Sign-in", redirects: .sameHostHTTPSOnly,
+                                                           knownSecrets: [secret])
             } catch let error as URLError {
                 throw Graph.APIError(Graph.APIError.Kind.transport(method: "POST", path: tokenURL.path(), code: error.code,
-                                            message: Redaction.text(error.localizedDescription)), access: .application)
+                                            message: Redaction.removing([secret], from: Redaction.text(error.localizedDescription))),
+                                     access: .application)
             }
             guard (200..<300).contains(response.statusCode) else {
-                throw Graph.APIError(HTTPError.status(HTTPResponse(status: response.statusCode, headers: [:], data: data),
+                let cleaned = String(data: data, encoding: .utf8).map { Data(Redaction.removing([secret], from: $0).utf8) } ?? data
+                throw Graph.APIError(HTTPError.status(HTTPResponse(status: response.statusCode, headers: [:], data: cleaned),
                                                   method: "POST", path: tokenURL.path(), duringSignIn: true),
                                  access: .application)
             }
