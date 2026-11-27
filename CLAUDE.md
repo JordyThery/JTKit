@@ -4,7 +4,12 @@ JTKit is the shared Swift package for Jordy’s apps in `~/Developer`. Jordy isn
 
 ## Layout
 
-One library product, `JTKit` (macOS 14+ only, Swift 6 language mode). Organize `Sources/JTKit/` in folders:
+Two main library products, both in Swift 6 language mode:
+
+- `JTKit` (macOS 14+ only): everything below. It includes and re-exports `JTKitContentCaching`.
+- `JTKitContentCaching` (1.12.0, Foundation only, macOS 14 and iOS 17, in `Sources/JTKitContentCaching/`): the content cache model, the macOS 27 status items, savings and health. Used by Muster (iOS) directly and by the Mac apps through `JTKit`.
+
+Organize `Sources/JTKit/` in folders:
 
 - `Core/`: Keychain, JSONValue, log redaction, request and activity logs, HTTP basics
 - `Updates/`: GitHub-release update checker and update view
@@ -22,7 +27,7 @@ Test helpers (MockURLProtocol, fixtures) are in the separate library product `JT
 1. Nothing app-specific is hard-coded: app name, GitHub repo, bundle IDs, Keychain service names, URLs, UserDefaults keys come in as parameters or a configuration value.
 2. Only what apps need is `public`; everything else stays internal.
 3. Swift 6 concurrency: model types are `Sendable`; UI state is `@MainActor`.
-4. macOS only. IntuneOnboard and Device Assist (iOS) are out of JTKit entirely; don’t add iOS code or `#if os(iOS)` branches.
+4. macOS only, except `JTKitContentCaching`: it stays Foundation only (no AppKit, SwiftUI, Security or networking), so it keeps building for iOS. Nothing else in JTKit gets iOS code or `#if os(iOS)` branches, and IntuneOnboard and Device Assist (iOS) stay out of JTKit entirely.
 5. Every component gets Swift Testing tests in `Tests/JTKitTests`, with no real network calls.
 6. No third-party dependencies without asking Jordy first.
 7. Views follow Apple’s HIG: run the apple-design skill review on any view added or changed here. Design-review fixes change only JTKit’s shared look, never a single app.
@@ -80,6 +85,8 @@ Bump `JTKit.version`, add a CHANGELOG entry (it’s for developers using the pac
 The README is public and describes the package to other developers. When a change makes a statement in it untrue (products, areas, principles, requirements), update it in the same commit.
 
 **Before tagging any JTKit version, build every app that uses it** in `Apps.xcworkspace`, against the local JTKit: AppSettings2Blueprint, Checkpoint, Intune Deployer, Jamf Deployer, JamfMigrator, Serial Number Reader, Software Update Dashboard (Profile2Blueprint and Blueprint Managed Preferences Editor were archived on 2026-11-11 and are no longer built). Report any that fail and don’t tag until they all build. JTKit’s own tests can’t catch a change that breaks how an app calls it (0.4.2 broke Serial Number Reader’s Settings preview).
+
+**A change to `JTKitContentCaching`** is also built for the iOS Simulator before tagging, not only for macOS (`xcodebuild -scheme JTKitContentCaching -destination 'generic/platform=iOS Simulator' build`), and then Muster is checked too: build it in `Apps.xcworkspace` against the local JTKit.
 
 ## Order and sources
 
