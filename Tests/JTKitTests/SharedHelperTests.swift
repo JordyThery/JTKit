@@ -7,7 +7,7 @@ import JTKitTestSupport
 // JTKit 1.1.0, Part C: helpers the apps had their own copies of.
 
 private func platformClient(_ server: MockServer) throws -> JamfPlatform.Client {
-    try JamfPlatform.Client(baseURL: URL(string: "https://eu.api.jamfcloud.com")!, scope: .environment("e77c1408-10c8-4007-b177-abc9157fbcab"),
+    try JamfPlatform.Client(baseURL: URL(string: "https://eu.api.jamfcloud.com")!, scope: .environment("00000000-0000-4000-8000-0000000000e8"),
                             tokens: FixedToken("tok"),
                             recorder: RequestRecorder(session: server.session, log: nil, service: "Jamf Platform API"),
                             sleep: { _ in }, random: { 0 })

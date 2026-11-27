@@ -32,7 +32,7 @@ private func xml(_ text: String) -> MockResponse {
 
 @Suite("Live check: the Jamf Pro fallback never reaches another group")
 struct JamfProFallbackTests {
-    private let group = "830636ce-d876-4768-a1df-0be83503e0f1"
+    private let group = "00000000-0000-4000-8000-0000000000f1"
     private let gateway = "https://eu.api.jamfcloud.com"
     private var groupURL: String { "\(gateway)/device-groups/v1/device-groups/\(group)" }
     private let headers = ["X-Environment-Id": platformA]
@@ -451,7 +451,7 @@ struct LiveCheckSmallItemTests {
     @Test("Refusals in the report show no serial number or ID")
     func refusalLocationsAreMasked() async throws {
         let network = LiveCheckNetwork(policy: makePolicy(), upstream: MockServer { _ in .json(200, "{}") }.session)
-        var request = URLRequest(url: URL(string: "https://api-business.apple.com/v1/orgDevices/C02XK0AAJGH5/appleCareCoverage")!)
+        var request = URLRequest(url: URL(string: "https://api-business.apple.com/v1/orgDevices/ZZTESTMAC002/appleCareCoverage")!)
         request.setValue("Bearer unknown", forHTTPHeaderField: "Authorization")
         await #expect(throws: (any Error).self) { _ = try await network.session.data(for: request) }
         #expect(network.refusals.first?.location == "api-business.apple.com/v1/orgDevices/{id}/appleCareCoverage")

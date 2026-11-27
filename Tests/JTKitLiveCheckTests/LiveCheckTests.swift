@@ -1018,7 +1018,7 @@ struct DeleteReadBackTests {
 
     @Test("A Platform group Jamf still lists after a 404: deleted again through the Jamf Pro API, then confirmed")
     func platformGroupFallsBackToJamfPro() async throws {
-        let group = "830636ce-d876-4768-a1df-0be83503e0f1"
+        let group = "00000000-0000-4000-8000-0000000000f1"
         let listed = Flag(true)
         let server = MockServer { request in
             switch (request.method, request.path) {
@@ -1050,7 +1050,7 @@ struct DeleteReadBackTests {
 
     @Test("The Jamf Pro fallback only for the ledger’s group, by its exact name")
     func fallbackOnlyForTheLedgersGroup() async throws {
-        let group = "830636ce-d876-4768-a1df-0be83503e0f1"
+        let group = "00000000-0000-4000-8000-0000000000f1"
         let server = MockServer { request in
             switch (request.method, request.path) {
             case ("GET", "/pro/v2/groups"):

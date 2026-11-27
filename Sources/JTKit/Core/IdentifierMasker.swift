@@ -57,7 +57,7 @@ public nonisolated struct IdentifierMasker: Sendable {
         // One pass, longest values first, so a shorter value can never be
         // replaced inside a longer one or inside a placeholder already written.
         // Whole words only; a percent escape before a value counts as a word
-        // boundary, so `%22C02XK1JHJG5H%22` in an address is masked too.
+        // boundary, so `%22ZZTESTMAC001%22` in an address is masked too.
         let alternatives = replacements.keys
             .sorted { ($0.count, $0) > ($1.count, $1) }
             .map { NSRegularExpression.escapedPattern(for: $0) }

@@ -45,9 +45,9 @@ struct SecretKeyMatchingTests {
     }
 
     @Test func aStatusItemKeepsItsKeyAndValue() throws {
-        let json = try JSONSerialization.data(withJSONObject: ["key": "device.identifier.serial-number", "value": "C02XK1JHJG5H"])
+        let json = try JSONSerialization.data(withJSONObject: ["key": "device.identifier.serial-number", "value": "ZZTESTMAC001"])
         let text = try #require(Redaction.body(json))
-        #expect(text.contains("device.identifier.serial-number") && text.contains("C02XK1JHJG5H"))
+        #expect(text.contains("device.identifier.serial-number") && text.contains("ZZTESTMAC001"))
     }
 }
 
@@ -59,7 +59,7 @@ struct DeviceRecordMaskingTests {
       "id": "17", "udid": "6E3B1C0A-2F4D-4B8E-9C1A-5D7E8F9A0B1C",
       "general": {"name": "Jane’s MacBook Pro", "assetTag": "ACME-0042", "platform": "Mac",
                   "site": {"id": "1", "name": "Headquarters"}},
-      "hardware": {"serialNumber": "C02XK1JHJG5H", "model": "MacBook Pro (14-inch, 2023)"},
+      "hardware": {"serialNumber": "ZZTESTMAC001", "model": "MacBook Pro (14-inch, 2023)"},
       "operatingSystem": {"name": "macOS", "version": "15.1"},
       "groupMemberships": [{"groupId": "3", "groupName": "All Managed Macs"}]
     }]}
@@ -70,14 +70,14 @@ struct DeviceRecordMaskingTests {
     {"totalCount": 1, "results": [{
       "mobileDeviceId": "8", "deviceType": "iOS",
       "general": {"displayName": "Front Desk iPad", "udid": "00008103-001A2C3E0C38001E"},
-      "hardware": {"serialNumber": "DMPXK1JHJG5H"}
+      "hardware": {"serialNumber": "ZZTESTIPD002"}
     }]}
     """
 
     @Test func aComputerNameInGeneralIsMasked() {
         let found = IdentifierMasker.identifiers(inBody: Data(Self.computersInventory.utf8))
         #expect(found.contains(FoundIdentifier(.device, "Jane’s MacBook Pro")))
-        #expect(found.contains(FoundIdentifier(.device, "C02XK1JHJG5H")))
+        #expect(found.contains(FoundIdentifier(.device, "ZZTESTMAC001")))
         // other sections have names of their own
         #expect(!found.contains { $0.value == "macOS" || $0.value == "Headquarters" || $0.value == "All Managed Macs" })
         let masker = IdentifierMasker(found)

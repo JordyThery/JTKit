@@ -11,10 +11,10 @@ struct IdentifierMaskerTests {
     @Test("Serials, UDIDs, IMEI and MAC addresses are found by key")
     func deviceKeys() {
         let identifiers = found(#"""
-        {"results":[{"serialNumber":"C02XK1JHJG5H","udid":"6F3A6C1E-2B0D-4E9B-9C1A-1D2E3F4A5B6C",
+        {"results":[{"serialNumber":"ZZTESTMAC001","udid":"6F3A6C1E-2B0D-4E9B-9C1A-1D2E3F4A5B6C",
                       "imei":"35 209900 176148 1","wifiMacAddress":"a4:83:e7:12:34:56","id":"12"}]}
         """#)
-        #expect(Set(identifiers.map(\.value)) == ["C02XK1JHJG5H", "6F3A6C1E-2B0D-4E9B-9C1A-1D2E3F4A5B6C",
+        #expect(Set(identifiers.map(\.value)) == ["ZZTESTMAC001", "6F3A6C1E-2B0D-4E9B-9C1A-1D2E3F4A5B6C",
                                                  "35 209900 176148 1", "a4:83:e7:12:34:56"])
         #expect(identifiers.allSatisfy { $0.kind == .device })
     }
@@ -22,7 +22,7 @@ struct IdentifierMaskerTests {
     @Test("A device record’s name is a device name; a Blueprint’s or a group’s isn’t")
     func names() {
         let identifiers = found(#"""
-        {"computer":{"serialNumber":"C02XK1JHJG5H","name":"Jordy’s MacBook"},
+        {"computer":{"serialNumber":"ZZTESTMAC001","name":"Jordy’s MacBook"},
          "blueprint":{"id":"5b1f7c2e-0000-0000-0000-000000000001","name":"Engineers"},
          "group":{"name":"All Macs"},"inventory":{"deviceName":"iPad Lab 3","computerName":"Studio Mac"}}
         """#)
@@ -57,14 +57,14 @@ struct IdentifierMaskerTests {
         <udid>6F3A6C1E-2B0D-4E9B-9C1A-1D2E3F4A5B6C</udid></computer></computers>
         <limitations><users><user><name>jdoe</name></user></users></limitations>
         <computer_groups><computer_group><id>2</id><name>Engineers</name></computer_group></computer_groups>
-        </scope><general><serial_number>C02XK1JHJG5H</serial_number></general></os_x_configuration_profile>
+        </scope><general><serial_number>ZZTESTMAC001</serial_number></general></os_x_configuration_profile>
         """#
         let identifiers = IdentifierMasker.identifiers(inBody: Data(xml.utf8))
         let byValue = Dictionary(identifiers.map { ($0.value, $0.kind) }, uniquingKeysWith: { first, _ in first })
         #expect(byValue["Lab Mac"] == .device)
         #expect(byValue["6F3A6C1E-2B0D-4E9B-9C1A-1D2E3F4A5B6C"] == .device)
         #expect(byValue["jdoe"] == .user)
-        #expect(byValue["C02XK1JHJG5H"] == .device)
+        #expect(byValue["ZZTESTMAC001"] == .device)
         #expect(byValue["Engineers"] == nil)
     }
 
@@ -72,8 +72,8 @@ struct IdentifierMaskerTests {
     func paths() {
         let blueprint = "5b1f7c2e-1111-2222-3333-444455556666"
         let identifiers = IdentifierMasker.identifiers(
-            inPath: "/JSSResource/computers/udid/6F3A6C1E-2B0D-4E9B-9C1A-1D2E3F4A5B6C?serial=C02XK1JHJG5H")
-        #expect(Set(identifiers.map(\.value)) == ["6F3A6C1E-2B0D-4E9B-9C1A-1D2E3F4A5B6C", "C02XK1JHJG5H"])
+            inPath: "/JSSResource/computers/udid/6F3A6C1E-2B0D-4E9B-9C1A-1D2E3F4A5B6C?serial=ZZTESTMAC001")
+        #expect(Set(identifiers.map(\.value)) == ["6F3A6C1E-2B0D-4E9B-9C1A-1D2E3F4A5B6C", "ZZTESTMAC001"])
         #expect(IdentifierMasker.identifiers(inPath: "/blueprints/v1/blueprints/\(blueprint)/deploy").isEmpty)
         #expect(IdentifierMasker.identifiers(inPath: "/api/v1/devices/00008103-001A2C3E0C38001E").map(\.value)
                 == ["00008103-001A2C3E0C38001E"])
@@ -84,12 +84,12 @@ struct IdentifierMaskerTests {
     @Test("Each value gets one stable placeholder, numbered per kind in order of appearance")
     func stablePlaceholders() {
         let masker = IdentifierMasker([
-            FoundIdentifier(.device, "C02XK1JHJG5H"),
+            FoundIdentifier(.device, "ZZTESTMAC001"),
             FoundIdentifier(.user, "jane@corp.example"),
-            FoundIdentifier(.device, "F9FXK2LMQ1GC"),
-            FoundIdentifier(.device, "c02xk1jhjg5h"),
+            FoundIdentifier(.device, "ZZTESTMAC003"),
+            FoundIdentifier(.device, "zztestmac001"),
         ])
-        let text = "GET /serial/C02XK1JHJG5H for jane@corp.example, then F9FXK2LMQ1GC and c02xk1jhjg5h again"
+        let text = "GET /serial/ZZTESTMAC001 for jane@corp.example, then ZZTESTMAC003 and zztestmac001 again"
         #expect(masker.mask(text) == "GET /serial/<device 1> for <user 1>, then <device 2> and <device 1> again")
     }
 
@@ -110,14 +110,14 @@ struct IdentifierMaskerTests {
     @Test("Values in an encoded address are masked: after a percent escape, and in encoded form")
     func encodedAddresses() {
         let masker = IdentifierMasker([
-            FoundIdentifier(.device, "C02XK1JHJG5H"),
+            FoundIdentifier(.device, "ZZTESTMAC001"),
             FoundIdentifier(.user, "jane@corp.example"),
         ])
-        #expect(masker.mask("GET /api/v2/mobile-devices/detail?filter=serialNumber%3D%3D%22C02XK1JHJG5H%22")
+        #expect(masker.mask("GET /api/v2/mobile-devices/detail?filter=serialNumber%3D%3D%22ZZTESTMAC001%22")
                 == "GET /api/v2/mobile-devices/detail?filter=serialNumber%3D%3D%22<device 1>%22")
         #expect(masker.mask("?email=jane%40corp.example&page=0") == "?email=<user 1>&page=0")
         // still whole words only: a value inside a longer one stays
-        #expect(masker.mask("%22XC02XK1JHJG5H%22") == "%22XC02XK1JHJG5H%22")
+        #expect(masker.mask("%22XZZTESTMAC001%22") == "%22XZZTESTMAC001%22")
     }
 
     @Test("Short and common values are never masked")
@@ -128,7 +128,7 @@ struct IdentifierMaskerTests {
 
     @Test("Status items name their identifier in a key field")
     func statusItems() {
-        let identifiers = found(#"[{"key":"device.identifier.serial-number","value":"C02XK1JHJG5H"}]"#)
-        #expect(identifiers == [FoundIdentifier(.device, "C02XK1JHJG5H")])
+        let identifiers = found(#"[{"key":"device.identifier.serial-number","value":"ZZTESTMAC001"}]"#)
+        #expect(identifiers == [FoundIdentifier(.device, "ZZTESTMAC001")])
     }
 }

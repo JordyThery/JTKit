@@ -4,7 +4,7 @@ import Testing
 import JTKitTestSupport
 
 private let proServer = URL(string: "https://school.jamfcloud.com")!
-private let environmentID = "e77c1408-10c8-4007-b177-abc9157fbcaa"
+private let environmentID = "00000000-0000-4000-8000-0000000000e7"
 
 /// A client for a Jamf Pro server reached directly, with a fixed token.
 private func proClient(_ server: MockServer, log: ActivityLog? = nil,
@@ -46,9 +46,9 @@ private func computersPage(_ records: [String], total: Int? = nil) -> String {
     #"{"totalCount":\#(total ?? records.count),"results":[\#(records.joined(separator: ","))]}"#
 }
 
-private func computerJSON(id: String = "12", serial: String = "C02XK1JHJG5H") -> String {
+private func computerJSON(id: String = "12", serial: String = "ZZTESTMAC001") -> String {
     #"""
-    {"id":"\#(id)","udid":"55900BDC-347C-58B1-D249-F32244B11D30",
+    {"id":"\#(id)","udid":"00000000-0000-4000-8000-0000000000F3",
      "general":{"name":"Lab Mac 4","assetTag":"A-1001","lastCheckIn":"2026-10-20T08:12:33.123Z","lastContact":null,
        "reportDate":"2026-10-19T07:00:00.12Z","lastEnrolledDate":"2025-02-01T10:00:00Z",
        "mdmProfileExpiration":"2027-02-01T10:00:00Z","managementId":"aa-bb","remoteManagement":{"managed":true},
@@ -64,7 +64,7 @@ private func computerJSON(id: String = "12", serial: String = "C02XK1JHJG5H") ->
     """#
 }
 
-private func mobileJSON(id: String = "77", serial: String = "F9FXK2Q3HGMN", udid: String = "00008030-001A2B3C4D5E802E") -> String {
+private func mobileJSON(id: String = "77", serial: String = "ZZTESTIPD001", udid: String = "00008030-001A2B3C4D5E802E") -> String {
     #"""
     {"mobileDeviceId":"\#(id)","deviceType":"iOS",
      "general":{"displayName":"Cart iPad 3","udid":"\#(udid)","assetTag":"T-3","osVersion":"26.0.1","osBuild":"23A355",
@@ -84,7 +84,7 @@ private func mobileJSON(id: String = "77", serial: String = "F9FXK2Q3HGMN", udid
 struct JamfProLookupTests {
     @Test("Serials and UDIDs: letters, digits and hyphens only, refused before sending")
     func identifiers() throws {
-        #expect(try JamfPro.validatedIdentifier(" C02XK1JHJG5H ") == "C02XK1JHJG5H")
+        #expect(try JamfPro.validatedIdentifier(" ZZTESTMAC001 ") == "ZZTESTMAC001")
         #expect(try JamfPro.validatedIdentifier("00008030-001A2B3C4D5E802E") == "00008030-001A2B3C4D5E802E")
         for bad in ["", "C02\"||id==1", "C02 X", "C02,X", "Ç02", String(repeating: "A", count: 65)] {
             #expect(throws: JamfPlatform.APIError.self) { try JamfPro.validatedIdentifier(bad) }
@@ -94,11 +94,11 @@ struct JamfProLookupTests {
     @Test("A computer by serial: v4 inventory, the sections, a quoted filter, read with v4's field names")
     func computerBySerial() async throws {
         let server = MockServer { _ in .json(200, computersPage([computerJSON()])) }
-        let match = try await proClient(server).computer(serial: "C02XK1JHJG5H")
+        let match = try await proClient(server).computer(serial: "ZZTESTMAC001")
         let sent = try #require(server.requests.first)
         #expect(sent.path == "/api/v4/computers-inventory")
         #expect(queryValues(sent, "section") == ["GENERAL", "HARDWARE", "OPERATING_SYSTEM", "USER_AND_LOCATION"])
-        #expect(sent.queryValue("filter") == #"hardware.serialNumber=="C02XK1JHJG5H""#)
+        #expect(sent.queryValue("filter") == #"hardware.serialNumber=="ZZTESTMAC001""#)
         #expect(sent.queryValue("page") == "0")
 
         let computer = try #require(match.record)
@@ -129,7 +129,7 @@ struct JamfProLookupTests {
     @Test("Through the Platform API gateway: the pro/ path and the Environment ID")
     func throughGateway() async throws {
         let server = MockServer { _ in .json(200, computersPage([computerJSON()])) }
-        _ = try await gatewayClient(server).computer(serial: "C02XK1JHJG5H")
+        _ = try await gatewayClient(server).computer(serial: "ZZTESTMAC001")
         let sent = try #require(server.requests.first)
         #expect(sent.path == "/pro/v4/computers-inventory")
         #expect(sent.header("X-Environment-Id") == environmentID)
@@ -137,24 +137,24 @@ struct JamfProLookupTests {
 
     @Test("Only an exact serial counts; two records for one serial are ambiguous")
     func exactMatch() async throws {
-        let other = MockServer { _ in .json(200, computersPage([computerJSON(serial: "C02XK1JHJG5X")])) }
-        #expect(try await proClient(other).computer(serial: "C02XK1JHJG5H") == .none)
+        let other = MockServer { _ in .json(200, computersPage([computerJSON(serial: "ZZTESTMAC009")])) }
+        #expect(try await proClient(other).computer(serial: "ZZTESTMAC001") == .none)
 
         let lower = MockServer { _ in .json(200, computersPage([computerJSON()])) }
-        #expect(try await proClient(lower).computer(serial: "c02xk1jhjg5h").record != nil, "case aside")
+        #expect(try await proClient(lower).computer(serial: "zztestmac001").record != nil, "case aside")
 
         let two = MockServer { _ in .json(200, computersPage([computerJSON(id: "1"), computerJSON(id: "2")])) }
-        #expect(try await proClient(two).computer(serial: "C02XK1JHJG5H") == .several(2))
+        #expect(try await proClient(two).computer(serial: "ZZTESTMAC001") == .several(2))
 
         let none = MockServer { _ in .json(200, computersPage([])) }
-        #expect(try await proClient(none).computer(serial: "C02XK1JHJG5H") == .none)
+        #expect(try await proClient(none).computer(serial: "ZZTESTMAC001") == .none)
     }
 
     @Test("A computer by UDID")
     func computerByUDID() async throws {
         let server = MockServer { _ in .json(200, computersPage([computerJSON()])) }
-        let match = try await proClient(server).computer(udid: "55900BDC-347C-58B1-D249-F32244B11D30")
-        #expect(server.requests.first?.queryValue("filter") == #"udid=="55900BDC-347C-58B1-D249-F32244B11D30""#)
+        let match = try await proClient(server).computer(udid: "00000000-0000-4000-8000-0000000000F3")
+        #expect(server.requests.first?.queryValue("filter") == #"udid=="00000000-0000-4000-8000-0000000000F3""#)
         #expect(match.record?.id == "12")
     }
 
@@ -163,11 +163,11 @@ struct JamfProLookupTests {
         let page = #"{"totalCount":1,"results":[\#(mobileJSON())]}"#
         let server = MockServer { _ in .json(200, page) }
         let client = try proClient(server)
-        let bySerial = try #require(try await client.mobileDevice(serial: "F9FXK2Q3HGMN").record)
+        let bySerial = try #require(try await client.mobileDevice(serial: "ZZTESTIPD001").record)
         let byUDID = try #require(try await client.mobileDevice(udid: "00008030-001A2B3C4D5E802E").record)
         #expect(server.requests.map(\.path) == ["/api/v2/mobile-devices/detail", "/api/v2/mobile-devices/detail"])
         #expect(queryValues(server.requests[0], "section") == ["GENERAL", "HARDWARE", "USER_AND_LOCATION"])
-        #expect(server.requests[0].queryValue("filter") == #"serialNumber=="F9FXK2Q3HGMN""#)
+        #expect(server.requests[0].queryValue("filter") == #"serialNumber=="ZZTESTIPD001""#)
         #expect(server.requests[1].queryValue("filter") == #"udid=="00008030-001A2B3C4D5E802E""#)
         #expect(bySerial == byUDID)
         #expect(bySerial.id == "77")
@@ -220,7 +220,7 @@ struct JamfProLookupTests {
 
         // An enrolled record already has its general section: no second read.
         let enrolled = MockServer { _ in .json(200, #"{"totalCount":1,"results":[\#(mobileJSON())]}"#) }
-        _ = try await proClient(enrolled).mobileDevice(serial: "F9FXK2Q3HGMN")
+        _ = try await proClient(enrolled).mobileDevice(serial: "ZZTESTIPD001")
         #expect(enrolled.requests.count == 1)
     }
 
@@ -278,10 +278,10 @@ struct JamfProLookupTests {
     func unenrolledMobileDevicesInABatch() async throws {
         let listed = #"{"totalCount":2,"results":[{"mobileDeviceId":"9","deviceType":"Unknown","hardware":{"serialNumber":"JTKTEST0001"}},\#(mobileJSON())]}"#
         let server = Self.unenrolledServer(listed: listed)
-        let batch = try await proClient(server).mobileDevices(serials: ["JTKTEST0001", "F9FXK2Q3HGMN"])
+        let batch = try await proClient(server).mobileDevices(serials: ["JTKTEST0001", "ZZTESTIPD001"])
         #expect(batch.records["JTKTEST0001"]?.general?.displayName == "Test iPad")
         #expect(batch.records["JTKTEST0001"]?.general?.assetTag == "TAG-1")
-        #expect(batch.records["F9FXK2Q3HGMN"]?.general?.assetTag == "T-3")
+        #expect(batch.records["ZZTESTIPD001"]?.general?.assetTag == "T-3")
         #expect(server.requests.map(\.path) == ["/api/v2/mobile-devices/detail", "/api/v2/mobile-devices/9",
                                                 "/JSSResource/mobiledevices/id/9/subset/General"])
 
@@ -302,9 +302,9 @@ struct JamfProLookupTests {
 
     @Test("Odd values never lose a record; an unreadable result is skipped, not fatal")
     func tolerant() async throws {
-        let odd = #"{"id":12,"udid":null,"general":{"managed":"yes","remoteManagement":"oops","name":7},"hardware":{"serialNumber":"C02XK1JHJG5H"},"newSection":{"x":1}}"#
+        let odd = #"{"id":12,"udid":null,"general":{"managed":"yes","remoteManagement":"oops","name":7},"hardware":{"serialNumber":"ZZTESTMAC001"},"newSection":{"x":1}}"#
         let server = MockServer { _ in .json(200, computersPage([odd, "42"], total: 2)) }
-        let computer = try #require(try await proClient(server).computer(serial: "C02XK1JHJG5H").record)
+        let computer = try #require(try await proClient(server).computer(serial: "ZZTESTMAC001").record)
         #expect(computer.id == "12")
         #expect(computer.general?.name == "7")
         #expect(computer.general?.managed == nil)
@@ -318,15 +318,15 @@ struct JamfProLookupTests {
             let records = (0..<(page == 0 ? 100 : 50)).map { computerJSON(id: "\(page * 100 + $0)") }
             return .json(200, computersPage(records, total: 150))
         }
-        #expect(try await proClient(server).computer(serial: "C02XK1JHJG5H") == .several(150))
+        #expect(try await proClient(server).computer(serial: "ZZTESTMAC001") == .several(150))
         #expect(server.requests.count == 2)
 
         let fullPage = (0..<100).map { computerJSON(id: "\($0)") }.joined(separator: ",")
         let endless = MockServer { _ in .json(200, #"{"results":[\#(fullPage)]}"#) }
-        let error = await thrown(JamfPlatform.APIError.self) { _ = try await proClient(endless).computers(serials: ["C02XK1JHJG5H"]).records }
+        let error = await thrown(JamfPlatform.APIError.self) { _ = try await proClient(endless).computers(serials: ["ZZTESTMAC001"]).records }
         #expect(error == nil, "a batch reports it per serial")
-        let batch = try await proClient(endless).computers(serials: ["C02XK1JHJG5H"])
-        guard case .pageLimitReached? = batch.failures["C02XK1JHJG5H"]?.kind else {
+        let batch = try await proClient(endless).computers(serials: ["ZZTESTMAC001"])
+        guard case .pageLimitReached? = batch.failures["ZZTESTMAC001"]?.kind else {
             Issue.record("Expected the page limit, got \(String(describing: batch.failures))")
             return
         }
@@ -449,10 +449,10 @@ struct JamfProWriteTests {
         let log = ActivityLog()
         let server = MockServer { _ in .json(200, computersPage([computerJSON()])) }
         let client = try proClient(server, log: log)
-        _ = try await client.computer(serial: "C02XK1JHJG5H")
+        _ = try await client.computer(serial: "ZZTESTMAC001")
         #expect(log.entries.last?.request?.responseBody == nil)
 
-        _ = try await client.computer(serial: "C02XK1JHJG5H", sections: [.general, .userAndLocation], recording: .results)
+        _ = try await client.computer(serial: "ZZTESTMAC001", sections: [.general, .userAndLocation], recording: .results)
         let recorded = try #require(log.entries.last?.request?.responseBody)
         #expect(recorded.contains("Lab Mac 4"))
         #expect(recorded.contains("MacBook Air"), "HARDWARE, which a lookup by serial number always asks for")
@@ -559,7 +559,7 @@ private func schoolClient(_ server: MockServer, log: ActivityLog? = nil, sleeps:
 
 /// A device as the list answers it (flags as booleans, check-in as text).
 private let schoolListDevice = #"""
-{"UDID":"00008030-001A2B3C4D5E802E","serialNumber":"F9FXK2Q3HGMN","name":"Cart iPad 3","assetTag":"",
+{"UDID":"00008030-001A2B3C4D5E802E","serialNumber":"ZZTESTIPD001","name":"Cart iPad 3","assetTag":"",
  "model":{"name":"iPad (10th generation)","identifier":"iPad13,18","type":{"id":1}},"os":{"prefix":"iOS","version":"26.0.1"},
  "owner":{},"isManaged":true,"isSupervised":false,"inTrash":false,"locationId":0,"groups":["Carts"],
  "lastCheckin":"2026-10-20 08:12:33","class":"ipad","notes":"private note"}
@@ -567,7 +567,7 @@ private let schoolListDevice = #"""
 
 /// The same device from `devices/{udid}` (flags as 0/1, check-in with the time zone).
 private let schoolDetailDevice = #"""
-{"code":200,"device":{"UDID":"00008030-001A2B3C4D5E802E","serialNumber":"F9FXK2Q3HGMN","name":"Cart iPad 3","assetTag":"T-3",
+{"code":200,"device":{"UDID":"00008030-001A2B3C4D5E802E","serialNumber":"ZZTESTIPD001","name":"Cart iPad 3","assetTag":"T-3",
  "model":{"name":"iPad (10th generation)","identifier":"iPad13,18"},"os":{"prefix":"iOS","version":"26.0.1"},
  "owner":{"name":"Jane Doe","username":"jane","email":"jane@school.example"},"isManaged":1,"isSupervised":0,
  "hasPasscode":true,"passcodeCompliant":1,"lastCheckin":{"date":"2026-10-20 08:12:33.000000","timezone_type":3,"timezone":"Asia/Tokyo"}}}
@@ -593,9 +593,9 @@ struct JamfSchoolTests {
     func bySerial() async throws {
         let log = ActivityLog()
         let server = MockServer { _ in .json(200, #"{"code":200,"count":1,"devices":[\#(schoolListDevice)]}"#) }
-        let device = try #require(try await schoolClient(server, log: log).device(serial: "f9fxk2q3hgmn").record)
+        let device = try #require(try await schoolClient(server, log: log).device(serial: "zztestipd001").record)
         let sent = try #require(server.requests.first)
-        #expect(sent.url.absoluteString == "https://school.jamfcloud.com/api/devices?serialnumber=f9fxk2q3hgmn")
+        #expect(sent.url.absoluteString == "https://school.jamfcloud.com/api/devices?serialnumber=zztestipd001")
         #expect(sent.header("Authorization") == "Basic " + Data("999001:KEY123".utf8).base64EncodedString())
         let recorded = try #require(log.entries.last?.request?.requestHeaders.first { $0.name == "Authorization" })
         #expect(recorded.value == "Basic <redacted>")
@@ -636,10 +636,10 @@ struct JamfSchoolTests {
     func serialNotFound() async throws {
         for answer in [MockResponse.json(404, #"{"code":404,"message":"DeviceNotFound"}"#), .json(200, #"{"message":"DeviceNotFound"}"#)] {
             let server = MockServer { _ in answer }
-            #expect(try await schoolClient(server).device(serial: "F9FXK2Q3HGMN") == .none)
+            #expect(try await schoolClient(server).device(serial: "ZZTESTIPD001") == .none)
         }
         let wrong = MockServer { _ in .json(404, #"{"error":{"message":"Not found","code":404}}"#) }
-        let error = await thrown(JamfSchool.APIError.self) { _ = try await schoolClient(wrong).device(serial: "F9FXK2Q3HGMN") }
+        let error = await thrown(JamfSchool.APIError.self) { _ = try await schoolClient(wrong).device(serial: "ZZTESTIPD001") }
         #expect(error?.status == 404)
     }
 
@@ -732,7 +732,7 @@ struct ActionEntryTests {
     @Test("An action names what the user did; its devices are masked in the bug-report export")
     func action() {
         let log = ActivityLog()
-        log.recordAction("Restarted iPhone F9FXK2Q3HGMN over USB", devices: ["F9FXK2Q3HGMN", "0x1A2B3C4D5E"])
+        log.recordAction("Restarted iPhone ZZTESTIPD001 over USB", devices: ["ZZTESTIPD001", "0x1A2B3C4D5E"])
         log.recordAction("Entered DFU", note: "The command failed (exit 1).", failed: true,
                          service: "USB", devices: ["0x1A2B3C4D5E"])
         let entries = log.entries
@@ -742,10 +742,10 @@ struct ActionEntryTests {
         #expect(entries[1].service == "USB")
 
         let masked = ActivityLogExport.text(entries, masked: true, app: app)
-        #expect(!masked.contains("F9FXK2Q3HGMN"))
+        #expect(!masked.contains("ZZTESTIPD001"))
         #expect(!masked.contains("0x1A2B3C4D5E"))
         #expect(masked.contains("<device 1>"))
         let unmasked = ActivityLogExport.text(entries, masked: false, app: app)
-        #expect(unmasked.contains("F9FXK2Q3HGMN"))
+        #expect(unmasked.contains("ZZTESTIPD001"))
     }
 }

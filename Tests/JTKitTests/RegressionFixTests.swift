@@ -485,15 +485,15 @@ struct RequestWaitTests {
 @Suite("Activity log: copy, capacity, bodies")
 struct ActivityLogFixTests {
     @Test func copyLogPutsTheWholeLogOnTheClipboardMaskedOrNot() async {
-        let entries = [ActivityLogEntry.action("Restarted C02XK1JHJG5H", devices: ["C02XK1JHJG5H"])]
+        let entries = [ActivityLogEntry.action("Restarted ZZTESTMAC001", devices: ["ZZTESTMAC001"])]
         let app = ActivityLogAppInfo(name: "Test", version: "1.0", system: "macOS")
         let pasteboard = NSPasteboard(name: NSPasteboard.Name("jtkit-test-\(UUID().uuidString)"))
         defer { pasteboard.releaseGlobally() }
         await ActivityLogExport.copy(entries, masked: false, app: app, to: pasteboard)
-        #expect(pasteboard.string(forType: .string)?.contains("C02XK1JHJG5H") == true)
+        #expect(pasteboard.string(forType: .string)?.contains("ZZTESTMAC001") == true)
         await ActivityLogExport.copy(entries, masked: true, app: app, to: pasteboard)
         let masked = pasteboard.string(forType: .string) ?? ""
-        #expect(!masked.contains("C02XK1JHJG5H"))
+        #expect(!masked.contains("ZZTESTMAC001"))
         #expect(masked.contains("Restarted"))
     }
 
@@ -705,7 +705,7 @@ struct EnvironmentIDIssueTests {
     }
 
     @Test func uppercaseIsAcceptedAndSentLowercased() async throws {
-        let upper = "E77C1408-10C8-4007-B177-ABC9157FBCAA"
+        let upper = "00000000-0000-4000-8000-0000000000E7"
         #expect(Connection(name: "P", service: .jamfPlatform, environmentID: upper).issues.isEmpty)
         let server = MockServer { _ in .json(200, #"{"results":[],"totalCount":0}"#) }
         let client = try JamfPlatform.Client(baseURL: URL(string: "https://us.api.jamfcloud.com")!, scope: .environment(" \(upper) "),

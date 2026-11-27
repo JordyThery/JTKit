@@ -3,7 +3,7 @@ import Testing
 @testable import JTKit
 import JTKitTestSupport
 
-private let environmentID = "e77c1408-10c8-4007-b177-abc9157fbcaa"
+private let environmentID = "00000000-0000-4000-8000-0000000000e7"
 private let gateway = URL(string: "https://eu.api.jamfcloud.com")!
 
 /// A client on a fake server, signed in with a fixed token; retries don’t wait.
@@ -326,14 +326,14 @@ struct JamfPlatformErrorTests {
         let log = ActivityLog()
         let traceID = "4bf92f3577b34da6a3ce929d0e0e4736"
         let server = MockServer { _ in
-            .json(500, #"{"httpStatus":500,"traceId":"\#(traceID)","errors":[{"code":"INTERNAL","description":"Device C02XK1JHJG5H failed"}],"serialNumber":"C02XK1JHJG5H"}"#)
+            .json(500, #"{"httpStatus":500,"traceId":"\#(traceID)","errors":[{"code":"INTERNAL","description":"Device ZZTESTMAC001 failed"}],"serialNumber":"ZZTESTMAC001"}"#)
         }
         let failure = await thrown { _ = try await platformClient(server, log: log).json("/devices/v1/devices") }
         #expect(failure?.traceID == traceID)
         #expect(failure?.message().contains("Trace ID: \(traceID)") == true)
         let export = ActivityLogExport.text(log.entries, masked: true)
         #expect(export.contains(traceID))
-        #expect(!export.contains("C02XK1JHJG5H"))
+        #expect(!export.contains("ZZTESTMAC001"))
     }
 }
 
@@ -1054,7 +1054,7 @@ struct JamfPlatformEnvironmentTests {
 
     @Test("The editor’s picker: a typed ID in the list is chosen, one not in it isn’t")
     func editorChoice() {
-        let list = [JamfPlatform.Environment(id: "E77C1408-10C8-4007-B177-ABC9157FBCAA", name: "Production")]
+        let list = [JamfPlatform.Environment(id: "00000000-0000-4000-8000-0000000000E7", name: "Production")]
         #expect(EnvironmentListState.choice(for: " \(environmentID) ", in: list) == list[0].id)
         #expect(EnvironmentListState.choice(for: "something-else", in: list) == "")
         #expect(EnvironmentListState.choice(for: "", in: list) == "")

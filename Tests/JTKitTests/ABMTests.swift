@@ -166,7 +166,7 @@ struct ABMRedactionTests {
     @Test("Apple’s sign-in is a sensitive call; the API isn’t")
     func sensitive() {
         #expect(SensitiveRequests.isSensitive(path: "/auth/oauth2/v2/token"))
-        #expect(!SensitiveRequests.isSensitive(path: "/v1/orgDevices/C02XK1JHJG5H"))
+        #expect(!SensitiveRequests.isSensitive(path: "/v1/orgDevices/ZZTESTMAC001"))
     }
 }
 
@@ -506,10 +506,10 @@ struct ABMReadTests {
     func device() async throws {
         let extra = #","imei":"35-1","meid":["A1"],"isMdmMigrationCapable":true,"mdmMigrationStatus":"STARTED","mdmMigrationDeadlineDateTime":"2026-11-02T10:00:00.000Z","newField":{"x":1}"#
         let rig = AppleRig(Apple.server { request in
-            request.path == "/v1/orgDevices/C02XK1JHJG5H"
-                ? .json(200, #"{"data":{"id":"C02XK1JHJG5H","attributes":\#(Apple.device("C02XK1JHJG5H", extra: extra))}}"#) : nil
+            request.path == "/v1/orgDevices/ZZTESTMAC001"
+                ? .json(200, #"{"data":{"id":"ZZTESTMAC001","attributes":\#(Apple.device("ZZTESTMAC001", extra: extra))}}"#) : nil
         })
-        let device = try #require(try await rig.client.device(serial: " c02xk1jhjg5h "))
+        let device = try #require(try await rig.client.device(serial: " zztestmac001 "))
         #expect(device.imei == ["35-1"])
         #expect(device.meid == ["A1"])
         #expect(device.hasActiveMigration)

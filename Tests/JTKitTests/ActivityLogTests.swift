@@ -70,13 +70,13 @@ struct ActivityLogTests {
 
     private func requestEntry() -> ActivityLogEntry {
         ActivityLogEntry(
-            category: "API", operation: "GET", detail: "/api/v1/computers/serial/C02XK1JHJG5H", status: 404, duration: 0.25,
+            category: "API", operation: "GET", detail: "/api/v1/computers/serial/ZZTESTMAC001", status: 404, duration: 0.25,
             note: "Not Found", service: "Jamf Pro", connection: "Lab",
             request: ActivityRequestDetails(
-                url: "https://acme.jamfcloud.com/api/v1/computers/serial/C02XK1JHJG5H", attempt: 2, maxAttempts: 4,
+                url: "https://acme.jamfcloud.com/api/v1/computers/serial/ZZTESTMAC001", attempt: 2, maxAttempts: 4,
                 requestHeaders: [HTTPHeader(name: "Authorization", value: "Bearer <redacted>")],
                 responseBody: #"{"user":"jane@corp.example","group":"Engineers"}"#),
-            identifiers: [FoundIdentifier(.device, "C02XK1JHJG5H"), FoundIdentifier(.user, "jane@corp.example")]
+            identifiers: [FoundIdentifier(.device, "ZZTESTMAC001"), FoundIdentifier(.user, "jane@corp.example")]
         )
     }
 
@@ -102,12 +102,12 @@ struct ActivityLogTests {
     @Test func transcriptShowsWhatWasSentAndReceived() {
         let text = ActivityLogExport.transcript(of: requestEntry())
         #expect(text.contains("API · Jamf Pro · Lab"))
-        #expect(text.contains("GET /api/v1/computers/serial/C02XK1JHJG5H"))
+        #expect(text.contains("GET /api/v1/computers/serial/ZZTESTMAC001"))
         #expect(text.contains("Status 404 · 0.25 s · Attempt 2 of 4"))
-        #expect(text.contains("URL: https://acme.jamfcloud.com/api/v1/computers/serial/C02XK1JHJG5H"))
+        #expect(text.contains("URL: https://acme.jamfcloud.com/api/v1/computers/serial/ZZTESTMAC001"))
         #expect(text.contains("── Request headers ──\nAuthorization: Bearer <redacted>"))
         #expect(text.contains("── Response body ──"))
-        #expect(text.contains("C02XK1JHJG5H"), "Copying one entry stays unmasked")
+        #expect(text.contains("ZZTESTMAC001"), "Copying one entry stays unmasked")
     }
 
     @Test func exportHeaderNamesTheAppAndMacOS() {
@@ -121,7 +121,7 @@ struct ActivityLogTests {
 
     @Test func bugReportMasksIdentifiersButNotNames() {
         let masked = ActivityLogExport.text([requestEntry()], masked: true, app: app)
-        #expect(!masked.contains("C02XK1JHJG5H"))
+        #expect(!masked.contains("ZZTESTMAC001"))
         #expect(!masked.contains("jane@corp.example"))
         #expect(masked.contains("/api/v1/computers/serial/<device 1>"))
         #expect(masked.contains("<user 1>"))
@@ -129,7 +129,7 @@ struct ActivityLogTests {
         #expect(masked.contains("Lab"))
 
         let unmasked = ActivityLogExport.text([requestEntry()], masked: false, app: app)
-        #expect(unmasked.contains("C02XK1JHJG5H"))
+        #expect(unmasked.contains("ZZTESTMAC001"))
         #expect(unmasked.contains("Not masked"))
     }
 

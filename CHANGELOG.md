@@ -1626,7 +1626,7 @@ For Checkpoint's adoption of step 5. Additions only.
 Fix, found while Serial Number Reader adopted step 5.
 - `IdentifierMasker`: "Export for Bug Report…" now also masks identifiers in
   a recorded address, where they follow a percent escape (a Jamf Pro lookup
-  `filter=serialNumber%3D%3D%22C02XK1JHJG5H%22` left the serial visible) or
+  `filter=serialNumber%3D%3D%22ZZTESTMAC001%22` left the serial visible) or
   are themselves encoded (`jane%40corp.example`).
 - `RequestRecorder`: a recorded error answer (status 400 and up) also gets the
   free-text cleaning the on-screen message already gets, so a secret inside

@@ -403,7 +403,7 @@ extension MDMCommand {
     /// The app shows it: a dialog when nothing has to be typed, otherwise a
     /// sheet (`needsTyping`).
     public struct Confirmation: Sendable, Hashable {
-        /// "Wipe Computer — C02XK1JHJG5H", "Wipe Computer — 3 Devices".
+        /// "Wipe Computer — ZZTESTMAC001", "Wipe Computer — 3 Devices".
         public var title: String
         /// What it does, e.g. the command’s consequence.
         public var message: String

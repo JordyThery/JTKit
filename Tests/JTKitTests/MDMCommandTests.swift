@@ -7,7 +7,7 @@ import JTKitTestSupport
 // School, the Platform API device calls and the Classic basics. Every test
 // has its own fake server.
 
-private let environmentID = "e77c1408-10c8-4007-b177-abc9157fbcaa"
+private let environmentID = "00000000-0000-4000-8000-0000000000e7"
 
 private func direct(_ server: MockServer, log: ActivityLog? = nil) throws -> JamfPlatform.Client {
     try JamfPlatform.Client(baseURL: URL(string: "https://jamf.example.com")!, scope: .organization, server: .jamfPro,
@@ -46,9 +46,9 @@ private func commandServer(_ override: @escaping @Sendable (RecordedRequest) -> 
     }
 }
 
-private let mac = MDMCommand.Target(serial: "C02XK1JHJG5H", recordID: "7", kind: .computer,
+private let mac = MDMCommand.Target(serial: "ZZTESTMAC001", recordID: "7", kind: .computer,
                                     udid: "5D3B6C1A-0000-1111-2222-333344445555", managementID: "M-7")
-private let iPad = MDMCommand.Target(serial: "DMPXK1JHJG5H", recordID: "12", kind: .mobileDevice,
+private let iPad = MDMCommand.Target(serial: "ZZTESTIPD002", recordID: "12", kind: .mobileDevice,
                                      udid: "00008103-001A2C3E0C38001E", managementID: "M-12")
 private let iPadWithoutID = MDMCommand.Target(serial: "DMPAAAAAAAAA", recordID: "13", kind: .mobileDevice)
 
@@ -144,7 +144,7 @@ struct ConfirmationTests {
     func oneDevice() {
         let plan = MDMCommand.wipeMobile.plan(for: [iPad], on: .jamfPro)
         let confirmation = MDMCommand.Confirmation(.wipeMobile, plan: plan, on: .jamfPro, connectionName: "Lab Jamf")
-        #expect(confirmation.title == "Wipe Device — DMPXK1JHJG5H")
+        #expect(confirmation.title == "Wipe Device — ZZTESTIPD002")
         #expect(confirmation.connectionLine == "On “Lab Jamf”.")
         #expect(confirmation.typedCount == nil)
         #expect(!confirmation.asksPINTwice)
@@ -155,7 +155,7 @@ struct ConfirmationTests {
 
     @Test("With no device to receive it, a confirmation can’t be confirmed")
     func noDeviceReceives() {
-        let mac = MDMCommand.Target(serial: "C02XK1JHJG5H", recordID: "7", kind: .computer)
+        let mac = MDMCommand.Target(serial: "ZZTESTMAC001", recordID: "7", kind: .computer)
         let plan = MDMCommand.wipeMobile.plan(for: [mac], on: .jamfPro)
         #expect(plan.receiving.isEmpty)
         let confirmation = MDMCommand.Confirmation(.wipeMobile, plan: plan, on: .jamfPro, connectionName: "Lab Jamf")
@@ -300,7 +300,7 @@ struct JamfProCommandSendingTests {
         }
         let result = try await gateway(server).sendConfirmed(.restartMobile, to: [iPad, iPadWithoutID])
         #expect(result.sent == [iPad])
-        #expect(server.requests.map(\.path) == ["/devices/v1/devices", "/device-actions/v1/devices/p-DMPXK1JHJG5H/restart",
+        #expect(server.requests.map(\.path) == ["/devices/v1/devices", "/device-actions/v1/devices/p-ZZTESTIPD002/restart",
                                                 "/devices/v1/devices"])
         #expect(result.problems == "DMPAAAAAAAAA: The platform device inventory returned 1 result for DMPAAAAAAAAA, none with that serial number. No command was sent.")
     }
@@ -320,7 +320,7 @@ struct JamfProCommandSendingTests {
         let result = try await direct(server).sendConfirmed(.renewProfile, to: [mac, iPad])
         #expect(result.sent == [mac])
         #expect(result.outcomes.last?.outcome == .notProcessed)
-        #expect(result.problems == "Jamf Pro accepted the request but renewed no profile for: DMPXK1JHJG5H")
+        #expect(result.problems == "Jamf Pro accepted the request but renewed no profile for: ZZTESTIPD002")
         #expect(body(server.requests.only) == dictionary(#"{"udids":["5D3B6C1A-0000-1111-2222-333344445555","00008103-001A2C3E0C38001E"]}"#))
     }
 
@@ -347,7 +347,7 @@ struct JamfProCommandSendingTests {
         #expect(result.sent == [mac])
         #expect(result.problems == """
             DMPAAAAAAAAA: the record has no management ID. Run a fresh lookup first.
-            Jamf Pro couldn’t deliver the blank push to: DMPXK1JHJG5H
+            Jamf Pro couldn’t deliver the blank push to: ZZTESTIPD002
             """)
     }
 
@@ -369,7 +369,7 @@ struct JamfProCommandSendingTests {
         let failing = commandServer { $0.path.hasSuffix("/mdm/commands") ? .json(503, "{}") : nil }
         let result = try await direct(failing).sendConfirmed(.lockMobile, to: [iPad])
         #expect(failing.requests.count == 1)
-        #expect(result.problems?.hasPrefix("DMPXK1JHJG5H: HTTP 503") == true)
+        #expect(result.problems?.hasPrefix("ZZTESTIPD002: HTTP 503") == true)
 
         let calls = Counter()
         let limited = commandServer { request in
@@ -450,11 +450,11 @@ struct CommandEntryTests {
         #expect(entry.detail == "Sent Lock Device to 1 of 3 devices")
         #expect(entry.note == """
             DMPAAAAAAAAA: skipped — the record has no management ID. Run a fresh lookup first.
-            C02XK1JHJG5H: skipped — the command doesn’t apply to Macs.
+            ZZTESTMAC001: skipped — the command doesn’t apply to Macs.
             """)
         #expect(entry.isWarning && !entry.isFailure)
         let masked = ActivityLogExport.text(log.entries, masked: true)
-        #expect(!masked.contains("DMPXK1JHJG5H") && !masked.contains("C02XK1JHJG5H") && !masked.contains("DMPAAAAAAAAA"))
+        #expect(!masked.contains("ZZTESTIPD002") && !masked.contains("ZZTESTMAC001") && !masked.contains("DMPAAAAAAAAA"))
     }
 
     @Test("All sent; a failure; the whole command failing")
@@ -467,7 +467,7 @@ struct CommandEntryTests {
         #expect(log.entries.map(\.detail) == ["Sent Restart Device to 1 device", "Wipe Device reached none of the 1 device",
                                               "Blank Push failed — No management IDs."])
         #expect(log.entries.map(\.isFailure) == [false, true, true])
-        #expect(log.entries[1].note == "DMPXK1JHJG5H: failed — HTTP 500")
+        #expect(log.entries[1].note == "ZZTESTIPD002: failed — HTTP 500")
     }
 
     @Test("Problems leave out devices of the wrong kind")
@@ -487,7 +487,7 @@ struct PlatformDeviceTests {
     func bySerial() async throws {
         let server = MockServer { request in
             switch request.queryValue("filter") {
-            case #"serialNumber=="C02XK1JHJG5H""#?: .json(200, #"{"results":[{"id":"x","serialNumber":"c02xk1jhjg5h"}]}"#)
+            case #"serialNumber=="ZZTESTMAC001""#?: .json(200, #"{"results":[{"id":"x","serialNumber":"zztestmac001"}]}"#)
             case #"serialNumber=="NONE""#?: .json(200, #"{"results":[]}"#)
             case #"serialNumber=="GONE""#?: .json(404, #"{"httpStatus":404,"errors":[{"code":"NOT_FOUND","description":"Device not found"}]}"#)
             case #"serialNumber=="ELSEWHERE""#?: .json(404, "<html>Not Found</html>")
@@ -495,7 +495,7 @@ struct PlatformDeviceTests {
             }
         }
         let client = try gateway(server)
-        #expect(try await client.device(serial: "C02XK1JHJG5H")?.id == "x")
+        #expect(try await client.device(serial: "ZZTESTMAC001")?.id == "x")
         #expect(try await client.device(serial: "NONE") == nil)
         #expect(try await client.device(serial: "GONE") == nil)
         let elsewhere = await #expect(throws: JamfPlatform.APIError.self, "a 404 without NOT_FOUND isn’t a missing device") {
@@ -541,7 +541,7 @@ struct PlatformDeviceTests {
     @Test("They exist only on the gateway: refused on a direct Jamf Pro server")
     func directIsRefused() async throws {
         let server = MockServer { _ in .json(200, "{}") }
-        await #expect(throws: JamfPlatform.APIError.self) { _ = try await direct(server).device(serial: "C02XK1JHJG5H") }
+        await #expect(throws: JamfPlatform.APIError.self) { _ = try await direct(server).device(serial: "ZZTESTMAC001") }
         #expect(server.requests.isEmpty)
     }
 }
@@ -609,14 +609,14 @@ struct ClassicTests {
             if request.path.hasSuffix("/computergroups") {
                 return .json(200, #"{"computer_groups":[{"id":3,"name":"Lab","is_smart":true},{"id":4,"name":"Static"}]}"#)
             }
-            return .json(200, #"{"computer_group":{"id":3,"computers":[{"id":7,"name":"Mac","serial_number":"C02XK1JHJG5H"},{"id":8,"name":"New"}]}}"#)
+            return .json(200, #"{"computer_group":{"id":3,"computers":[{"id":7,"name":"Mac","serial_number":"ZZTESTMAC001"},{"id":8,"name":"New"}]}}"#)
         }
         let client = try gateway(server)
         let groups = try await client.classicGroups(.computer)
         #expect(groups == [JamfClassic.Group(id: "3", name: "Lab", isSmart: true, kind: .computer),
                            JamfClassic.Group(id: "4", name: "Static", isSmart: false, kind: .computer)])
         let members = try await client.classicGroupMembers(groups[0])
-        #expect(members.map(\.serialNumber) == ["C02XK1JHJG5H", nil])
+        #expect(members.map(\.serialNumber) == ["ZZTESTMAC001", nil])
         #expect(server.requests.map(\.path) == ["/proclassic/computergroups", "/proclassic/computergroups/id/3"])
         #expect(server.requests.allSatisfy { $0.header("Accept") == "application/json" })
         #expect(JamfClassic.listItems(try LosslessJSON(data: Data(#"{"a":[1,2]}"#.utf8)))?.count == 2)
@@ -632,8 +632,8 @@ struct JamfSchoolCommandSendingTests {
     func commands() async throws {
         let server = MockServer { _ in .json(200, #"{"code":200,"message":"CommandSent"}"#) }
         let client = try school(server)
-        let device = MDMCommand.Target(serial: "DMPXK1JHJG5H", recordID: "u-1", kind: .mobileDevice)
-        let macDevice = MDMCommand.Target(serial: "C02XK1JHJG5H", recordID: "u-2", kind: .computer)
+        let device = MDMCommand.Target(serial: "ZZTESTIPD002", recordID: "u-1", kind: .mobileDevice)
+        let macDevice = MDMCommand.Target(serial: "ZZTESTMAC001", recordID: "u-2", kind: .computer)
         for command in [MDMCommand.updateInventory, .restartMobile, .wipeMobile, .unmanage] {
             #expect(try await client.sendConfirmed(command, to: [device]).sent == [device])
         }
@@ -785,7 +785,7 @@ struct MDMCommandApprovalTests {
     func jamfSchool() async throws {
         let server = MockServer { _ in .json(200, #"{"code":200}"#) }
         let client = try school(server)
-        let device = MDMCommand.Target(serial: "DMPXK1JHJG5H", recordID: "00008103-001A2C3E0C38001E", kind: .mobileDevice)
+        let device = MDMCommand.Target(serial: "ZZTESTIPD002", recordID: "00008103-001A2C3E0C38001E", kind: .mobileDevice)
         await #expect(throws: MDMCommand.Refusal.self) { _ = try await client.send(.unmanage, to: [device], approval: nil) }
         await #expect(throws: MDMCommand.Refusal.self) {
             _ = try await client.send(.unmanage, to: [device], approval: try approval(.unmanage, [device], on: .jamfPro))

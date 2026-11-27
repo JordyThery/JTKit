@@ -46,7 +46,7 @@ struct RequestRecorderTests {
     @Test("An error’s response body is recorded, redacted, with its identifiers")
     func errorBody() async throws {
         let server = MockServer { _ in
-            .json(400, #"{"errors":[{"code":"INVALID_FIELD"}],"serialNumber":"C02XK1JHJG5H","client_secret":"leak"}"#)
+            .json(400, #"{"errors":[{"code":"INVALID_FIELD"}],"serialNumber":"ZZTESTMAC001","client_secret":"leak"}"#)
         }
         let log = ActivityLog()
         _ = try await RequestRecorder(session: server.session, log: log)
@@ -60,7 +60,7 @@ struct RequestRecorderTests {
         let body = try #require(details.responseBody)
         #expect(body.contains("INVALID_FIELD"))
         #expect(!body.contains("leak"))
-        #expect(entry.identifiers.contains(FoundIdentifier(.device, "C02XK1JHJG5H")))
+        #expect(entry.identifiers.contains(FoundIdentifier(.device, "ZZTESTMAC001")))
     }
 
     @Test("A secret inside an error’s message is hidden in the log, as on screen")
