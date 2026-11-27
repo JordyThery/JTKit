@@ -1,4 +1,5 @@
 import Foundation
+import ObjectiveC
 import os
 
 /// Under tests: the host of an app’s unit tests, or a sandbox launch
@@ -103,7 +104,11 @@ public nonisolated enum TestRun {
         let configuration = URLSessionConfiguration.ephemeral
         configuration.protocolClasses = [RefusingURLProtocol.self]
         configuration.httpAdditionalHeaders = [RefusingURLProtocol.routeHeader: id]
-        return URLSession(configuration: configuration)
+        let session = URLSession(configuration: configuration)
+        // the route goes when the session goes, as a demo session’s servers do
+        objc_setAssociatedObject(session, &RefusingURLProtocol.registrationKey,
+                                 RefusingURLProtocol.Registration(id: id), .OBJC_ASSOCIATION_RETAIN)
+        return session
     }
 
     /// Fails every request of a refusing session and writes it down.
@@ -118,8 +123,27 @@ public nonisolated enum TestRun {
         private static let lock = NSLock()
         nonisolated(unsafe) private static var routes: [String: Route] = [:]
 
+        nonisolated(unsafe) static var registrationKey: UInt8 = 0
+
+        /// Kept by a refusing session; unregisters its route when the
+        /// session is let go.
+        final class Registration: @unchecked Sendable {
+            let id: String
+            init(id: String) { self.id = id }
+            deinit { RefusingURLProtocol.unregister(id: id) }
+        }
+
         static func register(_ route: Route, id: String) {
             lock.withLock { routes[id] = route }
+        }
+
+        static func unregister(id: String) {
+            lock.withLock { routes[id] = nil }
+        }
+
+        /// Tests only.
+        static func isRegistered(id: String) -> Bool {
+            lock.withLock { routes[id] != nil }
         }
 
         override class func canInit(with request: URLRequest) -> Bool { true }
