@@ -311,7 +311,9 @@ extension JamfPlatform.Client {
             var seen = Set<String>()
             var members: [JamfPro.GroupMember] = []
             let pageSize = 100
-            for page in 0..<1_000 {
+            let maxPages = 1_000
+            var complete = false
+            for page in 0..<maxPages {
                 let json = try await readJSON(path, query: [URLQueryItem(name: "page", value: String(page)),
                                                             URLQueryItem(name: "page-size", value: String(pageSize))],
                                               privileges: privileges, permissions: permissions)
@@ -319,8 +321,13 @@ extension JamfPlatform.Client {
                 let new = found.results.filter { seen.insert($0.id).inserted }
                 members += new
                 let received = page * pageSize + found.results.count + found.unreadableCount
-                if new.isEmpty || !JamfPlatform.hasMore(after: found, received: received, pageSize: pageSize) { break }
+                if new.isEmpty || !JamfPlatform.hasMore(after: found, received: received, pageSize: pageSize) {
+                    complete = true
+                    break
+                }
             }
+            // as every other list: never a membership cut short without a word
+            guard complete else { throw JamfPlatform.APIError(.pageLimitReached(path: path, pages: maxPages)) }
             // Through the Platform API the membership holds only each device's
             // ID and name (the rest null, checked 2026-11-09): read the rest
             // from the inventory.
