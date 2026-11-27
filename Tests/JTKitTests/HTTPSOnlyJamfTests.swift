@@ -44,6 +44,7 @@ struct HTTPSOnlyJamfTests {
         }
         #expect(server.requests.isEmpty)
         #expect(reads.value == 0)
+        #expect(await tokens.signInCount == 0)
     }
 
     @Test("A token provider with an https:// address signs in")

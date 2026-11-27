@@ -116,7 +116,6 @@ extension JamfPlatform {
         }
 
         private func signIn() async throws -> (String, Date, TimeInterval) {
-            signInCount += 1
             // the secret or the password never goes out in clear: an address
             // that isn’t https:// is refused before the secret is even read
             guard tokenURL.scheme?.lowercased() == "https" else {
@@ -125,6 +124,7 @@ extension JamfPlatform {
                                     category: "Blocked", isWarning: true)
                 throw HTTPError.invalidURL("\(tokenURL.absoluteString) isn’t an https:// address, so nothing was sent.")
             }
+            signInCount += 1
             let secret = try secret()
 
             var request = URLRequest(url: tokenURL)
