@@ -139,19 +139,20 @@ struct DeleteSaveFailureTests {
     }
 }
 
+@MainActor
 @Suite("1.13.1: the Microsoft sign-in hides its secret in any answer")
 struct GraphKnownSecretTests {
     @Test("A refused sign-in that echoes the secret outside client_secret= never shows it")
     func echoedSecret() async throws {
         let secret = "MadeUpSecret~0123456789"
         let server = MockServer { _ in .json(400, #"{"error":"invalid_client","error_description":"echo \#(secret) here"}"#) }
-        let log = await ActivityLog()
+        let log = ActivityLog()
         let tokens = try Graph.TokenProvider(tenantID: "00000000-0000-4000-8000-0000000000e1", clientID: "00000000-0000-4000-8000-0000000000c1",
                                              secret: { secret }, recorder: RequestRecorder(session: server.session, log: log))
         await #expect { _ = try await tokens.token() } throws: { error in
             !error.localizedDescription.contains(secret) && !String(describing: error).contains(secret)
         }
-        let entries = await log.entries
+        let entries = log.entries
         let transcript = entries.map { ActivityLogExport.transcript(of: $0) }.joined()
         #expect(!transcript.contains(secret))
     }
@@ -171,7 +172,7 @@ struct MobileMembershipLimitTests {
                                              server: .jamfPro, tokens: FixedToken("tok"),
                                              recorder: RequestRecorder(session: server.session, log: nil), sleep: { _ in })
         let group = JamfPro.DeviceGroup(groupID: "1", name: "G", isSmart: false, kind: .mobileDevice)
-        await #expect { _ = try await JamfPro(client: client).members(of: group) } throws: { error in
+        await #expect { _ = try await client.members(of: group) } throws: { error in
             guard case .pageLimitReached = (error as? JamfPlatform.APIError)?.kind else { return false }
             return true
         }
@@ -192,7 +193,7 @@ struct RefusingSessionLifetimeTests {
     @Test func theRouteGoesWithTheSession() async throws {
         var id = ""
         do {
-            let session = TestRun.refusingSession(log: TestRun.AttemptLog(), message: "Refused.")
+            let session = TestRun.refusingSession(log: TestRun.AttemptLog(fileURL: FileManager.default.temporaryDirectory.appending(path: "jtkit-refusing-\(UUID().uuidString).jsonl")), message: "Refused.")
             id = session.configuration.httpAdditionalHeaders?[TestRun.RefusingURLProtocol.routeHeader] as? String ?? ""
             #expect(TestRun.RefusingURLProtocol.isRegistered(id: id))
             _ = try? await session.data(from: URL(string: "https://example.com/")!)
