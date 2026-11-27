@@ -102,6 +102,24 @@ struct BearerBasicRedactionTests {
         #expect(Redaction.text("authorization: bearer opaque") == "authorization: bearer \(hidden)")
         #expect(Redaction.text(#"{"Authorization": "Basic abc"}"#).contains("abc") == false)
     }
+
+    @Test("1.13.2: any case, and quoted with ' as well as \"",
+          arguments: ["header was: bearer AbC123opaqueToken", "'authorization': 'bearer AbC123opaque'",
+                      "BEARER AbC123opaque", "basic dXNlcjpwYXNz"])
+    func anyCase(text: String) {
+        for secret in ["AbC123opaqueToken", "AbC123opaque", "dXNlcjpwYXNz"] {
+            #expect(!Redaction.text(text).contains(secret), "\(secret) shown")
+        }
+        #expect(Redaction.text(text).contains(Redaction.placeholder))
+    }
+
+    @Test("1.13.2: sentences still keep their words", arguments: [
+        "Basic authentication is disabled", "basic authentication is disabled for this API", "BEARER TOKEN EXPIRED",
+        "Invalid bearer token",
+    ])
+    func sentencesInAnyCase(text: String) {
+        #expect(Redaction.text(text) == text)
+    }
 }
 
 @MainActor

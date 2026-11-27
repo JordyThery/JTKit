@@ -261,16 +261,17 @@ public nonisolated enum Redaction {
 
     private static let textPatterns: [(NSRegularExpression, String)] = {
         let specs: [(String, String)] = [
-            // Authorization values: after "Authorization:" (also as JSON), whatever follows
-            (#"(Authorization"?\s*[:=]\s*"?(?:Bearer|Basic)\s+)[A-Za-z0-9\-._~+/]+=*"#, "$1\(placeholder)"),
-            // elsewhere only "Bearer" or "Basic" as written. After "Bearer",
-            // anything but a word of a sentence ("Bearer token expired");
+            // Authorization values: a Bearer or Basic value after
+            // "Authorization:" (also quoted, as in JSON or a Python dict)
+            (#"(Authorization["']?\s*[:=]\s*["']?(?:Bearer|Basic)\s+)[A-Za-z0-9\-._~+/]+=*"#, "$1\(placeholder)"),
+            // elsewhere "Bearer" or "Basic" in any case. After "Bearer",
+            // anything but a word of a sentence ("Invalid bearer token");
             // after "Basic", only what looks like a credential (a digit or one
             // of + / = _ ~, a capital after the first letter, or 20 characters
             // or more), so "Basic authentication is disabled" keeps its words
-            (#"((?-i:Bearer)\s+)(?!(?:token|tokens|auth|authentication|authorization|header|scheme|realm|credentials?|is|was|required|missing|invalid|expired)(?![A-Za-z0-9\-._~+/]))[A-Za-z0-9\-._~+/]+=*"#,
+            (#"(Bearer\s+)(?!(?:token|tokens|auth|authentication|authorization|header|scheme|realm|credentials?|is|was|required|missing|invalid|expired)(?![A-Za-z0-9\-._~+/]))[A-Za-z0-9\-._~+/]+=*"#,
              "$1\(placeholder)"),
-            (#"((?-i:Basic)\s+)(?=[A-Za-z0-9\-._~+/]*[0-9+/=_~]|[A-Za-z0-9\-._~+/]+(?-i:[A-Z])|[A-Za-z0-9\-._~+/]{20})[A-Za-z0-9\-._~+/]+=*"#,
+            (#"(Basic\s+)(?=[A-Za-z0-9\-._~+/]*[0-9+/=_~]|[A-Za-z0-9\-._~+/]+(?-i:[A-Z])|[A-Za-z0-9\-._~+/]{20})[A-Za-z0-9\-._~+/]+=*"#,
              "$1\(placeholder)"),
             // GitHub tokens are recognizable by their prefix alone
             (#"(?<![A-Za-z0-9_])(?:gh[pousr]_|github_pat_)[A-Za-z0-9_]+"#, placeholder),
