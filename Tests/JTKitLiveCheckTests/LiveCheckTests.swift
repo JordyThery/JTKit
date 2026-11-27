@@ -349,6 +349,8 @@ struct SecretReadRuleTests {
         "https://test-a.jamf.example/api/v4/computers-inventory/5/view-device-lock-pin",
         "https://test-a.jamf.example/api/v2/local-admin-password/00000000-0000-4000-8000-0000000000c1/account/admin/password",
         "https://test-a.jamf.example/api/v2/local-admin-password/00000000-0000-4000-8000-0000000000c1/account/admin/00000000-0000-4000-8000-0000000000c2/password",
+        // 1.13.1: one mobile device’s detail carries its unlock token
+        "https://read.jamf.example/api/v2/mobile-devices/12/detail",
     ])
     func secretReadsAreRefusedOnEveryTenant(url: String) throws {
         let policy = makePolicy()
@@ -373,6 +375,12 @@ struct SecretReadRuleTests {
         #expect(policy.decide(request("GET", "https://read.jamf.example/api/v2/local-admin-password/settings")).kind == .read)
         #expect(policy.decide(request("GET", "https://read.jamf.example/api/v2/local-admin-password/00000000-0000-4000-8000-0000000000c1/accounts")).kind == .read)
         #expect(policy.decide(request("GET", "https://read.jamf.example/api/v4/computers-inventory/5?section=FILEVAULT")).kind == .read)
+        let gateway = policy.decide(request("GET", "https://eu.api.jamfcloud.com/pro/v2/mobile-devices/12/detail",
+                                            headers: ["X-Environment-Id": platformA]))
+        if case .refuse(let reason) = gateway { #expect(reason.contains("unlock token")) } else { Issue.record("allowed") }
+        // the detail list carries no unlock token
+        #expect(policy.decide(request("GET", "https://read.jamf.example/api/v2/mobile-devices/detail?section=GENERAL")).kind == .read)
+        #expect(policy.decide(request("GET", "https://read.jamf.example/api/v2/mobile-devices/12")).kind == .read)
     }
 }
 

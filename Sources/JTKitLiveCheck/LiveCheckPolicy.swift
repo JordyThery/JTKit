@@ -285,7 +285,7 @@ public nonisolated final class LiveCheckPolicy: @unchecked Sendable {
             return .refuse("Apple Business or Apple School Manager activities are never run")
         }
         if Self.isSecretRead(lowered) || Self.selectsSecret(request.url) {
-            return .refuse("Device secrets (FileVault key, Recovery Lock, lock PIN, local admin password, Activation Lock bypass code) are never read in a live check")
+            return .refuse("Device secrets (FileVault key, Recovery Lock, lock PIN, local admin password, Activation Lock bypass code, unlock token) are never read in a live check")
         }
         let isRead = request.method == "GET" || request.method == "HEAD"
         if isRead {
@@ -817,6 +817,13 @@ public nonisolated final class LiveCheckPolicy: @unchecked Sendable {
                        // Graph: a Mac’s FileVault key, BitLocker keys, Windows LAPS
                        "getfilevaultkey", "bitlocker/recoverykeys", "devicelocalcredentials"]
         if markers.contains(where: path.contains) { return true }
+        // A mobile device’s own detail (…/mobile-devices/{id}/detail) carries
+        // its unlock token; the detail list (…/mobile-devices/detail) doesn’t
+        let segments = path.split(separator: "/")
+        if let index = segments.firstIndex(of: "mobile-devices"), index + 2 < segments.count,
+           segments[index + 2] == "detail", segments[index + 1] != "detail" {
+            return true
+        }
         // Jamf Pro LAPS: …/local-admin-password/{id}/account/{user}[/{guid}]/password.
         // Its settings and account list hold no password and stay readable.
         return path.contains("local-admin-password/") && path.hasSuffix("/password")
