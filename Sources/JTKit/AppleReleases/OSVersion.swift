@@ -24,14 +24,15 @@ public struct OSVersion: Sendable, Hashable, Comparable, Codable, LosslessString
     /// a build (`23A344`), a model identifier (`iPad13,18`), four parts.
     public init?(_ description: String) {
         let text = description.trimmingCharacters(in: .whitespacesAndNewlines)
-        let pattern = #"^(?:[A-Za-z][A-Za-z ]*\s)?([0-9]+(?:\.[0-9]+){0,2})(?:\s*(\([a-z]\)))?$"#
-        guard let match = text.firstMatch(of: try! Regex(pattern)),
-              let number = match.output[1].substring else { return nil }
-        let parts = number.split(separator: ".").compactMap { Int($0) }
+        guard let match = text.wholeMatch(of: Self.pattern) else { return nil }
+        let parts = match.output.1.split(separator: ".").compactMap { Int($0) }
         guard let major = parts.first else { return nil }
-        let extra = match.output.count > 2 ? match.output[2].substring.map(String.init) : nil
+        let extra = match.output.2.map(String.init)
         self.init(major: major, minor: parts.count > 1 ? parts[1] : 0, patch: parts.count > 2 ? parts[2] : 0, extra: extra)
     }
+
+    /// Checked when JTKit is built, made once: a name, the number, a letter.
+    private nonisolated(unsafe) static let pattern = /(?:[A-Za-z][A-Za-z ]*\s)?([0-9]+(?:\.[0-9]+){0,2})(?:\s*(\([a-z]\)))?/
 
     /// `27.0.1`; `27.1` without a patch; `27` for a major alone is written `27.0`.
     public var description: String {
