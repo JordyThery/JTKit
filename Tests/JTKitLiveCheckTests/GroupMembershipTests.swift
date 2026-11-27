@@ -75,4 +75,30 @@ struct GroupMembershipTests {
         #expect(policy.decide(request("PATCH", "\(groups)/\(group)", headers: auth,
                                       json: ["description": "JTKit release check"])).kind == .change)
     }
+
+    @Test("1.13.2: only group and PreStage resources are checked; 0, false and empty name no one; removals pass")
+    func narrowerGuard() throws {
+        let policy = makePolicy()
+        let auth = ["Authorization": "Bearer \(jwt(tid: entraTest))"]
+        // Graph’s administrative templates aren’t groups
+        #expect(policy.decide(request("POST", "https://graph.microsoft.com/beta/deviceManagement/groupPolicyConfigurations",
+                                      headers: auth, json: ["displayName": "\(prefix) – Template", "members": ["x"]])).isAllowed)
+        // a Classic account group isn’t a device group
+        try policy.ledger.add(created("test-a.jamf.example", "accounts", "3", "\(prefix) – A"), testPrefixes: [prefix])
+        let account = policy.decide(request("PUT", "https://test-a.jamf.example/JSSResource/accounts/groupid/3",
+                                            body: "<group><users><user><name>x</name></user></users></group>"))
+        if case .refuse(let reason) = account { #expect(!reason.contains("members"), "\(reason)") }
+        // zero and false are empty
+        #expect(policy.decide(request("POST", "https://test-a.jamf.example/api/v2/computer-groups/static-groups",
+                                      json: ["name": "\(prefix) – G", "computers": 0, "smart": false, "assignments": [Any]()])).isAllowed)
+        #expect(!policy.decide(request("POST", "https://test-a.jamf.example/api/v2/computer-groups/static-groups",
+                                       json: ["name": "\(prefix) – G", "computers": 3])).isAllowed)
+        // a body that is neither JSON nor XML isn’t refused by this rule
+        try policy.ledger.add(created("test-a.jamf.example", "computer-groups", "8", "\(prefix) – G"), testPrefixes: [prefix])
+        #expect(policy.decide(request("PUT", "https://test-a.jamf.example/api/v1/computer-groups/8", body: "name=x")).kind == .change)
+        // removing serials from a run’s PreStage only narrows it
+        try policy.ledger.add(created("test-a.jamf.example", "computer-prestages", "7", "\(prefix) – P"), testPrefixes: [prefix])
+        #expect(policy.decide(request("POST", "https://test-a.jamf.example/api/v2/computer-prestages/7/scope/delete-multiple",
+                                      json: ["serialNumbers": ["ZZTESTSERIAL"], "versionLock": 1])).isAllowed)
+    }
 }
