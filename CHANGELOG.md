@@ -1,5 +1,24 @@
 # Changelog
 
+## 1.13.2 (2026-11-27)
+A patch release. Code written for 1.13 compiles unchanged.
+
+### Fixed
+- `Redaction.text` hides a Bearer or Basic credential in any letter case again (`bearer …`, `BEARER …`,
+  `basic …`), and after a quoted `'authorization': 'bearer …'` as well as `"Authorization": "…"`. Sentence words
+  such as “Basic authentication is disabled” or “Invalid bearer token” stay readable.
+- `ABM.TokenProvider.token(beforeSigningIn:)`: a request that is cancelled while it waits for the shared sign-in
+  (and its rate-limit slot) throws `CancellationError` at once. When no request waits any more, the wait for the slot
+  ends and no sign-in is sent; a later request signs in afresh.
+- `JamfPlatform.TokenProvider`: a sign-in refused for a non-HTTPS address no longer counts in `signInCount`.
+
+### Live checks (`JTKitLiveCheck`)
+- The rule against group and PreStage members (1.13.1) applies only to group and PreStage resources (for example
+  `computergroups`, `computer-groups`, `static-groups`, `device-groups`, Graph `groups`, `computer-prestages`),
+  not to any path that contains “group”, such as Graph’s `groupPolicyConfigurations` or Classic accounts.
+  `0`, `false`, null and empty values name no members; a body that is neither JSON nor XML isn’t refused by this
+  rule; removals such as `…/scope/delete-multiple` pass.
+
 ## 1.13.1 (2026-11-27)
 A patch release. Code written for 1.13 compiles unchanged; one behavior is stricter (see Changed).
 
@@ -17,8 +36,8 @@ A patch release. Code written for 1.13 compiles unchanged; one behavior is stric
   slot share that sign-in without taking a slot of their own, so a burst of requests with no token no longer fills
   Apple’s window with sign-in slots.
 - `Redaction.text` keeps the words of a sentence such as “Basic authentication is disabled for this API” or “Invalid
-  bearer token”. After `Authorization:` anything is still hidden; elsewhere `Bearer` and `Basic` (as written) hide
-  what follows when it looks like a credential.
+  bearer token”. A Bearer or Basic value after `Authorization:` is still hidden; elsewhere `Bearer` and `Basic` (as
+  written) hide what follows when it looks like a credential. (1.13.2 makes the match case-insensitive again.)
 - `ConnectionStore.delete(id:)`: when the list can’t be saved after the secrets were deleted, the
   `ConnectionStoreError.couldNotSave` message says the connection is still listed and which secrets are already gone.
 - `IdentifierMasker.identifiers(inPath:)` (the bug-report export) also collects a UUID after a device path segment
@@ -30,8 +49,10 @@ A patch release. Code written for 1.13 compiles unchanged; one behavior is stric
   cut short.
 - `KeychainSecretStore`: an item that isn’t UTF-8 text throws `SecretStoreError(status: errSecDecode)` instead of
   reading as “none stored”.
-- `SoftwareUpdateRules.InspectWorkflow` returns each device’s reads from one place (swiftlang/swift#93208 shape).
-- `TestRun.refusingSession`’s route is let go with its session. `OSVersion` builds its pattern once.
+- `SoftwareUpdateRules.InspectWorkflow` keeps each device’s reads in one value and returns it once, so a Release
+  build with Swift 6.4 can’t lose a device’s result (swiftlang/swift#93208).
+- A session from `TestRun.refusingSession` no longer stays in memory after it is released. `OSVersion` builds its
+  pattern once instead of on every read.
 
 ### Live checks (`JTKitLiveCheck`)
 - A write to a group or PreStage that names members (`members`, `assignments`, `serialNumbers`, `computers`,

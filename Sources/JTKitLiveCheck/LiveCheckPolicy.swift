@@ -562,14 +562,17 @@ public nonisolated final class LiveCheckPolicy: @unchecked Sendable {
     private func membershipRefusal(_ request: LiveRequest, target: String, path: String) -> String? {
         guard request.method != "DELETE" else { return nil }
         let segments = path.split(separator: "/").map(String.init)
-        let isGroupOrPreStage = segments.contains { $0.contains("group") || $0.contains("prestage") }
-        guard isGroupOrPreStage else { return nil }
+        let resources = segments.filter { Self.groupResources.contains($0) }
+        guard !resources.isEmpty else { return nil }
+        // a removal of members or scope only narrows (Jamf Pro’s
+        // …/scope/delete-multiple)
+        guard !segments.contains(where: { $0 == "delete-multiple" || $0 == "remove-multiple" }) else { return nil }
         if target.hasPrefix("intune:") {
             // POST groups/{id}/members/$ref, and any other change of members or owners
             if let index = segments.firstIndex(of: "groups"), segments.dropFirst(index + 1).contains(where: { $0 == "members" || $0 == "owners" }) {
                 return "Adding members to a group is refused in a live check"
             }
-        } else if segments.contains(where: { $0.contains("smart") }) {
+        } else if resources.contains(where: { $0.contains("smart") }) {
             return "A smart group is refused in a live check: it can include real devices"
         }
         guard !request.body.isEmpty else { return nil }
@@ -595,8 +598,10 @@ public nonisolated final class LiveCheckPolicy: @unchecked Sendable {
             }
             return refusal
         }
+        // neither JSON nor XML: names no members (a create still needs a
+        // readable name with the run’s prefix, a change a ledger object)
         guard let document = try? XMLDocument(data: request.body, options: []), let root = document.rootElement() else {
-            return "A group or PreStage body that can’t be read is refused"
+            return nil
         }
         // Classic groups: <is_smart>, and members or criteria in their lists
         // (a `<size>` alone, as Jamf returns it, names no one)
@@ -611,6 +616,14 @@ public nonisolated final class LiveCheckPolicy: @unchecked Sendable {
         return nil
     }
 
+    /// The path segments (lowercased) of the group and PreStage resources
+    /// of Jamf Pro, the Classic API, the Platform API, Jamf School and Graph.
+    static let groupResources: Set<String> = [
+        "computergroups", "mobiledevicegroups", "computer-groups", "mobile-device-groups", "static-groups",
+        "smart-groups", "device-groups", "groups", "devicegroups", "smart-computer-groups", "static-computer-groups",
+        "smart-mobile-device-groups", "static-mobile-device-groups", "computer-prestages", "mobile-device-prestages",
+    ]
+
     /// Jamf Pro, Platform and PreStage JSON keys that name members (normalized).
     static let jamfMemberKeys: Set<String> = [
         "members", "assignments", "serialnumbers", "computers", "mobiledevices", "computerids",
@@ -619,12 +632,14 @@ public nonisolated final class LiveCheckPolicy: @unchecked Sendable {
     /// Graph keys that name a group’s members (normalized) or make it dynamic.
     static let graphMemberKeys: Set<String> = ["membersodatabind", "ownersodatabind", "membershiprule"]
 
-    /// A value that names something: a non-empty list, object or text.
+    /// A value that names something: a non-empty list, object or text, a
+    /// number other than 0, true. 0, false, null and empty name no one.
     static func isNonEmpty(_ value: Any) -> Bool {
         switch value {
         case let array as [Any]: !array.isEmpty
         case let object as [String: Any]: !object.isEmpty
         case let text as String: !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        case let number as NSNumber: number.doubleValue != 0
         case is NSNull: false
         default: true
         }

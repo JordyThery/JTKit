@@ -31,7 +31,12 @@ extension ABM {
         private let now: @Sendable () -> Date
 
         private var cached: (value: String, expiresAt: Date, margin: TimeInterval)?
-        private var inFlight: Task<(String, Date, TimeInterval), any Swift.Error>?
+        /// The sign-in under way (its wait for a slot included) and the
+        /// requests waiting for it; `generation` tells a finished sign-in
+        /// from one that was let go when every waiter stopped.
+        private var inFlight: (task: Task<Void, Never>, generation: Int)?
+        private var waiters: [UUID: CheckedContinuation<String, any Swift.Error>] = [:]
+        private var generation = 0
 
         /// How many times it signed in; for tests and diagnostics.
         public private(set) var signInCount = 0
@@ -86,23 +91,63 @@ extension ABM {
             if let cached, cached.expiresAt.timeIntervalSince(now()) > cached.margin {
                 return cached.value
             }
-            if let inFlight {
-                return try await inFlight.value.0
+            if inFlight == nil {
+                generation += 1
+                let current = generation
+                let task = Task {
+                    let result: Result<(String, Date, TimeInterval), any Swift.Error>
+                    do {
+                        try await beforeSigningIn()
+                        result = .success(try await self.signIn())
+                    } catch {
+                        result = .failure(error)
+                    }
+                    self.finish(result, generation: current)
+                }
+                inFlight = (task, current)
             }
-            let task = Task {
-                try await beforeSigningIn()
-                return try await self.signIn()
+            // a request that is stopped stops waiting at once; the sign-in
+            // (and its wait for a slot) stops too when no request waits for it
+            let id = UUID()
+            return try await withTaskCancellationHandler {
+                try await withCheckedThrowingContinuation { continuation in
+                    if Task.isCancelled {
+                        continuation.resume(throwing: CancellationError())
+                        stopIfUnwanted()
+                    } else {
+                        waiters[id] = continuation
+                    }
+                }
+            } onCancel: {
+                Task { await self.cancelWaiter(id) }
             }
-            inFlight = task
-            defer { inFlight = nil }
-            do {
-                let (value, expiresAt, margin) = try await task.value
+        }
+
+        private func finish(_ result: Result<(String, Date, TimeInterval), any Swift.Error>, generation finished: Int) {
+            guard inFlight?.generation == finished else { return }
+            inFlight = nil
+            let waiting = waiters
+            waiters = [:]
+            switch result {
+            case .success(let (value, expiresAt, margin)):
                 cached = (value, expiresAt, margin)
-                return value
-            } catch {
+                for continuation in waiting.values { continuation.resume(returning: value) }
+            case .failure(let error):
                 cached = nil
-                throw error
+                for continuation in waiting.values { continuation.resume(throwing: error) }
             }
+        }
+
+        private func cancelWaiter(_ id: UUID) {
+            waiters.removeValue(forKey: id)?.resume(throwing: CancellationError())
+            stopIfUnwanted()
+        }
+
+        /// Lets the sign-in go when nobody waits for it any more.
+        private func stopIfUnwanted() {
+            guard waiters.isEmpty, let running = inFlight else { return }
+            running.task.cancel()
+            inFlight = nil
         }
 
         public func forgetToken() {
